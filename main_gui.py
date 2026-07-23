@@ -7,6 +7,11 @@ import threading
 import sys
 import os
 
+if sys.platform == "win32":
+    import winsound
+else:
+    winsound = None
+
 # ── تحقق من المتطلبات ──────────────────────────────────────────────────
 try:
     import customtkinter as ctk
@@ -315,6 +320,7 @@ class App(ctk.CTk):
                                      hover_color="#16a34a", text_color="white",
                                      text="⏭  شات جديد")
             self._found_f = True
+            self._play_found_sound()
         elif status == "starting":
             self._set_status("starting", "جارٍ الفتح...", ORANGE)
         elif status == "stopped":
@@ -330,6 +336,17 @@ class App(ctk.CTk):
     def _set_status(self, key, text, color):
         self.status_dot.configure(text_color=color)
         self.status_label.configure(text=text, text_color=color)
+
+    def _play_found_sound(self, times_left=3):
+        try:
+            if winsound:
+                winsound.MessageBeep(winsound.MB_ICONASTERISK)
+            else:
+                self.bell()
+        except Exception:
+            pass
+        if times_left > 1:
+            self.after(350, lambda: self._play_found_sound(times_left - 1))
 
 
 # ── Entry ───────────────────────────────────────────────────────────────
