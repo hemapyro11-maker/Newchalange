@@ -51,6 +51,7 @@ class Y99Bot:
         self._stop_flag = threading.Event()
         self._thread    = None
         self._next_requested = False
+        self._awaiting_next   = False
         self.total = self.skipped = self.stayed = 0
 
     # ── public ─────────────────────────────────────────────────────────
@@ -59,6 +60,7 @@ class Y99Bot:
             return
         self._stop_flag.clear()
         self._next_requested = False
+        self._awaiting_next  = False
         self.total = self.skipped = self.stayed = 0
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
@@ -110,7 +112,11 @@ class Y99Bot:
             self.on_stats(self.total, self.skipped, self.stayed)
             self.on_log(f"━━  شات #{self.total}", "gray")
 
-            sent = await self._send(page, self.settings.get("send_msg","M"))
+            # لازم ناخد الـ baseline قبل ما نبعت، عشان لو التانية ردت بسرعة
+            # (زي رد بحرف واحد "F") ما نضيعش ردها باعتباره جزء من الصفحة الأصلية
+            text_before = await self._get_text(page)
+            send_msg = self.settings.get("send_msg", "M")
+            sent = await self._send(page, send_msg)
             if not sent:
                 self.on_log("🔄  مفيش اتصال → شات جديد", "gray")
                 await self._next(page)
@@ -118,11 +124,8 @@ class Y99Bot:
                 self.on_stats(self.total, self.skipped, self.stayed)
                 continue
 
-            await asyncio.sleep(0.8)
-            text_after = await self._get_text(page)
-
             self.on_log(f"⏳  مستني رد ({self.settings.get('wait_reply',8)}ث)...", "gray")
-            reply = await self._wait_reply(page, text_after)
+            reply = await self._wait_reply(page, text_before, ignore_text=send_msg)
 
             if reply is None:
                 self.on_log("⌛  مفيش رد → skip", "gray")
@@ -133,6 +136,10 @@ class Y99Bot:
                 if decision == "stay":
                     self.stayed += 1
                     self.on_log(f"✅  F!  فضلت في الشات", "green")
+                    # نمسح أي طلب Next قديم فضل واقف من شات سابق، عشان
+                    # ما نتخطاش الشات ده فورًا من غير ما نستناها
+                    self._next_requested = False
+                    self._awaiting_next  = True
                     self.on_status("found_f")
                     # استنى لحد ما المستخدم يضغط Next من الـ GUI
                     while not self._stop_flag.is_set():
@@ -140,6 +147,7 @@ class Y99Bot:
                         if self._next_requested:
                             self._next_requested = False
                             break
+                    self._awaiting_next = False
                     await self._next(page)
                     self.on_status("running")
                 else:
@@ -151,8 +159,9 @@ class Y99Bot:
             await asyncio.sleep(random.uniform(0.8, 1.5))
 
     def request_next(self):
-        """الـ GUI يضغط Next وهو في شات F."""
-        self._next_requested = True
+        """الـ GUI يضغط Next وهو في شات F. بيتجاهل أي ضغطة زيادة/متأخرة."""
+        if self._awaiting_next:
+            self._next_requested = True
 
     async def _send(self, page, text) -> bool:
         deadline = time.time() + self.settings.get("wait_connect", 5)
@@ -201,9 +210,10 @@ class Y99Bot:
         except Exception:
             return ""
 
-    async def _wait_reply(self, page, text_after_send) -> str | None:
+    async def _wait_reply(self, page, text_before, ignore_text=None) -> str | None:
         deadline = time.time() + self.settings.get("wait_reply", 8)
-        baseline = set(l.strip() for l in text_after_send.splitlines() if l.strip())
+        baseline = set(l.strip() for l in text_before.splitlines() if l.strip())
+        ignore = (ignore_text or "").strip().lower()
         seen = set()
         while time.time() < deadline:
             if self._stop_flag.is_set():
@@ -214,6 +224,9 @@ class Y99Bot:
                 if not l or l in baseline or l in seen:
                     continue
                 seen.add(l)
+                if ignore and l.lower() == ignore:
+                    # النص اللي إحنا بعتناه لما يترسم في الصفحة (زي "M")
+                    continue
                 if is_noise(l):
                     continue
                 self.on_log(f"📋  نص جديد: {l!r}", "lightblue")
