@@ -16,10 +16,15 @@ UI_NOISE = {
     "just now","new chat","end chat","start chat","conversations",
     "pending","unread","notifications","home","memes","apps","share",
     "people","rooms","all","search","eagle_eye123","okay","ok","pro",
+    # أسماء أيقونات (material icons) بتتقرا كنص عادي جوه الصفحة
+    "person_add","volume_up","volume_down","volume_off","close","menu",
+    "more_vert","settings","arrow_back","end chat (esc)",
+    "this user account has changed name or deleted itself.",
 }
 
-# "f", "F", "f18", "F 22" ... لكن مش كلمات زي "Fine"/"Maybe" اللي بتبدأ بنفس الحرف
-_GENDER_TOKEN = re.compile(r"^[fm]\d{0,3}$")
+# يقبل f / m / f18 / 18f / m22 / 22m ...
+# لكن مش كلمات زي "Fine"/"Maybe"/"for" اللي بتبدأ أو فيها نفس الحرف
+_GENDER_TOKEN = re.compile(r"^\d{0,3}[fm]\d{0,3}$")
 _STRIP_CHARS  = ".,!?؟،:؛-_()[]{}\"'*"
 
 def is_noise(text: str) -> bool:
@@ -36,9 +41,10 @@ def classify(text: str) -> str:
     t = text.strip().lower()
     if not t:
         return "unknown"
-    first = t.split()[0].strip(_STRIP_CHARS)
-    if _GENDER_TOKEN.match(first):
-        return "stay" if first[0] == "f" else "skip"
+    for tok in t.split():
+        tok = tok.strip(_STRIP_CHARS)
+        if tok and _GENDER_TOKEN.match(tok):
+            return "stay" if "f" in tok else "skip"
     return "unknown"
 
 
@@ -135,6 +141,7 @@ class Y99Bot:
                 decision = classify(reply)
                 if decision == "stay":
                     self.stayed += 1
+                    self.on_stats(self.total, self.skipped, self.stayed)
                     self.on_log(f"✅  F!  فضلت في الشات", "green")
                     # نمسح أي طلب Next قديم فضل واقف من شات سابق، عشان
                     # ما نتخطاش الشات ده فورًا من غير ما نستناها
@@ -152,6 +159,7 @@ class Y99Bot:
                     self.on_status("running")
                 else:
                     self.skipped += 1
+                    self.on_stats(self.total, self.skipped, self.stayed)
                     self.on_log(f"❌  M → skip", "salmon")
                     await self._next(page)
 
