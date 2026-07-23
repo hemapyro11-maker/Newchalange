@@ -5,3 +5,4 @@ dist/
 *.spec
 .venv/
 venv/
+y99_settings.json

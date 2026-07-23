@@ -2,7 +2,7 @@
 Y99 Filter Bot — واجهة حديثة
 """
 import tkinter as tk
-from tkinter import font as tkfont
+import json
 import threading
 import sys
 import os
@@ -54,6 +54,14 @@ LOG_COLORS = {
     "lightblue": "#93c5fd",
 }
 
+CONFIG_FILE = "y99_settings.json"
+
+
+def _config_path() -> str:
+    base = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) \
+        else os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, CONFIG_FILE)
+
 
 class App(ctk.CTk):
     def __init__(self):
@@ -70,6 +78,7 @@ class App(ctk.CTk):
         self._found_f = False
 
         self._build_ui()
+        self._load_settings()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # ── UI ──────────────────────────────────────────────────────────────
@@ -152,6 +161,14 @@ class App(ctk.CTk):
         self.reply_var = ctk.StringVar(value="8")
         ctk.CTkEntry(settings_frame, textvariable=self.reply_var, width=50,
                      fg_color=BG, border_color=BORDER).grid(row=1, column=5, padx=(4,14), pady=8)
+
+        # صوت التنبيه
+        self.sound_var = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(
+            settings_frame, text="🔊  صوت لما نلاقي F", variable=self.sound_var,
+            font=ctk.CTkFont(size=12), text_color=TEXT_DIM,
+            fg_color=ACCENT, hover_color="#3b5bdb", checkmark_color=TEXT,
+        ).grid(row=2, column=0, columnspan=6, sticky="w", padx=14, pady=(0, 10))
 
         # ── Buttons ──
         btn_row = ctk.CTkFrame(self, fg_color="transparent")
@@ -246,10 +263,31 @@ class App(ctk.CTk):
             "wait_reply":   wait_reply,
         }
 
+    def _load_settings(self):
+        try:
+            with open(_config_path(), "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            return
+        self.msg_var.set(str(data.get("send_msg", self.msg_var.get())))
+        self.connect_var.set(str(data.get("wait_connect", self.connect_var.get())))
+        self.reply_var.set(str(data.get("wait_reply", self.reply_var.get())))
+        self.sound_var.set(bool(data.get("sound_on", True)))
+
+    def _save_settings(self, settings: dict):
+        data = dict(settings)
+        data["sound_on"] = self.sound_var.get()
+        try:
+            with open(_config_path(), "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
     def _start_bot(self):
         settings = self._read_settings()
         if settings is None:
             return
+        self._save_settings(settings)
         self.bot = Y99Bot(
             settings,
             on_log=self._on_log,
@@ -338,6 +376,8 @@ class App(ctk.CTk):
         self.status_label.configure(text=text, text_color=color)
 
     def _play_found_sound(self, times_left=3):
+        if not self.sound_var.get():
+            return
         try:
             if winsound:
                 winsound.MessageBeep(winsound.MB_ICONASTERISK)

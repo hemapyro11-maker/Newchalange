@@ -4,6 +4,7 @@ bot_core.py — منطق البوت بدون GUI
 import asyncio
 import logging
 import random
+import re
 import time
 import threading
 from playwright.async_api import async_playwright
@@ -17,6 +18,10 @@ UI_NOISE = {
     "people","rooms","all","search","eagle_eye123","okay","ok","pro",
 }
 
+# "f", "F", "f18", "F 22" ... لكن مش كلمات زي "Fine"/"Maybe" اللي بتبدأ بنفس الحرف
+_GENDER_TOKEN = re.compile(r"^[fm]\d{0,3}$")
+_STRIP_CHARS  = ".,!?؟،:؛-_()[]{}\"'*"
+
 def is_noise(text: str) -> bool:
     t = text.strip().lower()
     if t in UI_NOISE:
@@ -29,11 +34,11 @@ def is_noise(text: str) -> bool:
 
 def classify(text: str) -> str:
     t = text.strip().lower()
-    first = t.split()[0] if t.split() else ""
-    if first.startswith("f"):
-        return "stay"
-    if first.startswith("m"):
-        return "skip"
+    if not t:
+        return "unknown"
+    first = t.split()[0].strip(_STRIP_CHARS)
+    if _GENDER_TOKEN.match(first):
+        return "stay" if first[0] == "f" else "skip"
     return "unknown"
 
 
@@ -73,25 +78,31 @@ class Y99Bot:
     async def _main(self):
         self.on_status("starting")
         self.on_log("🌐  بفتح المتصفح...", "cyan")
-        async with async_playwright() as pw:
-            browser = await pw.chromium.launch(headless=False)
-            ctx     = await browser.new_page()
-            page    = ctx
-            try:
-                await page.goto("https://y99.in/web/desktop/discover",
-                                wait_until="domcontentloaded", timeout=60000)
-                await asyncio.sleep(4)
-                await self._click_start(page)
-                self.on_status("running")
-                self.on_log("🚀  البوت شغال!", "green")
-                await asyncio.sleep(2)
-                await self._loop(page)
-            except Exception as e:
-                self.on_log(f"❌  خطأ: {e}", "red")
-                self.on_status("error")
-            finally:
-                await browser.close()
-        self.on_status("stopped")
+        had_error = False
+        try:
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch(headless=False)
+                try:
+                    page = await browser.new_page()
+                    await page.goto("https://y99.in/web/desktop/discover",
+                                    wait_until="domcontentloaded", timeout=60000)
+                    await asyncio.sleep(4)
+                    await self._click_start(page)
+                    self.on_status("running")
+                    self.on_log("🚀  البوت شغال!", "green")
+                    await asyncio.sleep(2)
+                    await self._loop(page)
+                finally:
+                    try:
+                        await browser.close()
+                    except Exception:
+                        pass
+        except Exception as e:
+            had_error = True
+            self.on_log(f"❌  خطأ: {e}", "red")
+            self.on_status("error")
+        if not had_error:
+            self.on_status("stopped")
 
     async def _loop(self, page):
         while not self._stop_flag.is_set():
