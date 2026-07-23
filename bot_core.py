@@ -156,7 +156,7 @@ class Y99Bot:
                     await self._next(page)
 
             self.on_stats(self.total, self.skipped, self.stayed)
-            await asyncio.sleep(random.uniform(0.8, 1.5))
+            await asyncio.sleep(random.uniform(0.15, 0.3))
 
     def request_next(self):
         """الـ GUI يضغط Next وهو في شات F. بيتجاهل أي ضغطة زيادة/متأخرة."""
@@ -237,7 +237,7 @@ class Y99Bot:
 
     async def _next(self, page):
         await page.keyboard.press("Escape")
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.15)
         try:
             await page.evaluate("""
                 ()=>{
@@ -248,7 +248,8 @@ class Y99Bot:
             """)
         except Exception:
             pass
-        await asyncio.sleep(random.uniform(1.2, 2.0))
+        # قصيرة قصادنا - _send() أصلاً بيستنى لحد ما مربع الكتابة يظهر
+        await asyncio.sleep(random.uniform(0.25, 0.45))
 
     async def _click_start(self, page):
         try:
