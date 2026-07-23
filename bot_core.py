@@ -7,6 +7,7 @@ import random
 import re
 import time
 import threading
+from collections import Counter
 from playwright.async_api import async_playwright
 
 log = logging.getLogger("bot")
@@ -219,27 +220,34 @@ class Y99Bot:
             return ""
 
     async def _wait_reply(self, page, text_before, ignore_text=None) -> str | None:
+        """
+        بيتابع عدد مرات ظهور كل سطر (مش بس هل ظهر قبل كده)، عشان لو الطرف
+        التاني رد بنفس النص اللي إحنا بعتناه (زي رد بـ "m" لما إحنا كمان
+        بعتنا "M")، الرد بتاعه ما يتجاهلش باعتباره صدى رسالتنا احنا.
+        """
         deadline = time.time() + self.settings.get("wait_reply", 8)
-        baseline = set(l.strip() for l in text_before.splitlines() if l.strip())
+        baseline = Counter(l.strip() for l in text_before.splitlines() if l.strip())
+        processed = Counter()
         ignore = (ignore_text or "").strip().lower()
-        seen = set()
+        ignore_budget = 1 if ignore else 0  # اتجاهل ظهور واحد بس (رسالتنا احنا)
+
         while time.time() < deadline:
             if self._stop_flag.is_set():
                 return None
             txt = await self._get_text(page)
-            for line in txt.splitlines():
-                l = line.strip()
-                if not l or l in baseline or l in seen:
-                    continue
-                seen.add(l)
-                if ignore and l.lower() == ignore:
-                    # النص اللي إحنا بعتناه لما يترسم في الصفحة (زي "M")
-                    continue
-                if is_noise(l):
-                    continue
-                self.on_log(f"📋  نص جديد: {l!r}", "lightblue")
-                if classify(l) != "unknown":
-                    return l
+            counts = Counter(l.strip() for l in txt.splitlines() if l.strip())
+            for l, count in counts.items():
+                new_occurrences = count - baseline.get(l, 0) - processed[l]
+                for _ in range(max(0, new_occurrences)):
+                    processed[l] += 1
+                    if ignore_budget > 0 and l.lower() == ignore:
+                        ignore_budget -= 1
+                        continue
+                    if is_noise(l):
+                        continue
+                    self.on_log(f"📋  نص جديد: {l!r}", "lightblue")
+                    if classify(l) != "unknown":
+                        return l
             await asyncio.sleep(0.6)
         return None
 
