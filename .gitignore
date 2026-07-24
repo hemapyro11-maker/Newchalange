@@ -8,3 +8,4 @@ venv/
 y99_settings.json
 smart_assistant/todo.json
 smart_assistant/connectors.json
+smart_assistant/skills.json

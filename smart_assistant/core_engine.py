@@ -8,7 +8,9 @@ core_engine.py — Core Engine للمساعد الذكي، بدون أي اعت�
 """
 from __future__ import annotations
 
+import datetime
 import importlib.util
+import json
 import logging
 import pathlib
 import queue
@@ -59,6 +61,13 @@ class CommandRegistry:
         return sorted(self._commands.values(), key=lambda c: c.name)
 
 
+def default_state_dir() -> pathlib.Path:
+    """مجلد ملفات الحالة الدائمة (زي skills.json) — جنب الـ exe أو جنب هذا الملف."""
+    if getattr(sys, "frozen", False):
+        return pathlib.Path(sys.executable).resolve().parent
+    return pathlib.Path(__file__).resolve().parent
+
+
 def default_plugin_dirs() -> list[pathlib.Path]:
     """
     مجلدات الإضافات: لو التطبيق شغال كـ exe (PyInstaller onefile)، بنرجع
@@ -99,11 +108,47 @@ class AssistantEngine:
         self.log_history: "deque[tuple[str, str]]" = deque(maxlen=300)
         self.plugins_dirs = plugins_dirs or default_plugin_dirs()
         self._loaded_plugins: list[str] = []
+        self.skills_path = default_state_dir() / "skills.json"
+        self.skills = self._load_skills()
         self._queue: "queue.Queue[tuple[str, Optional[Callable]]]" = queue.Queue()
         self._stop_flag = threading.Event()
         self._worker: Optional[threading.Thread] = None
         self._register_builtin_commands()
         self.load_plugins()
+
+    # ── skills ledger (تعلّم تراكمي دائم — بيتراكم ومبيتنساش) ─────────
+    def _load_skills(self) -> dict:
+        if self.skills_path.exists():
+            try:
+                return json.loads(self.skills_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        return {"plugins": {}, "commands": {}}
+
+    def _save_skills(self):
+        try:
+            self.skills_path.write_text(
+                json.dumps(self.skills, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except OSError:
+            pass
+
+    def _record_plugin_learned(self, name: str):
+        """يسجل إن الإضافة دي اتعلمت — إدخال إضافي بس، مبيتمسحش حتى لو
+        الإضافة نفسها اتشالت بعدين، عشان المهارة تفضل معروفة إنها اتعلمت."""
+        if name not in self.skills["plugins"]:
+            self.skills["plugins"][name] = {
+                "first_seen": datetime.datetime.now().isoformat(timespec="seconds"),
+            }
+            self._save_skills()
+
+    def _record_command_used(self, name: str):
+        entry = self.skills["commands"].setdefault(name, {"count": 0, "first_used": None})
+        entry["count"] += 1
+        entry["last_used"] = datetime.datetime.now().isoformat(timespec="seconds")
+        if entry["first_used"] is None:
+            entry["first_used"] = entry["last_used"]
+        self._save_skills()
 
     # ── lifecycle ──────────────────────────────────────────────────────
     def start(self):
@@ -155,6 +200,7 @@ class AssistantEngine:
                         continue
                     register(self)
                     loaded.append(path.stem)
+                    self._record_plugin_learned(path.stem)
                     self._log(f"🧩 plugin loaded: {path.stem}", "ok")
                 except Exception:
                     self._log(f"❌ failed to load plugin {path.name}:\n{traceback.format_exc()}", "error")
@@ -168,6 +214,7 @@ class AssistantEngine:
         self.registry.register("run", self._cmd_run, "تنفيذ أمر نظام (subprocess, بدون shell)")
         self.registry.register("plugins", self._cmd_plugins, "عرض الإضافات المحمّلة حالياً")
         self.registry.register("reload_plugins", self._cmd_reload_plugins, "إعادة مسح مجلد plugins/ وتحميل أي إضافة جديدة")
+        self.registry.register("skills", self._cmd_skills, "عرض كل المهارات (إضافات/أوامر) اللي اتعلمتها من الأول — تراكمي ومبيتنساش")
 
     def _cmd_help(self, ctx: CommandContext) -> str:
         return "\n".join(f"{c.name} — {c.description}" for c in self.registry.list_commands())
@@ -201,6 +248,19 @@ class AssistantEngine:
         self.load_plugins()
         new = sorted(set(self._loaded_plugins) - before)
         return f"reload done — {len(new)} new plugin(s): {', '.join(new) or 'none'}"
+
+    def _cmd_skills(self, ctx: CommandContext) -> str:
+        plugins = self.skills.get("plugins", {})
+        commands = self.skills.get("commands", {})
+        lines = [f"🧠 {len(plugins)} إضافة اتعلمتها، {len(commands)} أمر مختلف استخدمتهم من الأول:"]
+        for name, info in sorted(plugins.items()):
+            lines.append(f"  🧩 {name} — من {info.get('first_seen', '?')}")
+        top = sorted(commands.items(), key=lambda kv: -kv[1]["count"])[:10]
+        if top:
+            lines.append("أكتر الأوامر استخداماً:")
+            for name, info in top:
+                lines.append(f"  • {name} — {info['count']} مرة")
+        return "\n".join(lines)
 
     # ── internal ───────────────────────────────────────────────────────
     def _log(self, msg: str, level: str = "info"):
@@ -247,6 +307,7 @@ class AssistantEngine:
         except Exception:
             self._log(traceback.format_exc(), "error")
             return
+        self._record_command_used(name)
         log.debug("command %s finished in %.3fs", name, time.time() - start)
         if result:
             self._log(str(result), "info")
