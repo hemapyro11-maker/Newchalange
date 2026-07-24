@@ -19,6 +19,8 @@ STRINGS = {
         "start": "▶  تشغيل",
         "stop": "⏹  إيقاف",
         "attach_file": "إرفاق ملف للتحليل",
+        "scan_file": "فحص ملف أمنيًا (أي نوع، أي حجم)",
+        "scanning_file": "📡  بيتفحص",
     },
     "en": {
         "app_title": "Smart Assistant",
@@ -34,6 +36,8 @@ STRINGS = {
         "start": "▶  Start",
         "stop": "⏹  Stop",
         "attach_file": "Attach file to analyze",
+        "scan_file": "Security-scan a file (any type, any size)",
+        "scanning_file": "📡  Scanning",
     },
 }
 

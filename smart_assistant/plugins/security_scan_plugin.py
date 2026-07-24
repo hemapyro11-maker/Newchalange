@@ -98,6 +98,11 @@ def _matches_extension(p: pathlib.Path, extensions: set[str]) -> bool:
 
 def _iter_scan_files(root: pathlib.Path, extensions: set[str] | None = None) -> list[pathlib.Path]:
     if root.is_file():
+        try:
+            if root.stat().st_size > MAX_FILE_SIZE_FOR_SCAN:
+                return []
+        except OSError:
+            return []
         return [root]
     files = []
     for p in sorted(root.rglob("*")):
@@ -114,6 +119,16 @@ def _iter_scan_files(root: pathlib.Path, extensions: set[str] | None = None) -> 
             continue
         files.append(p)
     return files
+
+
+def _oversized_single_file_message(path: pathlib.Path, other_cmd: str) -> str:
+    size_mb = path.stat().st_size / (1024 * 1024)
+    return (
+        f"⚠️ {path} حجمه {size_mb:.1f}MB — أكبر من الحد الأقصى لفحص المحتوى النصي "
+        f"({MAX_FILE_SIZE_FOR_SCAN // (1024 * 1024)}MB) عشان مانحملوش كامل في الذاكرة.\n"
+        f"لو الملف ده تنفيذي/أرشيف/وسائط، استخدم virus_scan بدل {other_cmd} — "
+        "ClamAV بيفحصه بالستريمنج من غير ما يتحمّل في ذاكرة بايثون خالص."
+    )
 
 
 def _snippet(line: str) -> str:
@@ -286,6 +301,8 @@ def _cmd_code_scan(ctx) -> str:
     root = pathlib.Path(path_args[0])
     if not root.exists():
         return f"❌ المسار مش موجود: {root}"
+    if root.is_file() and root.stat().st_size > MAX_FILE_SIZE_FOR_SCAN:
+        return _oversized_single_file_message(root, "code_scan")
 
     files = _iter_scan_files(root, {".py"})
     if not files:
@@ -403,26 +420,30 @@ def _cmd_vuln_scan(ctx) -> str:
 
     lines = [f"🛡️ فحص ثغرات: {root}"]
 
-    _unquoted_exts = {".env", ".ini", ".cfg", ".conf", ".properties"}
-    files = _iter_scan_files(root, _TEXT_EXTENSIONS)
-    secret_hits = []
-    for f in files:
-        try:
-            text = f.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            continue
-        allow_unquoted = f.suffix.lower() in _unquoted_exts or f.name.lower().startswith(".env")
-        for ln, label, snippet in _scan_secrets_text(text, allow_unquoted=allow_unquoted):
-            secret_hits.append((f, ln, label, snippet))
-
-    lines.append(f"\n📌 أسرار مكشوفة ({len(files)} ملف اتفحص):")
-    if secret_hits:
-        for f, ln, label, snippet in secret_hits[:50]:
-            lines.append(f"  🛑 {f}:{ln} [{label}] {snippet}")
-        if len(secret_hits) > 50:
-            lines.append(f"  ... و{len(secret_hits) - 50} أخرى")
+    skipped_for_size = root.is_file() and root.stat().st_size > MAX_FILE_SIZE_FOR_SCAN
+    if skipped_for_size:
+        lines.append(f"\n📌 أسرار مكشوفة:\n  {_oversized_single_file_message(root, 'vuln_scan')}")
     else:
-        lines.append("  ✅ مفيش")
+        _unquoted_exts = {".env", ".ini", ".cfg", ".conf", ".properties"}
+        files = _iter_scan_files(root, _TEXT_EXTENSIONS)
+        secret_hits = []
+        for f in files:
+            try:
+                text = f.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            allow_unquoted = f.suffix.lower() in _unquoted_exts or f.name.lower().startswith(".env")
+            for ln, label, snippet in _scan_secrets_text(text, allow_unquoted=allow_unquoted):
+                secret_hits.append((f, ln, label, snippet))
+
+        lines.append(f"\n📌 أسرار مكشوفة ({len(files)} ملف اتفحص):")
+        if secret_hits:
+            for f, ln, label, snippet in secret_hits[:50]:
+                lines.append(f"  🛑 {f}:{ln} [{label}] {snippet}")
+            if len(secret_hits) > 50:
+                lines.append(f"  ... و{len(secret_hits) - 50} أخرى")
+        else:
+            lines.append("  ✅ مفيش")
 
     lines.append("\n📦 ثغرات مكتبات معروفة:")
     dep_reports = []

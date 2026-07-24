@@ -139,6 +139,15 @@ def test_code_scan_ignores_placeholder_secret_value(make_ctx, tmp_path):
     assert result.startswith("✅")
 
 
+def test_code_scan_skips_oversized_single_file_instead_of_loading_it(make_ctx, tmp_path, monkeypatch):
+    monkeypatch.setattr(ssp, "MAX_FILE_SIZE_FOR_SCAN", 10)  # حد صغير جدًا عشان الاختبار يبقى سريع
+    f = tmp_path / "big.py"
+    f.write_text("x = 1\n" * 100)  # أكبر من 10 بايت بكتير
+    result = ssp._cmd_code_scan(make_ctx("code_scan", [str(f)]))
+    assert result.startswith("⚠️")
+    assert "virus_scan" in result
+
+
 # ── code_scan --fix ───────────────────────────────────────────────────
 
 def test_code_scan_fix_rewrites_yaml_load_without_loader(make_ctx, tmp_path):
@@ -193,6 +202,15 @@ def test_vuln_scan_no_args(make_ctx):
 def test_vuln_scan_missing_path(make_ctx, tmp_path):
     result = ssp._cmd_vuln_scan(make_ctx("vuln_scan", [str(tmp_path / "nope")]))
     assert result.startswith("❌")
+
+
+def test_vuln_scan_skips_oversized_single_file_instead_of_loading_it(make_ctx, tmp_path, monkeypatch):
+    monkeypatch.setattr(ssp, "MAX_FILE_SIZE_FOR_SCAN", 10)
+    f = tmp_path / "big.txt"
+    f.write_text("API_KEY=AKIAABCDEFGHIJKLMNOP\n" * 10)
+    result = ssp._cmd_vuln_scan(make_ctx("vuln_scan", [str(f)]))
+    assert "virus_scan" in result
+    assert "AKIAABCDEFGHIJKLMNOP" not in result  # الملف متقراش خالص، يبقى مفيش نتيجة منه
 
 
 def test_vuln_scan_detects_aws_key_in_env_file(make_ctx, tmp_path):

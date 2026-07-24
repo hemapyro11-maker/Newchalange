@@ -117,6 +117,12 @@ class AssistantApp(ctk.CTk):
         )
         self.attach_btn.pack(side="left", padx=(0, 8))
 
+        self.scan_btn = ctk.CTkButton(
+            input_row, width=44, height=42, fg_color=CARD, hover_color=BORDER,
+            text="🛡️", font=ctk.CTkFont(size=16), command=self._scan_file
+        )
+        self.scan_btn.pack(side="left", padx=(0, 8))
+
         self.cmd_entry = ctk.CTkEntry(
             input_row, fg_color=CARD, border_color=BORDER, height=42,
             font=ctk.CTkFont(size=13)
@@ -207,6 +213,20 @@ class AssistantApp(ctk.CTk):
             return
         self.__append_log(f"📎  {path}", "info")
         self.engine.submit(f"probe {shlex.quote(path)}")
+
+    def _scan_file(self):
+        # من غير أي فلتر نوع ملف — الهدف إن أي ملف أيًا كان امتداده أو
+        # حجمه يتقدر يترفع للفحص. virus_scan (جزء من security_report)
+        # بيفحص عبر ClamAV بالستريمنج، من غير ما يتحمّل الملف في ذاكرة
+        # بايثون خالص، فمفيش مشكلة مع ملفات كبيرة.
+        path = filedialog.askopenfilename(
+            title=self.t.t("scan_file"),
+            filetypes=[("All files", "*.*")],
+        )
+        if not path:
+            return
+        self.__append_log(f"{self.t.t('scanning_file')}  {path}", "info")
+        self.engine.submit(f"security_report {shlex.quote(path)}")
 
     def _send_command(self):
         text = self.cmd_entry.get().strip()
