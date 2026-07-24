@@ -91,6 +91,10 @@ build_exe.bat
     تحت): سلسلة احتياطية حقيقية من edge-tts (صوت مصري أنثوي، محتاج
     إنترنت) → Piper (صوت عربي محلي، بيتحمّل مرة واحدة) → espeak-ng
     (احتياطي محلي دايمًا شغال).
+  - **فريق يوتيوب الاحترافي** (7 إضافات، شرح تفصيلي تحت): `youtube_strategy_plugin.py`،
+    `content_research_plugin.py`، `youtube_seo_plugin.py`،
+    `thumbnail_plugin.py`، `youtube_ads_plugin.py`،
+    `community_manager_plugin.py`، `youtube_analytics_plugin.py`.
 - `connectors.example.json` — مثال لإعداد MCP Connectors (انسخه لـ
   `connectors.json` وعدّله). `connectors.json` نفسه بيتعمل تلقائياً
   أول ما التطبيق يشتغل ومش متتبع في git (ممكن يحتوي مسارات/أسرار خاصة بيك).
@@ -111,7 +115,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-128 اختبار حقيقي (مش placeholders) بتغطي كل plugin و Core Engine —
+480 اختبار حقيقي (مش placeholders) بتغطي كل plugin و Core Engine —
 تحليل ELF/PE حقيقي، معالجة فيديو حقيقية عبر FFmpeg، توليد أيقونات
 حقيقي، حلقة توليد/تصحيح plugin_forge كاملة، إلخ. الاختبارات اللي
 محتاجة أدوات اختيارية (FFmpeg, Pillow, capstone, mcp) بتتخطى تلقائياً
@@ -337,6 +341,7 @@ Ghidra/radare2). كل النتائج اتقارنت واتأكد إنها مطا
 | App/UI Designer | `app_icons <source.png> <out_dir>` | ✅ يولّد كل أحجام أيقونات iOS+Android (19 حجم) من صورة واحدة |
 | Screenwriter | `scaffold screenplay <name>` + `fountain_stats` | ✅ صيغة Fountain القياسية + تحليل حقيقي (مشاهد/شخصيات/حوار) |
 | Game Narrative Designer | `scaffold ink_story <name>` | ✅ صيغة Ink (نفس أداة ألعاب حقيقية زي 80 Days) |
+| YouTube Creator/Growth Team | 7 إضافات (استراتيجية، بحث محتوى، SEO، مصغرات، إعلانات، تواصل مجتمعي، تحليلات — شرح تفصيلي تحت) | ✅ بيانات حقيقية عبر YouTube Data API v3 (محتاج مفتاح مجاني)، توليد مصغرات فعلي عبر Pillow، تحليل مشاعر/سبام محلي بدون إنترنت |
 
 **اللي مش موجود ومش هيتضاف — بصراحة:** إخراج سينمائي، اختيار ممثلين،
 تصميم أزياء/ماكياج، تصوير وإضاءة فعلية، تسجيل صوت ميداني، إنتاج/تسويق/
@@ -407,6 +412,89 @@ Ghidra/radare2). كل النتائج اتقارنت واتأكد إنها مطا
 الرسومية فيه زرار 🔊/🔇 في الأعلى يفعّل/يوقف نطق نتيجة كل أمر تلقائيًا
 — افتراضيًا مقفول، زي أي فحص في المشروع ده: مبيشتغلش غير لما تختاره
 إنت بنفسك.
+
+## فريق يوتيوب الاحترافي — 7 إضافات بمستوى متخصص حقيقي
+
+7 أدوار متخصصة (استراتيجية، بحث محتوى، SEO، تصميم مصغرات، إعلانات،
+تواصل مجتمعي، تحليلات) — كل واحدة بمنطق حقيقي (حسابات، تحليل نص، توليد
+صور فعلي)، مش نصوص عامة مولّدة. الأدوات اللي محتاجة بيانات حقيقية عن
+قناة/فيديو بتستخدم **YouTube Data API v3** (مجاني بالكامل — مفتاح API
+مجاني من [Google Cloud Console](https://console.cloud.google.com)، بس
+محتاج حساب Google، مفيش أي اشتراك أو تكلفة):
+
+```
+youtube_set_key <API_KEY>      # يتحفظ في smart_assistant/youtube_config.json (مش متتبع في git)
+youtube_key_status             # هل فيه مفتاح متظبط؟
+```
+
+من غير مفتاح، أي أمر محتاج بيانات حقيقية بيقولك كده صراحةً بدل ما يورّي
+بيانات وهمية — الأدوات اللي مش محتاجة إنترنت خالص (توليد مصغرات، تحليل
+مشاعر، حاسبات) بتشتغل عادي من غيره.
+
+### 1. مدير استراتيجية يوتيوب — `youtube_strategy_plugin.py`
+- `channel_stats <channel_id_or_@handle>` — مشتركين/مشاهدات/فيديوهات حقيقية.
+- `channel_strategy_report <channel>` — اتساق النشر (معامل تباين الفجوات
+  بين آخر الفيديوهات) ونسبة الوصول (متوسط مشاهدات ÷ مشتركين) مع توصيات.
+- `content_calendar <videos_per_week> <weeks>` — خطة نشر بتواريخ حقيقية،
+  موزّعة بالتساوي عبر أيام الأسبوع (مش متكدسة).
+- `competitor_compare <channel_1> <channel_2>` — مقارنة إحصائيات جنب بعض.
+
+### 2. باحث المحتوى وكاتب السيناريو — `content_research_plugin.py`
+- `youtube_search <query>` / `trending_videos [region=EG]` — بحث/ترند حقيقي
+  مع أرقام مشاهدات فعلية.
+- `keyword_ideas <topic>` — قوالب نية-بحث عربي/إنجليزي (بدون إنترنت).
+- `script_outline <topic> [duration_min=8]` — هيكل سيناريو بتوقيتات فعلية
+  محسوبة من مدة الفيديو (هوك أول 15 ثانية، عدد نقاط محسوب من الوقت المتاح).
+- `hook_analyzer <hook text>` — تقييم قوة الهوك الافتتاحي /100 (طول، سؤال،
+  رقم، كلمات فضول، مقدمات عامة مكرّرة).
+
+### 3. خبير SEO ليوتيوب — `youtube_seo_plugin.py`
+- `seo_title_score <title>` / `seo_description_score <text|path>` — تقييم
+  حقيقي (طول مقابل حدود يوتيوب الفعلية، أول 150 حرف، توقيتات، هاشتاجات).
+- `seo_tags_suggest <title.txt> <description.txt>` — استخراج كلمات مفتاحية
+  بتحليل تكرار محلي (unigrams/bigrams، مش API خارجي).
+- `seo_tags_audit <tags,...>` — تدقيق مقابل حد يوتيوب الفعلي (500 حرف)،
+  كشف تكرار/شبه-تكرار (مفرد/جمع)، توازن عام/محدد.
+- `seo_full_audit <title.txt> <description.txt> <tags>` — تقرير شامل موزون.
+
+### 4. مصمم المصغرات — `thumbnail_plugin.py`
+- `thumbnail_analyze <image>` — تحليل حقيقي عبر Pillow: سطوع، تباين
+  (stddev)، تشبع لون، دقة/نسبة مقابل 1280x720، حجم الملف مقابل حد يوتيوب (2MB).
+- `thumbnail_generate <bg> <title> <out.jpg>` — توليد فعلي: cover-fit لـ
+  1280x720، حجم خط تلقائي يتصغّر لحد ما يتظبط، **لون نص تلقائي** (بيقيس
+  سطوع منطقة النص فعليًا ويختار أبيض/أسود + stroke متباين).
+- `thumbnail_ab_compare <a> <b>` — مقارنة A/B على نفس المقاييس.
+
+### 5. أخصائي إعلانات يوتيوب — `youtube_ads_plugin.py`
+**حاسبة واستشارة استراتيجية بس — مش متصلة بحساب Google Ads حقيقي ومش
+بتنفّذ أي حملة فعلية أو تصرف فلوس.**
+- `ads_budget_calc <daily_budget> <cpm>` — وصول/مشاهدات متوقعة (بمدى، مش
+  رقم وهمي دقيق).
+- `ads_targeting_advisor <niche> <goal>` — توصية استهداف حقيقية مبنية على
+  أنواع استهداف Google Ads الفعلية (Affinity/In-market/Remarketing...).
+- `ads_copy_score <headline> | <description>` — تقييم نص إعلاني (طول، CTA، إلحاح).
+- `ads_campaign_plan <budget> <days> <goal>` — تقسيم ميزانية على قنوات
+  إعلانية + توصية استراتيجية مزايدة.
+
+### 6. مدير التواصل والمجتمع — `community_manager_plugin.py`
+- `comment_sentiment <text|path>` — تحليل مشاعر بقاموس عربي مصري +
+  إنجليزي، مع التعامل مع النفي ("مش حلو" = سلبي مش إيجابي).
+- `comment_spam_detect <text|path>` — كشف سبام هيكلي (روابط، عبارات
+  ترويجية معروفة، تكرار حروف).
+- `reply_template <comment> tone=friendly|professional|funny` — رد مقترح
+  حسب نوع التعليق (سؤال/مجاملة/شكوى) المكتشف تلقائيًا.
+- `engagement_calendar <posts_per_week>` — خطة منشورات مجتمعية بدوران نوع
+  المحتوى (استطلاع/سؤال/كواليس...).
+
+### 7. محلل بيانات يوتيوب — `youtube_analytics_plugin.py`
+- `video_stats <video_id>` — مشاهدات/لايك/تعليق/مدة حقيقية + معدل تفاعل.
+- `channel_growth_report <channel>` — أفضل/أسوأ أداء واتجاه مشاهدات
+  (مقارنة أقدم نص بأحدث نص من آخر الفيديوهات).
+- `engagement_health_proxy <video_id>` — **مؤشر تقريبي بس**، مش retention/CTR
+  حقيقي: الـ retention الحقيقي بيانات خاصة بصاحب القناة عبر YouTube
+  Analytics API بمصادقة OAuth على حسابه — مش متاح عبر مفتاح API عام، والأداة
+  بتقول كده صراحةً بدل ما تدّعي عكس ده.
+- `report_export <channel> <out.csv>` — تصدير CSV حقيقي لإحصائيات الفيديوهات.
 
 ## ليه مفيش "توليد فيديو/صورة بالذكاء الاصطناعي" زي Higgsfield؟
 

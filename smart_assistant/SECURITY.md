@@ -95,6 +95,41 @@ mismatch` بيوقف التنفيذ لو هجرة اتطبقت قبل كده ا�
 في الواجهة (زرار 🔊) مقفول افتراضيًا لنفس السبب — مبيتفعّلش من غير ما
 تختاره إنت.
 
+## فريق يوتيوب — youtube_strategy/content_research/youtube_seo/thumbnail/
+## youtube_ads/community_manager/youtube_analytics _plugin.py
+
+**النموذج:** الأدوات اللي بتجيب بيانات حقيقية (`channel_stats`,
+`youtube_search`, `trending_videos`, `video_stats`, `channel_growth_report`,
+`engagement_health_proxy`, `report_export`) بتبعت طلبات لسيرفرات Google
+(`googleapis.com`) ومعاها مفتاح الـ API بتاعك — زي أي أداة بتستخدم
+YouTube Data API. المفتاح نفسه بيتحفظ محليًا في `youtube_config.json`
+(مش متتبع في git — نفس معاملة `connectors.json`)، ومفيش أي بيانات
+شخصية أو محتوى بتاعك بيتبعت غير الاستعلامات اللي إنت بنفسك بتطلبها
+(اسم قناة، معرف فيديو...).
+
+**`ads_*` بصراحة كاملة:** الأدوات دي حاسبة واستشارة استراتيجية بس —
+**مفيش اتصال بحساب Google Ads حقيقي ومفيش تنفيذ أو تشغيل لأي حملة
+إعلانية فعلية أو صرف أي فلوس.** أي رقم بترجعه (وصول متوقع، تكلفة
+تقريبية) مبني على معدلات صناعة عامة، مش بيانات حساب حقيقي — الأداة
+بتقول كده صراحةً في كل رد.
+
+**`engagement_health_proxy` بصراحة كاملة:** مش retention/CTR حقيقي.
+البيانات دي (نسبة المشاهدة الفعلية، نقرات الصورة المصغرة) خاصة بصاحب
+القناة بس ومتاحة عبر YouTube **Analytics** API (مختلف عن Data API)
+بمصادقة OAuth على حساب القناة نفسها — الأداة مبنية على مفتاح API عام
+مش OAuth، فمقدرش أوصل للبيانات دي أصلاً. المؤشر اللي بيتحسب مبني على
+إشارات عامة (لايكات/تعليقات/مشاهدات) بس، ومكتوب عليه تحذير صريح في كل
+مرة.
+
+**الأدوات اللي مش محتاجة إنترنت خالص:** `keyword_ideas`, `script_outline`,
+`hook_analyzer`, `seo_title_score`, `seo_description_score`,
+`seo_tags_suggest`, `seo_tags_audit`, `seo_full_audit`,
+`thumbnail_analyze`, `thumbnail_generate`, `thumbnail_ab_compare`,
+`ads_budget_calc`, `ads_targeting_advisor`, `ads_copy_score`,
+`ads_campaign_plan`, `comment_sentiment`, `comment_spam_detect`,
+`reply_template`, `engagement_calendar` — كلها منطق/تحليل محلي 100%،
+مفيش أي طلب شبكة.
+
 ## `connectors` (MCP) — plugins/connectors_plugin.py
 
 **النموذج:** نفس ثقة Claude Desktop Connectors بالظبط: أي MCP server

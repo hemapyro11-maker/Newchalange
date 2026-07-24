@@ -17,3 +17,4 @@ smart_assistant/skills.json
 smart_assistant/plugins_pending/
 smart_assistant/quarantine/
 smart_assistant/voice_cache/
+smart_assistant/youtube_config.json
