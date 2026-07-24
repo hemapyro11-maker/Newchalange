@@ -65,6 +65,14 @@ build_exe.bat
     منافذ محلي بنطاق محدود، لأجهزتك المصرح لك باختبارها بس)، `tls_check`
     (فحص شهادة TLS: تاريخ انتهاء، مُصدر، SAN)، `file_perms` (تدقيق
     صلاحيات: world-writable, SUID/SGID, ملفات حساسة مقروءة).
+  - `security_scan_plugin.py` — فحص أمان شامل (شرح تفصيلي تحت):
+    `code_scan` (تحليل AST لكود بايثون: eval/exec، shell=True، pickle،
+    yaml.load غير آمن، SQL injection، أسرار مكشوفة — مع إصلاح تلقائي
+    للحالات الآمنة الواضحة بـ `--fix`)، `vuln_scan` (أسرار مكشوفة في أي
+    ملف نصي + ثغرات مكتبات معروفة عبر pip-audit/npm audit)، `virus_scan`
+    (فحص فيروسات/PUA حقيقي عبر ClamAV، بحجر صحي تلقائي — مش حذف أو
+    "تنظيف")، `quarantine_file`/`quarantine_list`/`quarantine_restore`،
+    و`security_report` (تقرير شامل بيجمعهم كلهم).
   - `plugin_forge_plugin.py` — المساعد يصمم plugins جديدة بنفسه ويصلح
     أخطاءها تلقائياً (شرح تفصيلي تحت).
   - `cinema_plugin.py` — مونتاج وتصحيح ألوان بمستوى احترافي: تصحيح
@@ -247,6 +255,44 @@ Ghidra/radare2). كل النتائج اتقارنت واتأكد إنها مطا
 النطاق واضح: تحليل *ساكن* لبنية ملف عندك حق تحلله (فهم كود، اعتماديات،
 دلائل تغليف) — مش كسر حماية ولا تجاوز تراخيص، زي ما اتقال فوق.
 
+## فحص أمان شامل — `security_scan_plugin.py`
+
+أربع أدوات حقيقية، كل واحدة بحدود واضحة عن قصد مش "ذكاء اصطناعي بيحل كل
+حاجة":
+
+- **`code_scan <path> [--fix]`** — تحليل AST حقيقي لكود بايثون (مش
+  regex سطحي): بيكتشف `eval`/`exec`، `os.system`، `subprocess(...,
+  shell=True)`، `pickle.load`، `yaml.load` غير آمن، هاش ضعيف
+  (md5/sha1)، SQL injection عبر f-string أو string concatenation
+  (ومبيلمسش parameterized queries)، وأسرار مكتوبة صريح في الكود. مع
+  `--fix`، بيصلح تلقائيًا **الحالة الآمنة والواضحة 100% بس**:
+  `yaml.load()` من غير `Loader` أو بـ `Loader=yaml.Loader/FullLoader/
+  UnsafeLoader` بيتحول لـ `safe_load()`/`Loader=yaml.SafeLoader` —
+  بإحداثيات دقيقة من الـ AST نفسه (مش استبدال نصي عشوائي)، وبيتأكد إن
+  الملف لسه بيترجم بعد التعديل قبل ما يكتبه، وإلا يرجع للأصل من غير
+  ما يلمسه. أي ملاحظة تانية (eval، shell=True، أسرار...) بتتبلّغ بس
+  للمراجعة اليدوية — إصلاحها الآمن محتاج فهم للسياق مش تحويل مضمون.
+- **`vuln_scan <path>`** — أسرار مكشوفة في أي ملف نصي (مفاتيح AWS،
+  Slack tokens، JWT، مفاتيح خاصة، بيانات اعتماد في connection strings،
+  وتعيينات أسرار عامة زي `SECRET`/`API_KEY`/`PASSWORD` — بما فيها ملفات
+  `.env` اللي اسمها بالكامل نقطة، وده حالة حقيقية `pathlib` بيتعامل
+  معاها غلط بالافتراضي) + ثغرات مكتبات معروفة عبر `pip-audit`
+  (لـ requirements.txt) و`npm audit` (لـ package.json) + صلاحيات ملفات
+  (بيستدعي `file_perms` من `security_plugin.py` مباشرة عبر command
+  registry، مش نسخة مكررة من نفس المنطق).
+- **`virus_scan <path> [--no-quarantine]`** — فحص فيروسات وبرامج تجسس
+  (PUA/spyware عبر `--detect-pua=yes`) *حقيقي* عبر
+  [ClamAV](https://www.clamav.org/downloads) (مجاني ومفتوح المصدر
+  بالكامل) — مش محرك فحص مؤلَّف. **أي ملف يتكشف مصاب بيتنقل تلقائيًا
+  للحجر الصحي (quarantine)، مش بيتمسح ولا "يتنضّف" في مكانه** — لأن
+  ضمان إن ملف "اتنضّف" من فيروس وهيفضل شغال طبيعي بعد كده مش حاجة أي
+  أداة أمان جادة بتقدر تضمنها فعليًا، حتى لو الملف نفسه ماتغيّرش.
+- **`quarantine_file` / `quarantine_list` / `quarantine_restore`** —
+  إدارة الحجر الصحي يدويًا: نقل أي ملف مشبوه بنفسك، عرض كل حاجة فيه،
+  أو استعادة ملف (لو false positive) — بيرفض يكتب فوق ملف موجود بالفعل
+  في مكان الاستعادة عشان محدش يفقد بيانات بالغلط.
+- **`security_report <path>`** — تقرير واحد بيجمع الثلاثة كلهم.
+
 ## تطوير متعدد المجالات (Desktop / Web / Mobile / Games / Data / AI / أمان / أفلام...)
 
 المساعد بقى فيه أدوات حقيقية شغالة عبر عشرات مجالات التطوير، كلها
@@ -264,7 +310,7 @@ Ghidra/radare2). كل النتائج اتقارنت واتأكد إنها مطا
 | Data Scientist | `csv_describe`, `csv_plot`, `csv_correlate` | ✅ اتجرب على بيانات حقيقية (إحصائيات، رسومات، correlation) |
 | AI/ML Engineer | `scaffold ml <name>` | ✅ **اتجرب فعلياً** — درّب نموذج حقيقي بدقة 100% على بيانات اختبار |
 | Systems/Embedded Developer | `scaffold embedded <name>` | ✅ بنية HAL حقيقية (`blink.c` منفصل عن الهاردوير) — **اتجرب فعلياً**: `make check` (compile) و`make test` (منطق الـ blink شغال ومُختبر على الـ host) |
-| Cybersecurity/Pentest | `hash_file`, `port_scan`, `tls_check`, `file_perms`, `re_plugin`/`inspect_plugin` | ✅ اتجرب فعلياً: شهادة self-signed حقيقية + ملفات بصلاحيات SUID/world-writable حقيقية |
+| Cybersecurity/Pentest | `hash_file`, `port_scan`, `tls_check`, `file_perms`, `code_scan`, `vuln_scan`, `virus_scan`, `security_report`, `re_plugin`/`inspect_plugin` | ✅ اتجرب فعلياً: شهادة self-signed، صلاحيات SUID/world-writable، كشف eval/shell=True/SQLi/أسرار حقيقية، وكشف+حجر صحي فعلي لملف مصاب عبر ClamAV (بتوقيع اختباري مخصص) |
 | Cloud/DevOps Engineer | `scaffold docker <name>` (multi-stage, non-root, HEALTHCHECK), `scaffold ci <name>` (lint→test matrix→build) | ✅ Dockerfile اتفحص بـ `docker build`، YAML اتأكد بـ `yaml.safe_load` |
 | Database Engineer | `db_schema`, `db_query`, `db_export_csv`, `db_migration_status`, `db_migrate`, `db_indexes` | ✅ SQLite حقيقي؛ هجرات اتجربت فعلياً (نجاح/توقف عند خطأ/رفض tampering)، وكشف foreign key من غير index |
 | Blockchain Developer | `scaffold blockchain <name>` | ✅ عقد Solidity + Hardhat toolbox test حقيقي (deploy/تعديل/owner guard) — **اتجرب فعلياً**: العقد اتترجم بـ solc لـ bytecode حقيقي |

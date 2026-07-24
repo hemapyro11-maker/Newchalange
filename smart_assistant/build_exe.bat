@@ -42,5 +42,10 @@ echo   - مشاريع scaffold kernel_module محتاجة kernel headers مثب�
 echo     و scaffold blockchain محتاجة Node.js+Hardhat، و scaffold
 echo     quantum/ml محتاجة pip install قدام المشروع نفسه (requirements.txt
 echo     بتاعه) مش داخل SmartAssistant نفسه.
+echo   - virus_scan محتاج ClamAV متثبت على الجهاز (مجاني ومفتوح المصدر):
+echo     https://www.clamav.org/downloads — شغّل freshclam بعد التثبيت.
+echo   - vuln_scan بيستخدم pip-audit (اختياري: pip install pip-audit) و
+echo     npm audit (لو Node.js متثبت) لفحص ثغرات المكتبات المعروفة —
+echo     من غيرهم بيفحص الأسرار المكشوفة وصلاحيات الملفات بس.
 echo ====================================
 pause
