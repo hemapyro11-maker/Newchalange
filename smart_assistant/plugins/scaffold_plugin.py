@@ -179,40 +179,135 @@ struct ContentView: View {{
 
 
 def _scaffold_game(root: pathlib.Path, name: str) -> list[str]:
-    _write(root / "main.py", f'''"""{name} — Pygame starter."""
+    _write(root / "player.py", '''"""player.py — منطق حركة اللاعب بحت، من غير أي اعتماد على pygame أو
+الشاشة — عشان يتاختبر مباشرة زي أي منطق بيزنس عادي، من غير ما نحتاج
+نفتح نافذة أو نحاكي أحداث لوحة مفاتيح."""
+
+
+class Player:
+    def __init__(self, x: float = 320, y: float = 240, speed: float = 4):
+        self.x = x
+        self.y = y
+        self.speed = speed
+
+    def move(self, left: bool, right: bool, up: bool, down: bool) -> None:
+        if left:
+            self.x -= self.speed
+        if right:
+            self.x += self.speed
+        if up:
+            self.y -= self.speed
+        if down:
+            self.y += self.speed
+
+    @property
+    def position(self) -> tuple[float, float]:
+        return (self.x, self.y)
+''')
+    _write(root / "main.py", f'''"""{name} — Pygame starter.
+
+حلقة اللعبة نفسها في run()، مش في module-level مباشرة، عشان نقدر
+نستدعيها من الاختبارات بـ max_frames محدود (شوف tests/test_headless_smoke.py)
+من غير ما ندخل في حلقة لا نهائية وقت الاختبار."""
 import pygame
 
-pygame.init()
-screen = pygame.display.set_mode((640, 480))
-pygame.display.set_caption("{name}")
-clock = pygame.time.Clock()
+from player import Player
 
-player_x, player_y = 320, 240
-running = True
-while running:
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
+WIDTH, HEIGHT = 640, 480
+
+
+def run(max_frames: int | None = None) -> None:
+    pygame.init()
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption("{name}")
+    clock = pygame.time.Clock()
+    player = Player(x=WIDTH / 2, y=HEIGHT / 2)
+
+    frame = 0
+    running = True
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+
+        keys = pygame.key.get_pressed()
+        player.move(keys[pygame.K_LEFT], keys[pygame.K_RIGHT], keys[pygame.K_UP], keys[pygame.K_DOWN])
+
+        screen.fill((30, 30, 40))
+        pygame.draw.circle(screen, (79, 110, 247), (int(player.x), int(player.y)), 20)
+        pygame.display.flip()
+        clock.tick(60)
+
+        frame += 1
+        if max_frames is not None and frame >= max_frames:
             running = False
 
-    keys = pygame.key.get_pressed()
-    if keys[pygame.K_LEFT]:
-        player_x -= 4
-    if keys[pygame.K_RIGHT]:
-        player_x += 4
-    if keys[pygame.K_UP]:
-        player_y -= 4
-    if keys[pygame.K_DOWN]:
-        player_y += 4
+    pygame.quit()
 
-    screen.fill((30, 30, 40))
-    pygame.draw.circle(screen, (79, 110, 247), (player_x, player_y), 20)
-    pygame.display.flip()
-    clock.tick(60)
 
-pygame.quit()
+if __name__ == "__main__":
+    run()
 ''')
+    _write(root / "tests" / "test_player.py", '''from player import Player
+
+
+def test_moves_right():
+    p = Player(x=0, y=0, speed=4)
+    p.move(left=False, right=True, up=False, down=False)
+    assert p.position == (4, 0)
+
+
+def test_no_input_stays_still():
+    p = Player(x=10, y=10, speed=4)
+    p.move(False, False, False, False)
+    assert p.position == (10, 10)
+
+
+def test_opposite_keys_cancel_out():
+    p = Player(x=0, y=0, speed=4)
+    p.move(left=True, right=True, up=False, down=False)
+    assert p.position == (0, 0)
+''')
+    _write(root / "tests" / "test_headless_smoke.py", '''"""اختبار حقيقي بيشغّل حلقة اللعبة فعليًا لعدد فريمات محدود من غير شاشة
+حقيقية (SDL_VIDEODRIVER=dummy) — بيتأكد إن pygame.init/الرسم/الأحداث
+شغالين مع بعض من غير ما ينهار، مش بس إن الكود بيترجم syntactically."""
+import os
+
+os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+
+from main import run
+
+
+def test_game_loop_runs_headless_for_a_few_frames():
+    run(max_frames=5)
+''')
+    _write(root / "pytest.ini", "[pytest]\ntestpaths = tests\npythonpath = .\n")
     _write(root / "requirements.txt", "pygame>=2.5.0\n")
-    return ["main.py", "requirements.txt"]
+    _write(root / "requirements-dev.txt", "-r requirements.txt\npytest>=8.0.0\n")
+    _write(root / ".gitignore", "__pycache__/\n*.pyc\n.pytest_cache/\n")
+    _write(root / "README.md", f'''# {name} — Pygame Starter
+
+```bash
+pip install -r requirements.txt
+python main.py          # يفتح نافذة فعلية باللعبة
+```
+
+## الاختبارات
+
+```bash
+pip install -r requirements-dev.txt
+pytest                   # منطق اللاعب + headless smoke test للحلقة كاملة
+```
+
+منطق الحركة في `player.py` منفصل عن pygame نفسه عشان يتاختبر مباشرة،
+واختبار الـ headless smoke بيشغّل `main.run()` فعليًا لـ 5 فريمات بدون
+شاشة حقيقية (`SDL_VIDEODRIVER=dummy`).
+''')
+    return [
+        "player.py", "main.py", "tests/test_player.py", "tests/test_headless_smoke.py",
+        "pytest.ini", "requirements.txt", "requirements-dev.txt", ".gitignore", "README.md",
+    ]
 
 
 def _scaffold_python(root: pathlib.Path, name: str) -> list[str]:
@@ -871,10 +966,67 @@ contract {safe} {{
 }}
 ''')
     _write(root / "package.json", json.dumps({
-        "name": safe.lower(), "version": "1.0.0",
-        "devDependencies": {"hardhat": "^2.22.0"},
+        "name": safe.lower(),
+        "version": "1.0.0",
+        "scripts": {"test": "hardhat test", "compile": "hardhat compile"},
+        "devDependencies": {
+            "hardhat": "^2.22.0",
+            "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+        },
     }, indent=2))
-    return [f"contracts/{safe}.sol", "package.json"]
+    _write(root / "hardhat.config.js", '''require("@nomicfoundation/hardhat-toolbox");
+
+/** @type import('hardhat/config').HardhatUserConfig */
+module.exports = {
+  solidity: "0.8.20",
+};
+''')
+    _write(root / "test" / f"{safe}.test.js", f'''const {{ expect }} = require("chai");
+
+describe("{safe}", function () {{
+  async function deploy(initialMessage) {{
+    const [owner, other] = await ethers.getSigners();
+    const Contract = await ethers.getContractFactory("{safe}");
+    const contract = await Contract.deploy(initialMessage);
+    await contract.waitForDeployment();
+    return {{ contract, owner, other }};
+  }}
+
+  it("يسجّل الرسالة الأولية والمالك وقت الـ deploy", async function () {{
+    const {{ contract, owner }} = await deploy("hello");
+    expect(await contract.message()).to.equal("hello");
+    expect(await contract.owner()).to.equal(owner.address);
+  }});
+
+  it("المالك يقدر يغيّر الرسالة", async function () {{
+    const {{ contract }} = await deploy("hello");
+    await contract.setMessage("updated");
+    expect(await contract.message()).to.equal("updated");
+  }});
+
+  it("غير المالك مايقدرش يغيّر الرسالة", async function () {{
+    const {{ contract, other }} = await deploy("hello");
+    await expect(contract.connect(other).setMessage("nope")).to.be.revertedWith("not owner");
+  }});
+}});
+''')
+    _write(root / ".gitignore", "node_modules/\nartifacts/\ncache/\ncoverage/\ncoverage.json\n.env\n")
+    _write(root / "README.md", f'''# {name} — Smart Contract ({safe})
+
+```bash
+npm install
+npx hardhat compile
+npx hardhat test
+```
+
+العقد في `contracts/{safe}.sol`، والاختبارات (deploy، تغيير الرسالة، منع
+غير المالك من التعديل) في `test/{safe}.test.js` باستخدام Hardhat +
+ethers.js + chai (عبر `@nomicfoundation/hardhat-toolbox`).
+''')
+    return [
+        f"contracts/{safe}.sol", "package.json", "hardhat.config.js",
+        f"test/{safe}.test.js", ".gitignore", "README.md",
+    ]
 
 
 def _scaffold_embedded(root: pathlib.Path, name: str) -> list[str]:
@@ -993,7 +1145,7 @@ int main(void) {
     return 0;
 }
 ''')
-    _write(root / "Makefile", f"""CC = gcc
+    _write(root / "Makefile", """CC = gcc
 CFLAGS = -Wall -Wextra -std=c11
 
 # فحص إن main.c/blink.c بيترجموا (compile-only) بأسلوب freestanding —

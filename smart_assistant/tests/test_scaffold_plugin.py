@@ -1,4 +1,5 @@
 import json
+import os
 import py_compile
 import shutil
 import subprocess
@@ -9,6 +10,7 @@ import pytest
 import scaffold_plugin as sp
 
 requires_gcc = pytest.mark.skipif(not shutil.which("gcc"), reason="gcc not installed")
+requires_node = pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
 
 
 def test_scaffold_no_args_lists_types(make_ctx):
@@ -88,8 +90,29 @@ def test_scaffold_python_creates_runnable_main(make_ctx, tmp_path):
 def test_scaffold_game_creates_runnable_pygame_source(make_ctx, tmp_path):
     result = sp._cmd_scaffold(make_ctx("scaffold", ["game", "MyGame", str(tmp_path)]))
     assert result.startswith("✅")
-    py_compile.compile(str(tmp_path / "MyGame" / "main.py"), doraise=True)
-    assert "pygame" in (tmp_path / "MyGame" / "requirements.txt").read_text(encoding="utf-8")
+    root = tmp_path / "MyGame"
+    py_compile.compile(str(root / "main.py"), doraise=True)
+    py_compile.compile(str(root / "player.py"), doraise=True)
+    assert "pygame" in (root / "requirements.txt").read_text(encoding="utf-8")
+    assert (root / "tests" / "test_player.py").is_file()
+    assert (root / "tests" / "test_headless_smoke.py").is_file()
+
+
+requires_pygame = pytest.mark.skipif(
+    subprocess.run(["python3", "-c", "import pygame"], capture_output=True).returncode != 0,
+    reason="pygame not installed",
+)
+
+
+@requires_pygame
+def test_scaffold_game_tests_actually_pass_headless(make_ctx, tmp_path):
+    result = sp._cmd_scaffold(make_ctx("scaffold", ["game", "MyGame", str(tmp_path)]))
+    assert result.startswith("✅")
+    root = tmp_path / "MyGame"
+    env = {**os.environ, "SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy"}
+    proc = subprocess.run(["python3", "-m", "pytest", "-q"], cwd=root, capture_output=True, text=True, env=env)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "4 passed" in proc.stdout
 
 
 def test_scaffold_backend_compiles(make_ctx, tmp_path):
@@ -187,17 +210,46 @@ def test_scaffold_quantum_script_compiles(make_ctx, tmp_path):
 def test_scaffold_blockchain_valid_solidity_and_json(make_ctx, tmp_path):
     result = sp._cmd_scaffold(make_ctx("scaffold", ["blockchain", "MyToken", str(tmp_path)]))
     assert result.startswith("✅")
-    sol = (tmp_path / "MyToken" / "contracts" / "MyToken.sol").read_text(encoding="utf-8")
+    root = tmp_path / "MyToken"
+    sol = (root / "contracts" / "MyToken.sol").read_text(encoding="utf-8")
     assert "pragma solidity" in sol
     assert "contract MyToken" in sol
-    data = json.loads((tmp_path / "MyToken" / "package.json").read_text(encoding="utf-8"))
+    data = json.loads((root / "package.json").read_text(encoding="utf-8"))
     assert "hardhat" in data["devDependencies"]
+    assert "@nomicfoundation/hardhat-toolbox" in data["devDependencies"]
+    assert data["scripts"]["test"] == "hardhat test"
+    assert (root / "hardhat.config.js").is_file()
+    assert (root / "test" / "MyToken.test.js").is_file()
+    assert (root / ".gitignore").is_file()
+    assert "node_modules/" in (root / ".gitignore").read_text(encoding="utf-8")
 
 
 def test_scaffold_blockchain_sanitizes_contract_name(make_ctx, tmp_path):
     result = sp._cmd_scaffold(make_ctx("scaffold", ["blockchain", "!!!", str(tmp_path)]))
     assert result.startswith("✅")
-    assert (tmp_path / "!!!" / "contracts" / "MyContract.sol").is_file()
+    root = tmp_path / "!!!"
+    assert (root / "contracts" / "MyContract.sol").is_file()
+    assert (root / "test" / "MyContract.test.js").is_file()
+
+
+@requires_node
+def test_scaffold_blockchain_config_and_test_are_valid_js(make_ctx, tmp_path):
+    result = sp._cmd_scaffold(make_ctx("scaffold", ["blockchain", "MyToken", str(tmp_path)]))
+    assert result.startswith("✅")
+    root = tmp_path / "MyToken"
+    for f in ("hardhat.config.js", "test/MyToken.test.js"):
+        proc = subprocess.run(["node", "--check", str(root / f)], capture_output=True, text=True)
+        assert proc.returncode == 0, proc.stderr
+
+
+def test_scaffold_blockchain_test_file_exercises_every_public_function(make_ctx, tmp_path):
+    result = sp._cmd_scaffold(make_ctx("scaffold", ["blockchain", "MyToken", str(tmp_path)]))
+    assert result.startswith("✅")
+    test_js = (tmp_path / "MyToken" / "test" / "MyToken.test.js").read_text(encoding="utf-8")
+    assert "getContractFactory(\"MyToken\")" in test_js
+    assert ".message()" in test_js
+    assert ".setMessage(" in test_js
+    assert "revertedWith" in test_js  # exercises the owner-only guard
 
 
 @requires_gcc
