@@ -46,6 +46,14 @@ build_exe.bat
   - `inspect_plugin.py` — تحليل ملفات على مستوى البايتات: تحديد النوع
     (`identify`)، `hexdump`، `strings`، وعرض محتويات أرشيف (`archive_list`)
     — بدون أي باكدج خارجي (شرح النطاق تحت).
+  - `re_plugin.py` — هندسة عكسية متقدمة: `elf_info`, `pe_info`,
+    `entropy`, `disasm` (شرح تفصيلي تحت).
+  - `scaffold_plugin.py` — سقالات مشاريع جاهزة: ويب/أندرويد/iOS/لعبة
+    Pygame/بايثون (`scaffold <type> <name>`).
+  - `design_plugin.py` — لوجو بسيط وتوليد كل أحجام أيقونات iOS/Android
+    من صورة واحدة (`make_logo`, `app_icons`) عبر Pillow.
+  - `security_plugin.py` — `hash_file` (تحقق سلامة) و`port_scan` (فحص
+    منافذ محلي بنطاق محدود، لأجهزتك المصرح لك باختبارها بس).
 - `connectors.example.json` — مثال لإعداد MCP Connectors (انسخه لـ
   `connectors.json` وعدّله). `connectors.json` نفسه بيتعمل تلقائياً
   أول ما التطبيق يشتغل ومش متتبع في git (ممكن يحتوي مسارات/أسرار خاصة بيك).
@@ -135,6 +143,14 @@ run git pull
 قبل كده وبيوسّع نفسه بإضافات جديدة (plugins) بمرور الوقت من غير ما
 يفقد أي حاجة اتعلمها.
 
+**"بدون تدخل مني" — الحد اللي المشروع مش هيتخطاه:** مفيش ولا هيتضاف
+كود بيخلي المساعد يعدّل نفسه، يحمّل، أو ينفّذ حاجة من الإنترنت من غير
+ما تراجعها إنت. ده مش قرار تعسفي — تنفيذ كود مجهول المصدر تلقائياً هو
+بالتعريف ثغرة تنفيذ كود عن بُعد (RCE) على جهازك. الآلية الآمنة البديلة
+موجودة فعلاً: تحط ملف plugin جديد إنت كتبته (أو نسخته من مصدر تثق
+بيه) في `plugins/`، وهو بيتحمّل تلقائياً من غير ما تعيد تشغيل التطبيق
+— ده "بدون تدخل" في التحميل، مع "مراجعتك" في مصدر الكود.
+
 ## تحليل الملفات (Inspect) — الجزء الشرعي من "الهندسة العكسية"
 
 `identify` / `hexdump` / `strings` / `archive_list` بتديك نفس الإمكانيات
@@ -168,6 +184,28 @@ Ghidra/radare2). كل النتائج اتقارنت واتأكد إنها مطا
 
 النطاق واضح: تحليل *ساكن* لبنية ملف عندك حق تحلله (فهم كود، اعتماديات،
 دلائل تغليف) — مش كسر حماية ولا تجاوز تراخيص، زي ما اتقال فوق.
+
+## تطوير متعدد المجالات (iOS / Android / Web / ألعاب / تصميم / أمان)
+
+المساعد بقى فيه أدوات حقيقية شغالة عبر مجالات تطوير مختلفة، كلها
+مبنية على أدوات مجانية 100%:
+
+| المجال | الأمر | الحالة |
+|---|---|---|
+| Website Developer | `scaffold web <name>` | ✅ HTML/CSS/JS شغال فوراً |
+| Android Developer | `scaffold android <name>` | ✅ سقالة Kotlin/Gradle — افتحها في Android Studio (مجاني) |
+| iOS Developer | `scaffold ios <name>` | ✅ سقالة SwiftUI — محتاجة Xcode على ماك (قيد النظام، مش تكلفة) |
+| Gaming Developer | `scaffold game <name>` | ✅ لعبة Pygame **شغالة فعلياً** — اتجرب وشغلت نافذة حقيقية |
+| Coding Developer | `scaffold python <name>` + `run` + `git` عبره | ✅ |
+| Video Editor | `media_plugin`: `trim/merge_av/concat/extract_audio/thumbnail/overlay_text` | ✅ كله اتجرب على فيديو حقيقي |
+| Logo Designer | `make_logo <text> <output.png>` | ✅ لوجو حروف أولى فوري |
+| App Designer | `app_icons <source.png> <out_dir>` | ✅ يولّد كل أحجام أيقونات iOS+Android (19 حجم) من صورة واحدة |
+| Security Developer | `hash_file`, `port_scan`, + `re_plugin`/`inspect_plugin` | ✅ |
+
+**ملحوظة مهمة عن iOS/Android:** التطبيق بيولّد الكود والسقالة، لكن
+البناء الفعلي لـ .ipa/.apk محتاج Xcode (ماك بس) أو Android Studio —
+دي قيود المنصات نفسها (Apple/Google) مش حاجة المشروع فارض تكلفة عليها؛
+الأدوات دي مجانية للتنزيل لكنها محتاجة نظام تشغيل/بيئة معينة.
 
 ## ليه مفيش "توليد فيديو/صورة بالذكاء الاصطناعي" زي Higgsfield؟
 

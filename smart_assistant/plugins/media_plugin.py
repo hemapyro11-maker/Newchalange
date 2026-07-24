@@ -3,7 +3,8 @@ media_plugin.py — تحليل ومعالجة الفيديو/الصوت عبر F
 مجانية ومفتوحة المصدر، Zero-Cost حسب معايير المشروع). يتحمّل تلقائياً
 لأنه موجود جوه مجلد plugins/ ومعرّف فيه register(engine).
 
-الأوامر: probe, convert, trim, merge_av, concat
+الأوامر: probe, convert, trim, merge_av, concat, extract_audio,
+thumbnail, overlay_text
 """
 from __future__ import annotations
 
@@ -129,9 +130,62 @@ def _cmd_concat(ctx) -> str:
     return f"✅ تم دمج {len(files)} ملفات في {dst}"
 
 
+def _cmd_extract_audio(ctx) -> str:
+    if len(ctx.args) < 2:
+        return "usage: extract_audio <video> <output.mp3>"
+    if not shutil.which("ffmpeg"):
+        return "❌ ffmpeg غير موجود"
+    src, dst = ctx.args[0], ctx.args[1]
+    result = subprocess.run(
+        ["ffmpeg", "-y", "-i", src, "-vn", "-acodec", "libmp3lame", dst],
+        capture_output=True, text=True, timeout=180,
+    )
+    if result.returncode != 0:
+        return f"❌ فشل الاستخراج:\n{result.stderr.strip()[-500:]}"
+    return f"✅ اتحفظ الصوت في {dst}"
+
+
+def _cmd_thumbnail(ctx) -> str:
+    if len(ctx.args) < 3:
+        return "usage: thumbnail <video> <timestamp_sec> <output.jpg>"
+    if not shutil.which("ffmpeg"):
+        return "❌ ffmpeg غير موجود"
+    src, ts, dst = ctx.args[0], ctx.args[1], ctx.args[2]
+    result = subprocess.run(
+        ["ffmpeg", "-y", "-ss", ts, "-i", src, "-frames:v", "1", dst],
+        capture_output=True, text=True, timeout=60,
+    )
+    if result.returncode != 0:
+        return f"❌ فشل: {result.stderr.strip()[-500:]}"
+    return f"✅ اتحفظت الصورة في {dst}"
+
+
+def _cmd_overlay_text(ctx) -> str:
+    if len(ctx.args) < 3:
+        return "usage: overlay_text <video> <text> <output>"
+    if not shutil.which("ffmpeg"):
+        return "❌ ffmpeg غير موجود"
+    src, text, dst = ctx.args[0], ctx.args[1], ctx.args[2]
+    escaped = text.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+    vf = (
+        f"drawtext=text='{escaped}':fontcolor=white:fontsize=32:"
+        "x=(w-text_w)/2:y=h-text_h-20:box=1:boxcolor=black@0.5"
+    )
+    result = subprocess.run(
+        ["ffmpeg", "-y", "-i", src, "-vf", vf, "-codec:a", "copy", dst],
+        capture_output=True, text=True, timeout=300,
+    )
+    if result.returncode != 0:
+        return f"❌ فشل إضافة النص:\n{result.stderr.strip()[-500:]}"
+    return f"✅ اتحفظ الفيديو مع النص في {dst}"
+
+
 def register(engine):
     engine.registry.register("probe", _cmd_probe, "تحليل ملف فيديو/صوت (ffprobe) واكتشاف المشاكل")
     engine.registry.register("convert", _cmd_convert, "تحويل صيغة ملف ميديا (ffmpeg)")
     engine.registry.register("trim", _cmd_trim, "قص جزء من فيديو أو صوت")
     engine.registry.register("merge_av", _cmd_merge_av, "دمج فيديو مع مسار صوت خارجي")
     engine.registry.register("concat", _cmd_concat, "دمج/لصق عدة ملفات فيديو أو صوت في ملف واحد")
+    engine.registry.register("extract_audio", _cmd_extract_audio, "استخراج الصوت من فيديو لملف mp3")
+    engine.registry.register("thumbnail", _cmd_thumbnail, "thumbnail <video> <sec> <out.jpg> — أخذ صورة من فيديو")
+    engine.registry.register("overlay_text", _cmd_overlay_text, "overlay_text <video> <text> <out> — إضافة نص/واترمارك على فيديو")

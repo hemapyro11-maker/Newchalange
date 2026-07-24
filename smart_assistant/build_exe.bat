@@ -4,7 +4,7 @@ echo   Smart Assistant - Build EXE
 echo ====================================
 
 :: تثبيت المتطلبات
-py -m pip install customtkinter pyinstaller mcp capstone --quiet
+py -m pip install customtkinter pyinstaller mcp capstone Pillow --quiet
 
 :: بناء الـ EXE
 py -m PyInstaller ^
@@ -17,6 +17,7 @@ py -m PyInstaller ^
     --hidden-import version ^
     --collect-all mcp ^
     --collect-all capstone ^
+    --collect-all PIL ^
     --add-data "core_engine.py;." ^
     --add-data "i18n.py;." ^
     --add-data "version.py;." ^
@@ -33,5 +34,7 @@ echo   - أوامر الميديا (probe/convert/trim/...) محتاجة FFmpeg
 echo     متثبت على الجهاز ومضاف للـ PATH: https://ffmpeg.org/download.html
 echo   - الـ Connectors (MCP) اللي بتحتاج npx/uvx محتاجة Node.js أو uv
 echo     متثبتين على الجهاز حسب الـ connector المستخدم.
+echo   - مشاريع scaffold android محتاجة Android Studio لفتحها/بنائها،
+echo     ومشاريع scaffold ios محتاجة Xcode على ماك.
 echo ====================================
 pause
