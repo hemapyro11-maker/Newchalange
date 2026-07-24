@@ -1,11 +1,11 @@
 """
-main_gui.py — واجهة المساعد الذكي (Smart Assistant)
-وحدة مستقلة بالكامل: واجهة عصرية بـ CustomTkinter، Dark Mode، ودعم عربي/إنجليزي.
+main_gui.py — واجهة نيزوكو (Nezuko)
+واجهة عصرية بـ CustomTkinter: سايدبار + محادثة على شكل فقاعات (bubbles)
+زي واجهات الدردشة الحديثة، مع دعم عربي/إنجليزي وصوت اختياري.
 """
 import os
 import shlex
 import sys
-import tkinter as tk
 from tkinter import filedialog
 
 try:
@@ -25,26 +25,47 @@ except ImportError:
     from i18n import Translator
 
 # ── Theme ───────────────────────────────────────────────────────────────
-ctk.set_appearance_mode("dark")
+# لوحة ألوان دافئة عصرية (مستوحاة من واجهات الدردشة الحديثة) — هوية
+# نيزوكو الخاصة، مش نسخة من أي براند تاني.
+ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
 
-BG        = "#0f1117"
-CARD      = "#1a1d27"
-ACCENT    = "#4f6ef7"
-GREEN     = "#22c55e"
-RED       = "#ef4444"
-ORANGE    = "#f97316"
-GRAY      = "#6b7280"
-TEXT      = "#f1f5f9"
-TEXT_DIM  = "#94a3b8"
-BORDER    = "#2d3148"
+BG            = "#f1ece1"
+SIDEBAR       = "#e7e0d0"
+SIDEBAR_HOVER = "#dbd2bd"
+CARD          = "#ffffff"
+CARD_BORDER   = "#ddd3ba"
+ACCENT        = "#c1633f"
+ACCENT_HOVER  = "#a8532f"
+ACCENT_SOFT   = "#f3ddd0"
+TEXT          = "#332e27"
+TEXT_DIM      = "#8a8272"
+TEXT_ON_ACCENT = "#fdf9f4"
+GREEN         = "#4b8b6b"
+RED           = "#c1483d"
+ORANGE        = "#c98a3e"
+GRAY          = "#a49d8c"
 
-LOG_COLORS = {
-    "info":  TEXT,
+USER_BUBBLE      = "#332e27"
+USER_BUBBLE_TEXT = "#fdf9f4"
+ASSISTANT_BUBBLE = CARD
+
+LEVEL_ACCENT = {
+    "info":  TEXT_DIM,
+    "ok":    GREEN,
     "warn":  ORANGE,
     "error": RED,
-    "ok":    GREEN,
 }
+LEVEL_ICON = {
+    "info":  "🧵",
+    "ok":    "✅",
+    "warn":  "⚠️",
+    "error": "❌",
+}
+
+MAX_BUBBLES = 300  # يمنع الأداء من التدهور في جلسة طويلة جدًا
+MAX_BUBBLE_LINES = 25
+MAX_BUBBLE_CHARS = 1600
 
 
 class AssistantApp(ctk.CTk):
@@ -55,9 +76,10 @@ class AssistantApp(ctk.CTk):
         self.engine = AssistantEngine(on_log=self._on_log, on_status=self._on_status)
         self.voice_enabled = False
         self._last_command_name = ""
+        self._bubble_rows: list[ctk.CTkFrame] = []
 
-        self.geometry("820x620")
-        self.minsize(700, 520)
+        self.geometry("1040x700")
+        self.minsize(840, 560)
         self.configure(fg_color=BG)
         self.resizable(True, True)
 
@@ -67,116 +89,172 @@ class AssistantApp(ctk.CTk):
 
     # ── UI ──────────────────────────────────────────────────────────────
     def _build_ui(self):
-        # ── Header ──
-        self.header = ctk.CTkFrame(self, fg_color=CARD, corner_radius=0, height=64)
-        self.header.pack(fill="x")
-        self.header.pack_propagate(False)
+        root = ctk.CTkFrame(self, fg_color=BG, corner_radius=0)
+        root.pack(fill="both", expand=True)
+
+        self._build_sidebar(root)
+        self._build_main(root)
+
+        self._apply_lang()
+
+    def _build_sidebar(self, root):
+        self.sidebar = ctk.CTkFrame(root, fg_color=SIDEBAR, corner_radius=0, width=248)
+        self.sidebar.pack(side="left", fill="y")
+        self.sidebar.pack_propagate(False)
+
+        brand_row = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        brand_row.pack(fill="x", padx=20, pady=(24, 4))
+
+        self.avatar = ctk.CTkLabel(
+            brand_row, text="🌸", width=40, height=40, corner_radius=12,
+            fg_color=ACCENT, text_color=TEXT_ON_ACCENT, font=ctk.CTkFont(size=18, weight="bold"),
+        )
+        self.avatar.pack(side="left")
+
+        title_col = ctk.CTkFrame(brand_row, fg_color="transparent")
+        title_col.pack(side="left", padx=(10, 0), fill="x", expand=True)
 
         self.title_label = ctk.CTkLabel(
-            self.header, font=ctk.CTkFont(size=22, weight="bold"), text_color=ACCENT
+            title_col, font=ctk.CTkFont(size=17, weight="bold"), text_color=TEXT, anchor="w"
         )
-        self.title_label.place(x=24, rely=0.5, anchor="w")
+        self.title_label.pack(fill="x")
 
         self.subtitle_label = ctk.CTkLabel(
-            self.header, font=ctk.CTkFont(size=12), text_color=TEXT_DIM
+            title_col, font=ctk.CTkFont(size=11), text_color=TEXT_DIM, anchor="w"
         )
-        self.subtitle_label.place(relx=1.0, x=-252, rely=0.5, anchor="e")
+        self.subtitle_label.pack(fill="x")
 
-        self.voice_btn = ctk.CTkButton(
-            self.header, width=130, height=32, fg_color=BORDER, hover_color=ACCENT,
-            command=self._toggle_voice
+        ctk.CTkFrame(self.sidebar, fg_color=CARD_BORDER, height=1).pack(fill="x", padx=20, pady=16)
+
+        # ── Quick actions ──
+        self.actions_label = ctk.CTkLabel(
+            self.sidebar, font=ctk.CTkFont(size=11, weight="bold"), text_color=TEXT_DIM, anchor="w"
         )
-        self.voice_btn.place(relx=1.0, x=-114, rely=0.5, anchor="e")
+        self.actions_label.pack(fill="x", padx=20, pady=(0, 6))
 
-        self.lang_btn = ctk.CTkButton(
-            self.header, width=90, height=32, fg_color=BORDER, hover_color=ACCENT,
-            command=self._toggle_lang
-        )
-        self.lang_btn.place(relx=1.0, x=-16, rely=0.5, anchor="e")
+        self.attach_btn = self._sidebar_button("📎", command=self._attach_file)
+        self.scan_btn = self._sidebar_button("🛡️", command=self._scan_file)
+        self.voice_btn = self._sidebar_button("🔇", command=self._toggle_voice)
+        self.lang_btn = self._sidebar_button("🌐", command=self._toggle_lang)
+        self.clear_btn = self._sidebar_button("🗑️", command=self._clear_log)
 
-        # ── Status bar ──
-        self.status_frame = ctk.CTkFrame(self, fg_color=CARD, corner_radius=10, height=48)
-        self.status_frame.pack(fill="x", padx=16, pady=(12, 0))
-        self.status_frame.pack_propagate(False)
+        # ── Spacer ──
+        ctk.CTkFrame(self.sidebar, fg_color="transparent").pack(fill="both", expand=True)
 
-        self.status_dot = ctk.CTkLabel(
-            self.status_frame, text="●", font=ctk.CTkFont(size=14), text_color=GRAY
-        )
-        self.status_dot.place(x=16, rely=0.5, anchor="w")
+        ctk.CTkFrame(self.sidebar, fg_color=CARD_BORDER, height=1).pack(fill="x", padx=20, pady=(0, 16))
+
+        status_row = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        status_row.pack(fill="x", padx=20, pady=(0, 20))
+
+        self.status_dot = ctk.CTkLabel(status_row, text="●", font=ctk.CTkFont(size=13), text_color=GRAY)
+        self.status_dot.pack(side="left")
 
         self.status_label = ctk.CTkLabel(
-            self.status_frame, font=ctk.CTkFont(size=13, weight="bold"), text_color=TEXT_DIM
+            status_row, font=ctk.CTkFont(size=12, weight="bold"), text_color=TEXT_DIM
         )
-        self.status_label.place(x=36, rely=0.5, anchor="w")
+        self.status_label.pack(side="left", padx=(6, 0))
 
         self.start_btn = ctk.CTkButton(
-            self.status_frame, width=120, height=32, fg_color=ACCENT, hover_color="#3b5bdb",
-            command=self._toggle_engine
+            self.sidebar, height=36, fg_color=ACCENT, hover_color=ACCENT_HOVER,
+            text_color=TEXT_ON_ACCENT, corner_radius=10,
+            font=ctk.CTkFont(size=12, weight="bold"), command=self._toggle_engine,
         )
-        self.start_btn.place(relx=1.0, x=-16, rely=0.5, anchor="e")
+        self.start_btn.pack(fill="x", padx=20, pady=(0, 20))
 
-        # ── Command input row ──
-        input_row = ctk.CTkFrame(self, fg_color="transparent")
-        input_row.pack(fill="x", padx=16, pady=(12, 0))
-
-        self.attach_btn = ctk.CTkButton(
-            input_row, width=44, height=42, fg_color=CARD, hover_color=BORDER,
-            text="📎", font=ctk.CTkFont(size=16), command=self._attach_file
+    def _sidebar_button(self, icon: str, command) -> ctk.CTkButton:
+        btn = ctk.CTkButton(
+            self.sidebar, height=38, corner_radius=10,
+            fg_color="transparent", hover_color=SIDEBAR_HOVER,
+            text_color=TEXT, anchor="w", font=ctk.CTkFont(size=13),
+            command=command,
         )
-        self.attach_btn.pack(side="left", padx=(0, 8))
+        btn._nezuko_icon = icon  # يتقرا في _apply_lang عشان نبني النص الكامل (أيقونة + تسمية)
+        btn.pack(fill="x", padx=12, pady=2)
+        return btn
 
-        self.scan_btn = ctk.CTkButton(
-            input_row, width=44, height=42, fg_color=CARD, hover_color=BORDER,
-            text="🛡️", font=ctk.CTkFont(size=16), command=self._scan_file
-        )
-        self.scan_btn.pack(side="left", padx=(0, 8))
+    def _build_main(self, root):
+        main = ctk.CTkFrame(root, fg_color=BG, corner_radius=0)
+        main.pack(side="left", fill="both", expand=True)
+
+        self.chat_scroll = ctk.CTkScrollableFrame(main, fg_color=BG, corner_radius=0)
+        self.chat_scroll.pack(fill="both", expand=True, padx=(8, 8), pady=(16, 0))
+
+        # ── Input bar (pill-shaped, عايم فوق أسفل المحادثة) ──
+        input_wrap = ctk.CTkFrame(main, fg_color="transparent")
+        input_wrap.pack(fill="x", padx=24, pady=20)
+
+        self.input_bar = ctk.CTkFrame(input_wrap, fg_color=CARD, corner_radius=24, border_width=1, border_color=CARD_BORDER)
+        self.input_bar.pack(fill="x")
 
         self.cmd_entry = ctk.CTkEntry(
-            input_row, fg_color=CARD, border_color=BORDER, height=42,
-            font=ctk.CTkFont(size=13)
+            self.input_bar, fg_color="transparent", border_width=0, height=48,
+            font=ctk.CTkFont(size=14), text_color=TEXT,
         )
-        self.cmd_entry.pack(side="left", expand=True, fill="x", padx=(0, 8))
+        self.cmd_entry.pack(side="left", fill="x", expand=True, padx=(20, 8), pady=4)
         self.cmd_entry.bind("<Return>", lambda e: self._send_command())
 
         self.send_btn = ctk.CTkButton(
-            input_row, width=100, height=42, fg_color=ACCENT, hover_color="#3b5bdb",
-            font=ctk.CTkFont(size=13, weight="bold"), command=self._send_command
+            self.input_bar, width=44, height=40, corner_radius=20,
+            fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color=TEXT_ON_ACCENT,
+            font=ctk.CTkFont(size=15, weight="bold"), text="➤", command=self._send_command,
         )
-        self.send_btn.pack(side="left")
+        self.send_btn.pack(side="right", padx=(0, 6), pady=4)
 
-        # ── Log ──
-        log_header = ctk.CTkFrame(self, fg_color="transparent")
-        log_header.pack(fill="x", padx=16, pady=(14, 4))
+    # ── Chat bubbles ────────────────────────────────────────────────────
+    def _truncate_for_bubble(self, text: str) -> str:
+        # فقاعة طويلة جدًا (زي مخرجات help أو تقرير أمان كامل) بتتقطع —
+        # مش بس تجميل، ده كمان بيتجنب مشكلة رسم حقيقية في CustomTkinter
+        # مع إطارات طويلة جدًا جوه CTkScrollableFrame (الخلفية البيضاء
+        # مش بترسم صح للمحتوى اللي بيعدّي ارتفاع معين).
+        lines = text.splitlines()
+        if len(lines) <= MAX_BUBBLE_LINES and len(text) <= MAX_BUBBLE_CHARS:
+            return text
+        truncated = "\n".join(lines[:MAX_BUBBLE_LINES])[:MAX_BUBBLE_CHARS]
+        remaining = len(lines) - MAX_BUBBLE_LINES
+        note = f"\n… ({remaining} سطر تاني مقطوع، شوف السجل الكامل)" if remaining > 0 else "\n… (النص اتقطع)"
+        return truncated + note
 
-        self.log_title_label = ctk.CTkLabel(
-            log_header, font=ctk.CTkFont(size=12, weight="bold"), text_color=TEXT_DIM
+    def _add_bubble(self, text: str, role: str, level: str = "info"):
+        row = ctk.CTkFrame(self.chat_scroll, fg_color="transparent")
+        row.pack(fill="x", pady=5)
+
+        is_user = role == "user"
+        if not is_user:
+            text = self._truncate_for_bubble(text)
+        bubble = ctk.CTkFrame(
+            row, corner_radius=16,
+            fg_color=USER_BUBBLE if is_user else ASSISTANT_BUBBLE,
+            border_width=0 if is_user else 1,
+            border_color=CARD_BORDER,
         )
-        self.log_title_label.pack(side="left")
+        bubble.pack(side="right" if is_user else "left", padx=8)
 
-        self.clear_btn = ctk.CTkButton(
-            log_header, width=70, height=24, fg_color=CARD, hover_color=BORDER,
-            text_color=TEXT_DIM, font=ctk.CTkFont(size=11), command=self._clear_log
+        if not is_user:
+            accent = LEVEL_ACCENT.get(level, TEXT_DIM)
+            ctk.CTkFrame(bubble, fg_color=accent, width=3, corner_radius=2).pack(side="left", fill="y", padx=(0, 0), pady=8)
+
+        text_color = USER_BUBBLE_TEXT if is_user else TEXT
+        prefix = "" if is_user else f"{LEVEL_ICON.get(level, '🧵')}  "
+        label = ctk.CTkLabel(
+            bubble, text=prefix + text, text_color=text_color,
+            font=ctk.CTkFont(size=13, family="Consolas" if not is_user else None),
+            justify="right" if self.t.lang == "ar" else "left",
+            anchor="e" if self.t.lang == "ar" else "w",
+            wraplength=560,
         )
-        self.clear_btn.pack(side="right")
+        label.pack(padx=16, pady=10)
+        # نحدد حجم الفقاعة صراحةً من قياس الليبل الحقيقي بدل ما نستنى
+        # auto-size — أضمن وأسرع من الاعتماد على حدث Configure.
+        label.update_idletasks()
+        extra_width = 32 if is_user else 35  # padx(16+16) + شريط اللون الجانبي (3px) للفقاعات غير المستخدم
+        bubble.configure(width=label.winfo_reqwidth() + extra_width, height=label.winfo_reqheight() + 20)
 
-        log_frame = ctk.CTkFrame(self, fg_color=CARD, corner_radius=10)
-        log_frame.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+        self._bubble_rows.append(row)
+        if len(self._bubble_rows) > MAX_BUBBLES:
+            oldest = self._bubble_rows.pop(0)
+            oldest.destroy()
 
-        self.log_box = tk.Text(
-            log_frame, bg=CARD, fg=TEXT, insertbackground=TEXT,
-            relief="flat", bd=0, font=("Consolas", 11),
-            state="disabled", wrap="word",
-            selectbackground=ACCENT, selectforeground=TEXT,
-        )
-        self.log_box.pack(fill="both", expand=True, padx=10, pady=10)
-        for name, color in LOG_COLORS.items():
-            self.log_box.tag_config(name, foreground=color)
-
-        scrollbar = ctk.CTkScrollbar(log_frame, command=self.log_box.yview)
-        scrollbar.pack(side="right", fill="y")
-        self.log_box.configure(yscrollcommand=scrollbar.set)
-
-        self._apply_lang()
+        self.after(30, self._scroll_chat_to_bottom)
 
     # ── i18n ────────────────────────────────────────────────────────────
     def _apply_lang(self):
@@ -184,8 +262,19 @@ class AssistantApp(ctk.CTk):
         self.title(t.t("app_title"))
         self.title_label.configure(text=t.t("app_title"))
         self.subtitle_label.configure(text=t.t("app_subtitle"))
-        self.lang_btn.configure(text=t.t("lang_toggle"))
-        self.voice_btn.configure(text=t.t("voice_toggle_on") if self.voice_enabled else t.t("voice_toggle_off"))
+        self.actions_label.configure(text=t.t("quick_actions"))
+
+        self.attach_btn.configure(text=f"{self.attach_btn._nezuko_icon}  {t.t('attach_file')}")
+        self.scan_btn.configure(text=f"{self.scan_btn._nezuko_icon}  {t.t('scan_file')}")
+        voice_icon = "🔊" if self.voice_enabled else "🔇"
+        self.voice_btn._nezuko_icon = voice_icon
+        self.voice_btn.configure(
+            text=f"{voice_icon}  {t.t('voice_toggle_on') if self.voice_enabled else t.t('voice_toggle_off')}",
+            text_color=ACCENT if self.voice_enabled else TEXT,
+        )
+        self.lang_btn.configure(text=f"{self.lang_btn._nezuko_icon}  {t.t('lang_toggle')}")
+        self.clear_btn.configure(text=f"{self.clear_btn._nezuko_icon}  {t.t('clear_log')}")
+
         self.status_label.configure(
             text=t.t("status_running") if self.engine.is_running() else t.t("status_stopped")
         )
@@ -194,9 +283,6 @@ class AssistantApp(ctk.CTk):
             placeholder_text=t.t("input_placeholder"),
             justify="right" if t.lang == "ar" else "left",
         )
-        self.send_btn.configure(text=t.t("send"))
-        self.log_title_label.configure(text=f"📋  {t.t('log_title')}")
-        self.clear_btn.configure(text=t.t("clear_log"))
 
     def _toggle_lang(self):
         self.t.toggle()
@@ -224,7 +310,7 @@ class AssistantApp(ctk.CTk):
         )
         if not path:
             return
-        self.__append_log(f"📎  {path}", "info")
+        self._add_bubble(f"📎  {path}", "user")
         self._last_command_name = "probe"
         self.engine.submit(f"probe {shlex.quote(path)}")
 
@@ -239,7 +325,7 @@ class AssistantApp(ctk.CTk):
         )
         if not path:
             return
-        self.__append_log(f"{self.t.t('scanning_file')}  {path}", "info")
+        self._add_bubble(f"{self.t.t('scanning_file')}  {path}", "user")
         self._last_command_name = "security_report"
         self.engine.submit(f"security_report {shlex.quote(path)}")
 
@@ -247,7 +333,7 @@ class AssistantApp(ctk.CTk):
         text = self.cmd_entry.get().strip()
         if not text:
             return
-        self.__append_log(f"›  {text}", "info")
+        self._add_bubble(text, "user")
         self._last_command_name = text.split(maxsplit=1)[0].lower()
         self.engine.submit(text)
         self.cmd_entry.delete(0, "end")
@@ -267,9 +353,23 @@ class AssistantApp(ctk.CTk):
         self.engine.submit(f"speak {snippet}")
 
     def _clear_log(self):
-        self.log_box.configure(state="normal")
-        self.log_box.delete("1.0", "end")
-        self.log_box.configure(state="disabled")
+        for row in self._bubble_rows:
+            row.destroy()
+        self._bubble_rows.clear()
+        # CTkScrollableFrame بيحدّث الـ scrollregion بس لما يحصل حدث
+        # <Configure> على الفريم الداخلي، وده مش مضمون يحصل فورًا بعد
+        # destroy() لـ 19 فقاعة دفعة واحدة. من غير التحديث الصريح ده،
+        # الـ scrollregion بتفضل زي ما كانت (كبيرة) فلما فقاعة جديدة
+        # تتضاف بعد المسح، yview_moveto(1.0) بيسكرول لمكان فاضي بدل
+        # ما يوريها — الفقاعة فعليًا موجودة بس برّه حدود العرض المرئي.
+        canvas = self.chat_scroll._parent_canvas
+        canvas.configure(scrollregion=canvas.bbox("all"))
+        canvas.yview_moveto(0.0)
+
+    def _scroll_chat_to_bottom(self):
+        canvas = self.chat_scroll._parent_canvas
+        canvas.configure(scrollregion=canvas.bbox("all"))
+        canvas.yview_moveto(1.0)
 
     def _on_close(self):
         self.engine.stop()
@@ -277,20 +377,13 @@ class AssistantApp(ctk.CTk):
 
     # ── Callbacks (from engine thread) ────────────────────────────────
     def _on_log(self, msg: str, level: str = "info"):
-        self.after(0, self.__append_log, msg, level)
+        self.after(0, self._add_bubble, msg, "assistant", level)
         # بس نتيجة أمر فعلي (level="info") بتتقال بصوت — مش رسائل تحميل
         # الإضافات ("ok") ولا الأخطاء/التحذيرات. وبنستثني نتيجة speak/
         # voice_status نفسها عشان نيزوكو ماتفضلش تقرا تأكيد إنها قالت
         # حاجة لغاية ما تدخل في حلقة نطق بلا نهاية.
         if level == "info" and self.voice_enabled and self._last_command_name not in ("speak", "voice_status"):
             self._speak_async(msg)
-
-    def __append_log(self, msg, level):
-        self.log_box.configure(state="normal")
-        tag = level if level in LOG_COLORS else "info"
-        self.log_box.insert("end", msg + "\n", tag)
-        self.log_box.see("end")
-        self.log_box.configure(state="disabled")
 
     def _on_status(self, status: str):
         self.after(0, self.__update_status, status)
