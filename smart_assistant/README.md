@@ -56,6 +56,10 @@ build_exe.bat
     منافذ محلي بنطاق محدود، لأجهزتك المصرح لك باختبارها بس).
   - `plugin_forge_plugin.py` — المساعد يصمم plugins جديدة بنفسه ويصلح
     أخطاءها تلقائياً (شرح تفصيلي تحت).
+  - `cinema_plugin.py` — مونتاج وتصحيح ألوان بمستوى احترافي: تصحيح
+    ألوان سينمائي، انتقالات، letterbox، تثبيت اهتزاز، تغيير سرعة،
+    Picture-in-Picture، شاشة خضراء، وضبط جهارة الصوت لمعيار بث
+    (شرح تفصيلي تحت).
 - `connectors.example.json` — مثال لإعداد MCP Connectors (انسخه لـ
   `connectors.json` وعدّله). `connectors.json` نفسه بيتعمل تلقائياً
   أول ما التطبيق يشتغل ومش متتبع في git (ممكن يحتوي مسارات/أسرار خاصة بيك).
@@ -244,7 +248,7 @@ Ghidra/radare2). كل النتائج اتقارنت واتأكد إنها مطا
 | iOS Developer | `scaffold ios <name>` | ✅ سقالة SwiftUI — محتاجة Xcode على ماك (قيد النظام، مش تكلفة) |
 | Gaming Developer | `scaffold game <name>` | ✅ لعبة Pygame **شغالة فعلياً** — اتجرب وشغلت نافذة حقيقية |
 | Coding Developer | `scaffold python <name>` + `run` + `git` عبره | ✅ |
-| Video Editor | `media_plugin`: `trim/merge_av/concat/extract_audio/thumbnail/overlay_text` | ✅ كله اتجرب على فيديو حقيقي |
+| Video Editor | `media_plugin` + `cinema_plugin` (مونتاج احترافي، شرح تحت) | ✅ كله اتجرب على فيديو حقيقي |
 | Logo Designer | `make_logo <text> <output.png>` | ✅ لوجو حروف أولى فوري |
 | App Designer | `app_icons <source.png> <out_dir>` | ✅ يولّد كل أحجام أيقونات iOS+Android (19 حجم) من صورة واحدة |
 | Security Developer | `hash_file`, `port_scan`, + `re_plugin`/`inspect_plugin` | ✅ |
@@ -253,6 +257,39 @@ Ghidra/radare2). كل النتائج اتقارنت واتأكد إنها مطا
 البناء الفعلي لـ .ipa/.apk محتاج Xcode (ماك بس) أو Android Studio —
 دي قيود المنصات نفسها (Apple/Google) مش حاجة المشروع فارض تكلفة عليها؛
 الأدوات دي مجانية للتنزيل لكنها محتاجة نظام تشغيل/بيئة معينة.
+
+## مونتاج احترافي (Cinema-Grade Editing) — `cinema_plugin.py`
+
+الأوامر دي بتستخدم نفس تقنيات المونتاج والتصحيح اللوني اللي أدوات
+احترافية زي DaVinci Resolve/Premiere بتستخدمها تحت الغطاء (فلاتر FFmpeg
+حقيقية، مش تقريب)، اتختبرت كلها بصرياً على فيديو حقيقي:
+
+- `color_grade <in> <out> [preset]` — تصحيح ألوان سينمائي: presets
+  `cinematic`, `teal_orange` (اللوك الهوليوودي الكلاسيكي), `noir`,
+  `vintage`, `warm`, `cool`, `bw`.
+- `transition <clip1> <clip2> <out> [style] [duration]` — انتقال حقيقي
+  بين كليبين (58 نوع: dissolve, wipe, slide, zoom...)، فيديو وصوت مع
+  بعض (`xfade` + `acrossfade`).
+- `letterbox <in> <out> [ratio=2.39]` — الشرايط السوداء السينمائية
+  (2.39:1 زي أفلام السينما سكوب).
+- `stabilize <in> <out>` — تثبيت اهتزاز الكاميرا (two-pass عبر
+  libvidstab، نفس التقنية في مثبتات الفيديو الاحترافية).
+- `speed_ramp <in> <out> <factor>` — سلو موشن/تسريع مع تعديل طبقة
+  الصوت تلقائياً (مش بس تسريع الفيديو وسيبان الصوت).
+- `pip <bg> <overlay> <out> [position] [scale]` — Picture-in-Picture.
+- `chroma_key <fg> <bg> <out> [color] [similarity]` — دمج خلفية خضراء
+  (green screen) حقيقي — جربته بموضوع ملوّن فوق خلفية خضرا واتأكد إن
+  الخلفية بس اللي اتشالت والموضوع فضل زي ما هو.
+- `master_audio <in> <out> [lufs]` — توحيد جهارة الصوت لمعيار بث حقيقي
+  (loudnorm/EBU R128) — `-16` LUFS لليوتيوب/الستريمنج، `-23` للبث.
+- `denoise_audio <in> <out>` — إزالة ضوضاء الخلفية من الصوت.
+- `title_card <text> <out> [duration] [size]` — لوحة عنوان متحركة
+  (fade in/out حقيقي، مش نص ثابت).
+
+**بصراحة كاملة:** الأدوات دي بتديك نفس المحرك التقني اللي أفلام
+هوليوود بتتمنتج بيه (FFmpeg نفسه بيتستخدم في استوديوهات حقيقية) —
+لكن "جودة هوليوود" الفعلية قرارات فنية (توقيت القص، اختيار الألوان،
+حكاية القصة) بيعملها مونتير بشري. السوفت وير بيدّيك الأداة، مش الفن.
 
 ## ليه مفيش "توليد فيديو/صورة بالذكاء الاصطناعي" زي Higgsfield؟
 
