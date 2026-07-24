@@ -47,18 +47,27 @@ def _cmd_reload_macros(ctx) -> str:
     return "تم إعادة تحميل الـ macros"
 
 
+_MACRO_MARKER = "macro (من "
+
+
 def load_macros(engine):
     directory = _commands_dir()
     directory.mkdir(parents=True, exist_ok=True)
     for path in sorted(directory.glob("*.txt")):
+        name = path.stem
+        existing = engine.registry.get(name)
+        if existing is not None and not existing.description.startswith(_MACRO_MARKER):
+            engine._log(f"⚠  اتجاهل macro '{name}' لأنه بيصطدم مع أمر مدمج بنفس الاسم", "warn")
+            continue
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
-        except Exception as e:
+        except OSError as e:
             engine._log(f"❌ تعذرت قراءة macro {path.name}: {e}", "error")
             continue
-        engine.registry.register(
-            path.stem, _make_macro_handler(lines), f"macro (من {path.name})"
-        )
+        if any(line.strip().split(maxsplit=1)[:1] == [name] for line in lines if line.strip()):
+            engine._log(f"⚠  اتجاهل macro '{name}' لأنه بينادي نفسه (self-reference)", "warn")
+            continue
+        engine.registry.register(name, _make_macro_handler(lines), f"{_MACRO_MARKER}{path.name})")
 
 
 def register(engine):

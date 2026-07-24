@@ -8,6 +8,17 @@ from __future__ import annotations
 
 import pathlib
 
+_INVALID_NAME_CHARS = set('/\\:*?"<>|')
+
+
+def _validate_name(name: str) -> str | None:
+    """يرجع رسالة خطأ لو الاسم غير آمن كاسم مجلد، وإلا None."""
+    if not name or name in (".", ".."):
+        return "❌ اسم المشروع لازم يكون غير فاضي ومش '.' أو '..'"
+    if any(c in _INVALID_NAME_CHARS for c in name):
+        return f"❌ اسم المشروع مينفعش يحتوي على: {' '.join(sorted(_INVALID_NAME_CHARS))}"
+    return None
+
 
 def _write(path: pathlib.Path, content: str):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -28,7 +39,8 @@ def _scaffold_web(root: pathlib.Path, name: str) -> list[str]:
 
 
 def _scaffold_android(root: pathlib.Path, name: str) -> list[str]:
-    pkg = "com.example." + "".join(c.lower() for c in name if c.isalnum()) or "com.example.app"
+    slug = "".join(c.lower() for c in name if c.isalnum())
+    pkg = "com.example." + slug if slug else "com.example.app"
     pkg_path = pkg.replace(".", "/")
     _write(root / "settings.gradle.kts", f'rootProject.name = "{name}"\ninclude(":app")\n')
     _write(root / "build.gradle.kts", "// top-level build file\n")
@@ -169,10 +181,18 @@ def _cmd_scaffold(ctx) -> str:
     kind, name = ctx.args[0], ctx.args[1]
     if kind not in _SCAFFOLDS:
         return f"❌ نوع غير معروف: {kind} (المتاح: {', '.join(_SCAFFOLDS)})"
+    name_error = _validate_name(name)
+    if name_error:
+        return name_error
     base = pathlib.Path(ctx.args[2]) if len(ctx.args) > 2 else pathlib.Path(".")
     root = base / name
+    if root.exists() and any(root.iterdir()):
+        return f"❌ المجلد {root} موجود بالفعل ومش فاضي — اختار اسم/مكان تاني"
     fn, _ = _SCAFFOLDS[kind]
-    files = fn(root, name)
+    try:
+        files = fn(root, name)
+    except OSError as e:
+        return f"❌ فشل إنشاء الملفات: {e}"
     listing = "\n".join(f"  📄 {f}" for f in files)
     return f"✅ اتعمل مشروع {kind} في {root}:\n{listing}"
 

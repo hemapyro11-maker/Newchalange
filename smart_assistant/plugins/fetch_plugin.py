@@ -6,6 +6,7 @@ Claude Code). GET بسيط عبر urllib (بدون أي مكتبة أو خدمة
 from __future__ import annotations
 
 import urllib.error
+import urllib.parse
 import urllib.request
 
 MAX_CHARS = 4000
@@ -16,8 +17,13 @@ def _cmd_fetch(ctx) -> str:
     if not ctx.args:
         return "usage: fetch <url>"
     url = ctx.args[0]
-    if not (url.startswith("http://") or url.startswith("https://")):
+    if "://" not in url:
+        # مفيش scheme خالص (زي "example.com" أو "localhost:8080/x") — نفترض https
         url = "https://" + url
+    elif urllib.parse.urlsplit(url).scheme not in ("http", "https"):
+        # نمنع عمداً أي scheme غير http/https (زي file:// أو ftp://) — أداة
+        # "تحميل صفحة ويب" ميفترضش تقرأ ملفات محلية أو بروتوكولات تانية.
+        return "❌ fetch بيدعم http/https بس"
     req = urllib.request.Request(url, headers={"User-Agent": "SmartAssistant/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:

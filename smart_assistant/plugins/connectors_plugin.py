@@ -65,7 +65,7 @@ class ConnectorManager:
         if name not in config:
             self.engine._log(f"❌ connector '{name}' غير موجود في connectors.json", "error")
             return
-        if self.servers.get(name, {}).get("status") == "connected":
+        if self.servers.get(name, {}).get("status") in ("connected", "connecting"):
             return
         self.servers[name] = {"status": "connecting", "tools": []}
         threading.Thread(target=self._connect_blocking, args=(name, config[name]), daemon=True).start()
@@ -80,6 +80,9 @@ class ConnectorManager:
     async def _async_connect(self, name, cfg):
         from mcp import ClientSession, StdioServerParameters
         from mcp.client.stdio import stdio_client
+
+        if "command" not in cfg:
+            raise ValueError(f"connectors.json['{name}'] ناقصه 'command'")
 
         stack = contextlib.AsyncExitStack()
         params = StdioServerParameters(

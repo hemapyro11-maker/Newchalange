@@ -10,9 +10,29 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import shutil
 import subprocess
 import tempfile
+
+
+def _missing_files(*paths: str) -> list[str]:
+    return [p for p in paths if not pathlib.Path(p).is_file()]
+
+
+def _run_ffmpeg(args: list[str], timeout: int) -> tuple[bool, str]:
+    """بيشغّل ffmpeg/ffprobe ويرجع (نجح, رسالة الخطأ لو فشل). بيمسك كل
+    حالات الفشل الممكنة (timeout, binary اتشال أثناء التشغيل, ...) بدل
+    ما يسيب استثناء خام يوصل للمستخدم."""
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return False, f"⏱ انتهت المهلة ({timeout}s) — الملف كبير أوي أو ffmpeg علّق"
+    except OSError as e:
+        return False, f"❌ تعذر تشغيل {args[0]}: {e}"
+    if result.returncode != 0:
+        return False, result.stderr.strip()[-500:]
+    return True, result.stdout
 
 
 def _cmd_probe(ctx) -> str:
@@ -21,19 +41,16 @@ def _cmd_probe(ctx) -> str:
     if not shutil.which("ffprobe"):
         return "❌ ffprobe غير موجود — ثبّت FFmpeg وضيفه للـ PATH (ffmpeg.org/download.html)"
     path = ctx.args[0]
+    if not pathlib.Path(path).is_file():
+        return f"❌ الملف مش موجود: {path}"
+    ok, output = _run_ffmpeg(
+        ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", path],
+        timeout=30,
+    )
+    if not ok:
+        return f"❌ الملف مش قابل للقراءة:\n{output}"
     try:
-        result = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-print_format", "json",
-             "-show_format", "-show_streams", path],
-            capture_output=True, text=True, timeout=30,
-        )
-    except subprocess.TimeoutExpired:
-        return "⏱ انتهت المهلة أثناء تحليل الملف"
-
-    if result.returncode != 0:
-        return f"❌ الملف مش قابل للقراءة أو مساره غلط:\n{result.stderr.strip()[:300]}"
-    try:
-        data = json.loads(result.stdout)
+        data = json.loads(output)
     except json.JSONDecodeError:
         return "❌ تعذر تحليل مخرجات ffprobe"
 
@@ -71,9 +88,12 @@ def _cmd_convert(ctx) -> str:
     if not shutil.which("ffmpeg"):
         return "❌ ffmpeg غير موجود — ثبّته من ffmpeg.org"
     src, dst = ctx.args[0], ctx.args[1]
-    result = subprocess.run(["ffmpeg", "-y", "-i", src, dst], capture_output=True, text=True, timeout=300)
-    if result.returncode != 0:
-        return f"❌ فشل التحويل:\n{result.stderr.strip()[-500:]}"
+    missing = _missing_files(src)
+    if missing:
+        return f"❌ الملف مش موجود: {missing[0]}"
+    ok, err = _run_ffmpeg(["ffmpeg", "-y", "-i", src, dst], timeout=300)
+    if not ok:
+        return f"❌ فشل التحويل:\n{err}"
     return f"✅ تم التحويل إلى {dst}"
 
 
@@ -83,12 +103,14 @@ def _cmd_trim(ctx) -> str:
     if not shutil.which("ffmpeg"):
         return "❌ ffmpeg غير موجود"
     src, start, duration, dst = ctx.args[0], ctx.args[1], ctx.args[2], ctx.args[3]
-    result = subprocess.run(
-        ["ffmpeg", "-y", "-ss", start, "-i", src, "-t", duration, "-c", "copy", dst],
-        capture_output=True, text=True, timeout=120,
+    missing = _missing_files(src)
+    if missing:
+        return f"❌ الملف مش موجود: {missing[0]}"
+    ok, err = _run_ffmpeg(
+        ["ffmpeg", "-y", "-ss", start, "-i", src, "-t", duration, "-c", "copy", dst], timeout=120,
     )
-    if result.returncode != 0:
-        return f"❌ فشل القص:\n{result.stderr.strip()[-500:]}"
+    if not ok:
+        return f"❌ فشل القص:\n{err}"
     return f"✅ تم القص إلى {dst}"
 
 
@@ -98,13 +120,15 @@ def _cmd_merge_av(ctx) -> str:
     if not shutil.which("ffmpeg"):
         return "❌ ffmpeg غير موجود"
     video, audio, dst = ctx.args[0], ctx.args[1], ctx.args[2]
-    result = subprocess.run(
-        ["ffmpeg", "-y", "-i", video, "-i", audio,
-         "-c:v", "copy", "-c:a", "aac", "-shortest", dst],
-        capture_output=True, text=True, timeout=300,
+    missing = _missing_files(video, audio)
+    if missing:
+        return f"❌ الملف مش موجود: {missing[0]}"
+    ok, err = _run_ffmpeg(
+        ["ffmpeg", "-y", "-i", video, "-i", audio, "-c:v", "copy", "-c:a", "aac", "-shortest", dst],
+        timeout=300,
     )
-    if result.returncode != 0:
-        return f"❌ فشل الدمج:\n{result.stderr.strip()[-500:]}"
+    if not ok:
+        return f"❌ فشل الدمج:\n{err}"
     return f"✅ تم دمج الصوت مع الفيديو في {dst}"
 
 
@@ -114,19 +138,26 @@ def _cmd_concat(ctx) -> str:
     if not shutil.which("ffmpeg"):
         return "❌ ffmpeg غير موجود"
     dst, *files = ctx.args
+    missing = _missing_files(*files)
+    if missing:
+        return f"❌ الملف مش موجود: {missing[0]}"
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as f:
         for path in files:
-            f.write(f"file '{os.path.abspath(path)}'\n")
+            # ffmpeg concat demuxer syntax: quote paths with ' and escape
+            # any literal ' inside them as '\'' — بدون كده أسماء ملفات
+            # فيها quote بتكسر الأمر.
+            escaped = os.path.abspath(path).replace("'", "'\\''")
+            f.write(f"file '{escaped}'\n")
         list_path = f.name
     try:
-        result = subprocess.run(
+        ok, err = _run_ffmpeg(
             ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", list_path, "-c", "copy", dst],
-            capture_output=True, text=True, timeout=300,
+            timeout=300,
         )
     finally:
         os.unlink(list_path)
-    if result.returncode != 0:
-        return f"❌ فشل الدمج:\n{result.stderr.strip()[-500:]}"
+    if not ok:
+        return f"❌ فشل الدمج:\n{err}"
     return f"✅ تم دمج {len(files)} ملفات في {dst}"
 
 
@@ -136,12 +167,14 @@ def _cmd_extract_audio(ctx) -> str:
     if not shutil.which("ffmpeg"):
         return "❌ ffmpeg غير موجود"
     src, dst = ctx.args[0], ctx.args[1]
-    result = subprocess.run(
-        ["ffmpeg", "-y", "-i", src, "-vn", "-acodec", "libmp3lame", dst],
-        capture_output=True, text=True, timeout=180,
+    missing = _missing_files(src)
+    if missing:
+        return f"❌ الملف مش موجود: {missing[0]}"
+    ok, err = _run_ffmpeg(
+        ["ffmpeg", "-y", "-i", src, "-vn", "-acodec", "libmp3lame", dst], timeout=180,
     )
-    if result.returncode != 0:
-        return f"❌ فشل الاستخراج:\n{result.stderr.strip()[-500:]}"
+    if not ok:
+        return f"❌ فشل الاستخراج:\n{err}"
     return f"✅ اتحفظ الصوت في {dst}"
 
 
@@ -151,12 +184,12 @@ def _cmd_thumbnail(ctx) -> str:
     if not shutil.which("ffmpeg"):
         return "❌ ffmpeg غير موجود"
     src, ts, dst = ctx.args[0], ctx.args[1], ctx.args[2]
-    result = subprocess.run(
-        ["ffmpeg", "-y", "-ss", ts, "-i", src, "-frames:v", "1", dst],
-        capture_output=True, text=True, timeout=60,
-    )
-    if result.returncode != 0:
-        return f"❌ فشل: {result.stderr.strip()[-500:]}"
+    missing = _missing_files(src)
+    if missing:
+        return f"❌ الملف مش موجود: {missing[0]}"
+    ok, err = _run_ffmpeg(["ffmpeg", "-y", "-ss", ts, "-i", src, "-frames:v", "1", dst], timeout=60)
+    if not ok:
+        return f"❌ فشل: {err}"
     return f"✅ اتحفظت الصورة في {dst}"
 
 
@@ -166,17 +199,17 @@ def _cmd_overlay_text(ctx) -> str:
     if not shutil.which("ffmpeg"):
         return "❌ ffmpeg غير موجود"
     src, text, dst = ctx.args[0], ctx.args[1], ctx.args[2]
+    missing = _missing_files(src)
+    if missing:
+        return f"❌ الملف مش موجود: {missing[0]}"
     escaped = text.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
     vf = (
         f"drawtext=text='{escaped}':fontcolor=white:fontsize=32:"
         "x=(w-text_w)/2:y=h-text_h-20:box=1:boxcolor=black@0.5"
     )
-    result = subprocess.run(
-        ["ffmpeg", "-y", "-i", src, "-vf", vf, "-codec:a", "copy", dst],
-        capture_output=True, text=True, timeout=300,
-    )
-    if result.returncode != 0:
-        return f"❌ فشل إضافة النص:\n{result.stderr.strip()[-500:]}"
+    ok, err = _run_ffmpeg(["ffmpeg", "-y", "-i", src, "-vf", vf, "-codec:a", "copy", dst], timeout=300)
+    if not ok:
+        return f"❌ فشل إضافة النص:\n{err}"
     return f"✅ اتحفظ الفيديو مع النص في {dst}"
 
 

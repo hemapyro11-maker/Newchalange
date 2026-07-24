@@ -32,6 +32,9 @@ def _cmd_check_update(ctx) -> str:
     except Exception as e:
         return f"❌ خطأ أثناء التحقق من التحديث: {e}"
 
+    if not isinstance(data, dict):
+        return "❌ شكل ملف الإصدار على السيرفر مش متوقع"
+
     latest = data.get("version", "unknown")
     notes = data.get("notes", "")
     if latest != current:

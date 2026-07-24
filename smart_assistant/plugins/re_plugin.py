@@ -43,8 +43,16 @@ def _cmd_entropy(ctx) -> str:
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
         return f"❌ الملف مش موجود: {path}"
-    chunk_size = int(ctx.args[1]) if len(ctx.args) > 1 else 4096
-    data = path.read_bytes()
+    try:
+        chunk_size = int(ctx.args[1]) if len(ctx.args) > 1 else 4096
+    except ValueError:
+        return "❌ chunk_size لازم يكون رقم صحيح"
+    if chunk_size < 1:
+        return "❌ chunk_size لازم يكون 1 على الأقل"
+    try:
+        data = path.read_bytes()
+    except OSError as e:
+        return f"❌ تعذرت قراءة الملف: {e}"
     overall = _shannon_entropy(data)
     lines = [f"📊 entropy إجمالي: {overall:.2f} / 8.0 bits/byte  (حجم: {len(data)} bytes)"]
     if overall > 7.5:
@@ -77,6 +85,8 @@ _ELF_MACHINES = {3: "x86 (i386)", 40: "ARM", 62: "x86-64", 183: "AArch64", 8: "M
 def _parse_elf(data: bytes) -> dict:
     if data[:4] != b"\x7fELF":
         raise ValueError("مش ملف ELF")
+    if len(data) < 16:
+        raise ValueError("الملف قصير أوي — header ELF ناقص")
     ei_class = data[4]          # 1=32-bit, 2=64-bit
     ei_data = data[5]           # 1=LE, 2=BE
     is64 = ei_class == 2
@@ -147,10 +157,13 @@ def _cmd_elf_info(ctx) -> str:
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
         return f"❌ الملف مش موجود: {path}"
-    data = path.read_bytes()
+    try:
+        data = path.read_bytes()
+    except OSError as e:
+        return f"❌ تعذرت قراءة الملف: {e}"
     try:
         info = _parse_elf(data)
-    except (ValueError, struct.error) as e:
+    except (ValueError, struct.error, IndexError) as e:
         return f"❌ مش ملف ELF صالح: {e}"
 
     lines = [
@@ -283,10 +296,13 @@ def _cmd_pe_info(ctx) -> str:
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
         return f"❌ الملف مش موجود: {path}"
-    data = path.read_bytes()
+    try:
+        data = path.read_bytes()
+    except OSError as e:
+        return f"❌ تعذرت قراءة الملف: {e}"
     try:
         info = _parse_pe(data)
-    except (ValueError, struct.error) as e:
+    except (ValueError, struct.error, IndexError) as e:
         return f"❌ مش ملف PE صالح: {e}"
 
     import datetime
@@ -328,19 +344,22 @@ if CAPSTONE_AVAILABLE:
 def _auto_entry_offset(data: bytes) -> tuple[int, str] | None:
     """يحاول يلاقي offset نقطة الدخول (entry point) جوه الملف نفسه، ويرجع
     (offset, arch_hint) لو الملف ELF أو PE معروف، وإلا None."""
-    if data[:4] == b"\x7fELF":
-        info = _parse_elf(data)
-        for s in info["sections"]:
-            if s["addr"] <= info["entry"] < s["addr"] + s["size"] and s["addr"]:
-                arch = "x64" if info["bits"] == 64 and "x86" in info["machine"] else \
-                    ("x86" if "x86" in info["machine"] else "arm64" if "AArch64" in info["machine"] else "arm")
-                return s["offset"] + (info["entry"] - s["addr"]), arch
-    elif data[:2] == b"MZ":
-        info = _parse_pe(data)
-        off = _rva_to_offset(info["sections"], info["entry_rva"])
-        if off is not None:
-            arch = "x64" if info["is64"] else "x86"
-            return off, arch
+    try:
+        if data[:4] == b"\x7fELF":
+            info = _parse_elf(data)
+            for s in info["sections"]:
+                if s["addr"] <= info["entry"] < s["addr"] + s["size"] and s["addr"]:
+                    arch = "x64" if info["bits"] == 64 and "x86" in info["machine"] else \
+                        ("x86" if "x86" in info["machine"] else "arm64" if "AArch64" in info["machine"] else "arm")
+                    return s["offset"] + (info["entry"] - s["addr"]), arch
+        elif data[:2] == b"MZ":
+            info = _parse_pe(data)
+            off = _rva_to_offset(info["sections"], info["entry_rva"])
+            if off is not None:
+                arch = "x64" if info["is64"] else "x86"
+                return off, arch
+    except (ValueError, struct.error, IndexError):
+        return None
     return None
 
 
@@ -352,14 +371,26 @@ def _cmd_disasm(ctx) -> str:
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
         return f"❌ الملف مش موجود: {path}"
-    data = path.read_bytes()
+    try:
+        data = path.read_bytes()
+    except OSError as e:
+        return f"❌ تعذرت قراءة الملف: {e}"
 
     offset = None
     arch = "x64"
-    if len(ctx.args) > 1:
-        offset = int(ctx.args[1], 0)
+    try:
+        if len(ctx.args) > 1:
+            offset = int(ctx.args[1], 0)
+        length = int(ctx.args[2]) if len(ctx.args) > 2 else 128
+    except ValueError:
+        return "❌ offset و length لازم يكونوا أرقام صحيحة"
     if len(ctx.args) > 3:
         arch = ctx.args[3]
+
+    if offset is not None and offset < 0:
+        return "❌ offset مينفعش يكون سالب"
+    if not (0 < length <= 65536):
+        return "❌ length لازم يكون بين 1 و65536"
 
     note = ""
     if offset is None:
@@ -370,7 +401,6 @@ def _cmd_disasm(ctx) -> str:
         else:
             offset = 0
 
-    length = int(ctx.args[2]) if len(ctx.args) > 2 else 128
     if arch not in _ARCH_MAP:
         return f"❌ arch غير مدعوم: {arch} (المتاح: {', '.join(_ARCH_MAP)})"
 

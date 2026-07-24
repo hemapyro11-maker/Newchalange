@@ -84,6 +84,20 @@ def _pending_dir() -> pathlib.Path:
     return d
 
 
+_INVALID_NAME_CHARS = set('/\\:*?"<>|')
+
+
+def _validate_name(name: str) -> str | None:
+    """يرجع رسالة خطأ لو اسم الـ plugin غير آمن كاسم ملف، وإلا None.
+    مهم بالذات هنا: approve_plugin بينقل الملف لـ plugins/ اللي بيتحمّل
+    ويتنفذ تلقائياً، فاسم فيه path traversal (زي ../../x) خطر حقيقي."""
+    if not name or name in (".", ".."):
+        return "❌ اسم الـ plugin لازم يكون غير فاضي ومش '.' أو '..'"
+    if any(c in _INVALID_NAME_CHARS for c in name) or ".." in name:
+        return "❌ اسم الـ plugin مينفعش يحتوي على مسارات أو رموز غريبة"
+    return None
+
+
 def _clean_code(text: str) -> str:
     text = text.strip()
     if text.startswith("```"):
@@ -175,6 +189,9 @@ def _cmd_create_plugin(ctx) -> str:
     if len(ctx.args) < 2:
         return "usage: create_plugin <name> <description...>"
     name = ctx.args[0]
+    name_error = _validate_name(name)
+    if name_error:
+        return name_error
     description = " ".join(ctx.args[1:])
     prompt = PLUGIN_CONTRACT + f"\nTask: {description}\n\nWrite the complete plugin file now."
     ok, code, msg, attempts = _generate_with_retries(ctx.engine, prompt, name)
@@ -195,6 +212,9 @@ def _cmd_fix_plugin(ctx) -> str:
     if not ctx.args:
         return "usage: fix_plugin <name> [error_text...]"
     name = ctx.args[0]
+    name_error = _validate_name(name)
+    if name_error:
+        return name_error
     error_text = " ".join(ctx.args[1:])
 
     live_path = None
@@ -251,11 +271,17 @@ def _cmd_review_pending(ctx) -> str:
     if not ctx.args:
         return "usage: review_pending <name>"
     name = ctx.args[0]
+    name_error = _validate_name(name)
+    if name_error:
+        return name_error
     code_path = _pending_dir() / f"{name}.py"
     meta_path = _pending_dir() / f"{name}.meta.json"
     if not code_path.is_file():
         return f"❌ مفيش plugin مستني اسمه {name}"
-    meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else {}
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else {}
+    except (OSError, json.JSONDecodeError):
+        meta = {}
     header = (
         f"📋 {name} — {'✅ اتأكد إنها شغالة' if meta.get('validated') else '⚠ فيها مشكلة'}\n"
         f"الوصف: {meta.get('description', '?')}\n"
@@ -270,15 +296,21 @@ def _cmd_approve_plugin(ctx) -> str:
     if not ctx.args:
         return "usage: approve_plugin <name>"
     name = ctx.args[0]
+    name_error = _validate_name(name)
+    if name_error:
+        return name_error
     code_path = _pending_dir() / f"{name}.py"
     if not code_path.is_file():
         return f"❌ مفيش plugin مستني اسمه {name}"
     target_dir = ctx.engine.plugins_dirs[-1]  # جنب الـ exe/كود المصدر (قابل للكتابة)، مش الـ bundle للقراءة بس
-    target_dir.mkdir(parents=True, exist_ok=True)
-    target_path = target_dir / f"{name}.py"
-    target_path.write_text(code_path.read_text(encoding="utf-8"), encoding="utf-8")
-    code_path.unlink()
-    (_pending_dir() / f"{name}.meta.json").unlink(missing_ok=True)
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target_path = target_dir / f"{name}.py"
+        target_path.write_text(code_path.read_text(encoding="utf-8"), encoding="utf-8")
+        code_path.unlink()
+        (_pending_dir() / f"{name}.meta.json").unlink(missing_ok=True)
+    except OSError as e:
+        return f"❌ فشل النقل لـ plugins/: {e}"
     ctx.engine.load_plugins()
     return f"✅ اتنقلت {name} لـ plugins/ واتحمّلت. جرب: help"
 
@@ -287,6 +319,9 @@ def _cmd_reject_plugin(ctx) -> str:
     if not ctx.args:
         return "usage: reject_plugin <name>"
     name = ctx.args[0]
+    name_error = _validate_name(name)
+    if name_error:
+        return name_error
     removed = False
     for suffix in (".py", ".meta.json"):
         p = _pending_dir() / f"{name}{suffix}"

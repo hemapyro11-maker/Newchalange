@@ -58,9 +58,17 @@ def _cmd_identify(ctx) -> str:
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
         return f"❌ الملف مش موجود: {path}"
-    data = path.read_bytes()[:4096]
+    try:
+        with path.open("rb") as f:
+            data = f.read(4096)
+        size = path.stat().st_size
+    except OSError as e:
+        return f"❌ تعذرت قراءة الملف: {e}"
     kind = _identify(data)
-    return f"📄 {path.name}\n🔎 النوع المكتشف: {kind}\n📦 الحجم: {path.stat().st_size} bytes"
+    return f"📄 {path.name}\n🔎 النوع المكتشف: {kind}\n📦 الحجم: {size} bytes"
+
+
+MAX_HEXDUMP_LENGTH = 65536
 
 
 def _cmd_hexdump(ctx) -> str:
@@ -69,11 +77,21 @@ def _cmd_hexdump(ctx) -> str:
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
         return f"❌ الملف مش موجود: {path}"
-    offset = int(ctx.args[1]) if len(ctx.args) > 1 else 0
-    length = int(ctx.args[2]) if len(ctx.args) > 2 else 256
-    with path.open("rb") as f:
-        f.seek(offset)
-        chunk = f.read(length)
+    try:
+        offset = int(ctx.args[1]) if len(ctx.args) > 1 else 0
+        length = int(ctx.args[2]) if len(ctx.args) > 2 else 256
+    except ValueError:
+        return "❌ offset و length لازم يكونوا أرقام صحيحة"
+    if offset < 0:
+        return "❌ offset مينفعش يكون سالب"
+    if not (0 < length <= MAX_HEXDUMP_LENGTH):
+        return f"❌ length لازم يكون بين 1 و{MAX_HEXDUMP_LENGTH}"
+    try:
+        with path.open("rb") as f:
+            f.seek(offset)
+            chunk = f.read(length)
+    except OSError as e:
+        return f"❌ تعذرت قراءة الملف: {e}"
     lines = []
     for i in range(0, len(chunk), 16):
         row = chunk[i:i + 16]
@@ -89,8 +107,16 @@ def _cmd_strings(ctx) -> str:
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
         return f"❌ الملف مش موجود: {path}"
-    min_len = int(ctx.args[1]) if len(ctx.args) > 1 else 4
-    data = path.read_bytes()
+    try:
+        min_len = int(ctx.args[1]) if len(ctx.args) > 1 else 4
+    except ValueError:
+        return "❌ min_length لازم يكون رقم صحيح"
+    if min_len < 1:
+        return "❌ min_length لازم يكون 1 على الأقل"
+    try:
+        data = path.read_bytes()
+    except OSError as e:
+        return f"❌ تعذرت قراءة الملف: {e}"
     pattern = re.compile(rb"[\x20-\x7e]{%d,}" % min_len)
     found = [m.group().decode("ascii") for m in pattern.finditer(data)]
     if not found:

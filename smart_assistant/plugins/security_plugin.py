@@ -26,9 +26,12 @@ def _cmd_hash_file(ctx) -> str:
         h = hashlib.new(algo)
     except ValueError:
         return f"❌ خوارزمية غير مدعومة: {algo} (جرب: {', '.join(sorted(hashlib.algorithms_guaranteed))[:200]})"
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
+    try:
+        with path.open("rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+    except OSError as e:
+        return f"❌ تعذرت قراءة الملف: {e}"
     return f"{algo}({path.name}) = {h.hexdigest()}"
 
 
@@ -40,17 +43,27 @@ def _cmd_port_scan(ctx) -> str:
         start, end = int(ctx.args[1]), int(ctx.args[2])
     except ValueError:
         return "❌ start_port و end_port لازم يكونوا أرقام"
+    if not (0 < start <= 65535 and 0 < end <= 65535):
+        return "❌ أرقام البورتات لازم تكون بين 1 و65535"
     if end < start:
         return "❌ end_port لازم يكون أكبر من أو يساوي start_port"
     if end - start + 1 > MAX_PORT_RANGE:
         return f"❌ النطاق كبير أوي — الحد الأقصى {MAX_PORT_RANGE} بورت في المرة الواحدة"
 
+    try:
+        socket.getaddrinfo(host, None)
+    except socket.gaierror as e:
+        return f"❌ تعذر إيجاد المضيف {host}: {e}"
+
     open_ports = []
     for port in range(start, end + 1):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(0.3)
-            if s.connect_ex((host, port)) == 0:
-                open_ports.append(port)
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(0.3)
+                if s.connect_ex((host, port)) == 0:
+                    open_ports.append(port)
+        except OSError:
+            continue
     if not open_ports:
         return f"مفيش بورتات مفتوحة من {start} لـ {end} على {host}"
     return f"🔓 بورتات مفتوحة على {host}: {', '.join(map(str, open_ports))}"
