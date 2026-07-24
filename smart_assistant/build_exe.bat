@@ -4,7 +4,7 @@ echo   Smart Assistant - Build EXE
 echo ====================================
 
 :: تثبيت المتطلبات
-py -m pip install customtkinter pyinstaller mcp capstone Pillow --quiet
+py -m pip install customtkinter pyinstaller mcp capstone Pillow pandas matplotlib --quiet
 
 :: بناء الـ EXE
 py -m PyInstaller ^
@@ -18,6 +18,8 @@ py -m PyInstaller ^
     --collect-all mcp ^
     --collect-all capstone ^
     --collect-all PIL ^
+    --collect-all pandas ^
+    --collect-all matplotlib ^
     --add-data "core_engine.py;." ^
     --add-data "i18n.py;." ^
     --add-data "version.py;." ^
@@ -36,5 +38,9 @@ echo   - الـ Connectors (MCP) اللي بتحتاج npx/uvx محتاجة Node
 echo     متثبتين على الجهاز حسب الـ connector المستخدم.
 echo   - مشاريع scaffold android محتاجة Android Studio لفتحها/بنائها،
 echo     ومشاريع scaffold ios محتاجة Xcode على ماك.
+echo   - مشاريع scaffold kernel_module محتاجة kernel headers مثبتة،
+echo     و scaffold blockchain محتاجة Node.js+Hardhat، و scaffold
+echo     quantum/ml محتاجة pip install قدام المشروع نفسه (requirements.txt
+echo     بتاعه) مش داخل SmartAssistant نفسه.
 echo ====================================
 pause

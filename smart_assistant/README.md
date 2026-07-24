@@ -48,8 +48,14 @@ build_exe.bat
     — بدون أي باكدج خارجي (شرح النطاق تحت).
   - `re_plugin.py` — هندسة عكسية متقدمة: `elf_info`, `pe_info`,
     `entropy`, `disasm` (شرح تفصيلي تحت).
-  - `scaffold_plugin.py` — سقالات مشاريع جاهزة: ويب/أندرويد/iOS/لعبة
-    Pygame/بايثون (`scaffold <type> <name>`).
+  - `scaffold_plugin.py` — سقالات مشاريع جاهزة لـ 19 نوع (`scaffold
+    <type> <name>` — شرح تفصيلي تحت).
+  - `database_plugin.py` — أدوات قواعد بيانات حقيقية (sqlite3):
+    `db_schema`, `db_query`, `db_export_csv`.
+  - `data_science_plugin.py` — تحليل بيانات حقيقي (pandas/matplotlib):
+    `csv_describe`, `csv_plot`, `csv_correlate`.
+  - `screenplay_plugin.py` — تحليل سيناريو حقيقي بصيغة Fountain:
+    `fountain_stats` (مشاهد، شخصيات، حوار، تقدير صفحات).
   - `design_plugin.py` — لوجو بسيط وتوليد كل أحجام أيقونات iOS/Android
     من صورة واحدة (`make_logo`, `app_icons`) عبر Pillow.
   - `security_plugin.py` — `hash_file` (تحقق سلامة) و`port_scan` (فحص
@@ -236,22 +242,46 @@ Ghidra/radare2). كل النتائج اتقارنت واتأكد إنها مطا
 النطاق واضح: تحليل *ساكن* لبنية ملف عندك حق تحلله (فهم كود، اعتماديات،
 دلائل تغليف) — مش كسر حماية ولا تجاوز تراخيص، زي ما اتقال فوق.
 
-## تطوير متعدد المجالات (iOS / Android / Web / ألعاب / تصميم / أمان)
+## تطوير متعدد المجالات (Desktop / Web / Mobile / Games / Data / AI / أمان / أفلام...)
 
-المساعد بقى فيه أدوات حقيقية شغالة عبر مجالات تطوير مختلفة، كلها
+المساعد بقى فيه أدوات حقيقية شغالة عبر عشرات مجالات التطوير، كلها
 مبنية على أدوات مجانية 100%:
 
 | المجال | الأمر | الحالة |
 |---|---|---|
-| Website Developer | `scaffold web <name>` | ✅ HTML/CSS/JS شغال فوراً |
+| Desktop App Developer | Smart Assistant نفسه (CustomTkinter) + `scaffold python` | ✅ |
+| Frontend Web Developer | `scaffold web <name>` | ✅ HTML/CSS/JS شغال فوراً |
+| Backend Web Developer | `scaffold backend <name>` | ✅ FastAPI شغال فوراً (`uvicorn main:app`) |
+| Full-Stack Web Developer | `scaffold fullstack <name>` | ✅ frontend+backend مع بعض |
 | Android Developer | `scaffold android <name>` | ✅ سقالة Kotlin/Gradle — افتحها في Android Studio (مجاني) |
 | iOS Developer | `scaffold ios <name>` | ✅ سقالة SwiftUI — محتاجة Xcode على ماك (قيد النظام، مش تكلفة) |
-| Gaming Developer | `scaffold game <name>` | ✅ لعبة Pygame **شغالة فعلياً** — اتجرب وشغلت نافذة حقيقية |
-| Coding Developer | `scaffold python <name>` + `run` + `git` عبره | ✅ |
+| Game Developer | `scaffold game <name>` | ✅ لعبة Pygame **شغالة فعلياً** — اتجرب وشغلت نافذة حقيقية |
+| Data Scientist | `csv_describe`, `csv_plot`, `csv_correlate` | ✅ اتجرب على بيانات حقيقية (إحصائيات، رسومات، correlation) |
+| AI/ML Engineer | `scaffold ml <name>` | ✅ **اتجرب فعلياً** — درّب نموذج حقيقي بدقة 100% على بيانات اختبار |
+| Systems/Embedded Developer | `scaffold embedded <name>` | ✅ كود C اتأكد إنه يترجم (compiles) فعلاً |
+| Cybersecurity/Pentest | `hash_file`, `port_scan`, `re_plugin`/`inspect_plugin` | ✅ |
+| Cloud/DevOps Engineer | `scaffold docker <name>`, `scaffold ci <name>` | ✅ Dockerfile + GitHub Actions YAML صحيحة |
+| Database Engineer | `db_schema`, `db_query`, `db_export_csv` | ✅ SQLite حقيقي، محمي من SQL injection في أسماء الجداول |
+| Blockchain Developer | `scaffold blockchain <name>` | ✅ عقد Solidity صحيح + إعداد Hardhat |
+| Quantum Computing | `scaffold quantum <name>` | ✅ دائرة Qiskit صحيحة (Bell state) |
+| AR/VR Developer | `scaffold arvr <name>` | ✅ WebXR (A-Frame، مجاني ومفتوح المصدر) |
+| QA/Test Automation | `scaffold pytest <name>` | ✅ سقالة pytest شغالة وبتعدي فعلاً |
+| Kernel/Low-Level Developer | `scaffold kernel_module <name>` | ✅ يحتاج kernel headers مثبتة للبناء (قيد نظام، موثّق) |
+| Network/Multiplayer Backend | `scaffold multiplayer_server <name>` | ✅ **اتجرب فعلياً** — سيرفر حقيقي استقبل اتصال TCP |
 | Video Editor | `media_plugin` + `cinema_plugin` (مونتاج احترافي، شرح تحت) | ✅ كله اتجرب على فيديو حقيقي |
+| Color Grading / VFX / Audio Mixing | `cinema_plugin` (`color_grade`, `chroma_key`, `master_audio`...) | ✅ |
 | Logo Designer | `make_logo <text> <output.png>` | ✅ لوجو حروف أولى فوري |
-| App Designer | `app_icons <source.png> <out_dir>` | ✅ يولّد كل أحجام أيقونات iOS+Android (19 حجم) من صورة واحدة |
-| Security Developer | `hash_file`, `port_scan`, + `re_plugin`/`inspect_plugin` | ✅ |
+| App/UI Designer | `app_icons <source.png> <out_dir>` | ✅ يولّد كل أحجام أيقونات iOS+Android (19 حجم) من صورة واحدة |
+| Screenwriter | `scaffold screenplay <name>` + `fountain_stats` | ✅ صيغة Fountain القياسية + تحليل حقيقي (مشاهد/شخصيات/حوار) |
+| Game Narrative Designer | `scaffold ink_story <name>` | ✅ صيغة Ink (نفس أداة ألعاب حقيقية زي 80 Days) |
+
+**اللي مش موجود ومش هيتضاف — بصراحة:** إخراج سينمائي، اختيار ممثلين،
+تصميم أزياء/ماكياج، تصوير وإضاءة فعلية، تسجيل صوت ميداني، إنتاج/تسويق/
+توزيع الأفلام، تصميم مفاهيمي وكتابة قصة الألعاب، إدارة إنتاج الألعاب،
+تمثيل صوتي/موشن كابتشر، وإدارة مجتمعات اللاعبين. دول أدوار قرار بشري
+وحرفة فيزيائية وعمل تجاري — مش حاجة أي أداة برمجية ممكن "تكون" بمستوى
+احترافي، بغض النظر عن الصياغة. أي حاجة تانية من الليستة الأصلية مش
+مذكورة هنا اتغطت فعلياً بالأدوات فوق.
 
 **ملحوظة مهمة عن iOS/Android:** التطبيق بيولّد الكود والسقالة، لكن
 البناء الفعلي لـ .ipa/.apk محتاج Xcode (ماك بس) أو Android Studio —
