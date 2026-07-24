@@ -211,6 +211,16 @@ def test_scaffold_embedded_c_compiles(make_ctx, tmp_path):
     assert proc.returncode == 0, proc.stderr
 
 
+@requires_gcc
+def test_scaffold_embedded_blink_logic_actually_runs_and_passes(make_ctx, tmp_path):
+    result = sp._cmd_scaffold(make_ctx("scaffold", ["embedded", "MyMCU", str(tmp_path)]))
+    assert result.startswith("✅")
+    root = tmp_path / "MyMCU"
+    proc = subprocess.run(["make", "test"], cwd=root, capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    assert "blink logic ok" in proc.stdout
+
+
 def test_scaffold_kernel_module_has_real_tabs_in_makefile(make_ctx, tmp_path):
     result = sp._cmd_scaffold(make_ctx("scaffold", ["kernel_module", "MyMod", str(tmp_path)]))
     assert result.startswith("✅")

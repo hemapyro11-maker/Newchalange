@@ -878,28 +878,157 @@ contract {safe} {{
 
 
 def _scaffold_embedded(root: pathlib.Path, name: str) -> list[str]:
-    _write(root / "main.c", f'''/* {name} — embedded C starter (GPIO blink pattern).
- * gpio_set/delay_ms متعمدين يتسابوا abstract — نفس أسلوب الـ HAL
- * (Hardware Abstraction Layer) الحقيقي: كل بورد له تعريف مختلف
- * لعناوين الذاكرة، فده بيتكتب حسب الـ board/MCU المستهدف. */
+    _write(root / "hal.h", '''#ifndef HAL_H
+#define HAL_H
+
+/* HAL (Hardware Abstraction Layer): كل بورد بيدّي implementation مختلف
+ * لـ gpio_set/delay_ms (تسجيل مباشر لعناوين الذاكرة، أو HAL library
+ * جاهزة من مصنّع الـ MCU). منطق البرنامج (blink.c) ميعرفش ولا يهمه
+ * إزاي الـ pin بيتحرك فعلياً — ده اللي بيخلينا نقدر نختبره على الجهاز
+ * المضيف (host) من غير هاردوير حقيقي. */
+typedef struct {
+    void (*gpio_set)(int pin, int value);
+    void (*delay_ms)(int ms);
+} hal_t;
+
+#endif
+''')
+    _write(root / "blink.h", '''#ifndef BLINK_H
+#define BLINK_H
+
 #include <stdint.h>
+#include "hal.h"
+
+typedef struct {
+    int led_on;
+    uint32_t elapsed_ms;
+} blink_state_t;
+
+void blink_init(blink_state_t *state);
+void blink_step(blink_state_t *state, const hal_t *hal, uint32_t dt_ms);
+
+#endif
+''')
+    _write(root / "blink.c", f'''/* {name} — منطق الـ blink البحت (led toggle كل INTERVAL_MS)،
+ * منفصل عن أي تفاصيل هاردوير عشان نقدر نختبره في test/test_blink.c
+ * من غير محاكي أو بورد حقيقي. */
+#include "blink.h"
 
 #define LED_PIN 13
+#define INTERVAL_MS 500
+
+void blink_init(blink_state_t *state) {{
+    state->led_on = 0;
+    state->elapsed_ms = 0;
+}}
+
+void blink_step(blink_state_t *state, const hal_t *hal, uint32_t dt_ms) {{
+    state->elapsed_ms += dt_ms;
+    if (state->elapsed_ms >= INTERVAL_MS) {{
+        state->elapsed_ms = 0;
+        state->led_on = !state->led_on;
+        hal->gpio_set(LED_PIN, state->led_on);
+    }}
+}}
+''')
+    _write(root / "main.c", f'''/* {name} — نقطة الدخول: بتربط منطق blink.c بتنفيذ gpio_set/delay_ms
+ * الحقيقي بتاع البورد المستهدف. لازم يتترجم بـ cross toolchain (زي
+ * arm-none-eabi-gcc) للفرمواير الفعلي — الملف ده متعمد يفضل
+ * freestanding (مايستخدمش libc عادية) عشان يترجم على أي بيئة. */
+#include <stdint.h>
+#include "hal.h"
+#include "blink.h"
 
 void gpio_set(int pin, int value);
 void delay_ms(int ms);
 
 int main(void) {{
+    hal_t hal = {{ gpio_set, delay_ms }};
+    blink_state_t state;
+    blink_init(&state);
     while (1) {{
-        gpio_set(LED_PIN, 1);
-        delay_ms(500);
-        gpio_set(LED_PIN, 0);
-        delay_ms(500);
+        blink_step(&state, &hal, 10);
+        hal.delay_ms(10);
     }}
     return 0;
 }}
 ''')
-    return ["main.c"]
+    _write(root / "test" / "test_blink.c", '''/* اختبار حقيقي شغال على الجهاز المضيف (host) — بيستخدم hal_t وهمي
+ * (mock) بيسجّل كل نداء gpio_set، وبيتأكد إن الـ LED بيتقلب بالظبط
+ * كل 500ms من غير أي هاردوير حقيقي. */
+#include <assert.h>
+#include <stdio.h>
+#include "../blink.h"
+
+static int gpio_calls = 0;
+static int last_value = -1;
+
+static void mock_gpio_set(int pin, int value) {
+    (void)pin;
+    last_value = value;
+    gpio_calls++;
+}
+
+static void mock_delay_ms(int ms) {
+    (void)ms;
+}
+
+int main(void) {
+    hal_t hal = { mock_gpio_set, mock_delay_ms };
+    blink_state_t state;
+    blink_init(&state);
+
+    blink_step(&state, &hal, 100);
+    assert(gpio_calls == 0 && "لسه محدش وصل لـ 500ms");
+
+    blink_step(&state, &hal, 450);
+    assert(gpio_calls == 1);
+    assert(last_value == 1);
+
+    blink_step(&state, &hal, 500);
+    assert(gpio_calls == 2);
+    assert(last_value == 0);
+
+    printf("blink logic ok — %d نداء gpio_set صحيحين\\n", gpio_calls);
+    return 0;
+}
+''')
+    _write(root / "Makefile", f"""CC = gcc
+CFLAGS = -Wall -Wextra -std=c11
+
+# فحص إن main.c/blink.c بيترجموا (compile-only) بأسلوب freestanding —
+# للفرمواير الفعلي محتاج cross toolchain حقيقي زي arm-none-eabi-gcc
+check:
+\t$(CC) -ffreestanding -std=c11 -c main.c -o /dev/null
+\t$(CC) -ffreestanding -std=c11 -c blink.c -o /dev/null
+\t@echo "✅ main.c وblink.c بيترجموا (compile-only، freestanding)"
+
+# اختبار منطق blink.c فعلياً على الجهاز المضيف (مش هاردوير حقيقي)
+test:
+\t$(CC) $(CFLAGS) test/test_blink.c blink.c -o test/test_blink
+\t./test/test_blink
+
+clean:
+\trm -f test/test_blink
+
+.PHONY: check test clean
+""")
+    _write(root / "README.md", f'''# {name} — Embedded/MCU Starter
+
+بنية HAL (Hardware Abstraction Layer) بسيطة: منطق الـ blink في `blink.c`
+منفصل تمامًا عن تفاصيل الهاردوير (`hal.h`)، عشان يتاختبر على الجهاز
+المضيف من غير بورد حقيقي.
+
+```bash
+make check   # يتأكد إن main.c/blink.c بيترجموا (freestanding)
+make test    # يبني ويشغّل اختبار حقيقي لمنطق blink.c على الـ host
+```
+
+للفرمواير الفعلي على بورد حقيقي، لازم cross toolchain (زي
+`arm-none-eabi-gcc`) وتوفّر `gpio_set`/`delay_ms` الحقيقيين لبوردك.
+''')
+    _write(root / ".gitignore", "*.o\n*.elf\n*.bin\n*.hex\ntest/test_blink\n")
+    return ["hal.h", "blink.h", "blink.c", "main.c", "test/test_blink.c", "Makefile", "README.md", ".gitignore"]
 
 
 def _scaffold_kernel_module(root: pathlib.Path, name: str) -> list[str]:
