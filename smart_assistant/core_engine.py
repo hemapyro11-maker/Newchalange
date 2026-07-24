@@ -204,7 +204,10 @@ class AssistantEngine:
                     self._log(f"🧩 plugin loaded: {path.stem}", "ok")
                 except Exception:
                     self._log(f"❌ failed to load plugin {path.name}:\n{traceback.format_exc()}", "error")
-        self._loaded_plugins = sorted(set(self._loaded_plugins) | set(loaded))
+        # self._loaded_plugins بيعكس نتيجة آخر مسح بس (مش تراكمي) — عشان
+        # أمر "plugins" يفضل صادق لو ملف اتشال والمستخدم عمل reload_plugins.
+        # (سجل "اتعلمت قبل كده" الدائم هو self.skills["plugins"] مش ده.)
+        self._loaded_plugins = sorted(loaded)
         return loaded
 
     # ── builtin commands ──────────────────────────────────────────────
