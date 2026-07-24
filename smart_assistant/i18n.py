@@ -18,6 +18,7 @@ STRINGS = {
         "lang_toggle": "English",
         "start": "▶  تشغيل",
         "stop": "⏹  إيقاف",
+        "attach_file": "إرفاق ملف للتحليل",
     },
     "en": {
         "app_title": "Smart Assistant",
@@ -32,6 +33,7 @@ STRINGS = {
         "lang_toggle": "العربية",
         "start": "▶  Start",
         "stop": "⏹  Stop",
+        "attach_file": "Attach file to analyze",
     },
 }
 

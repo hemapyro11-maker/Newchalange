@@ -1,0 +1,5 @@
+{
+  "version": "0.2.0",
+  "notes": "Plugin system, media analysis (probe/convert/trim/merge/concat via FFmpeg), file-upload analysis, local self-improvement suggestions (Ollama), and a manual update check.",
+  "url": "https://github.com/hemapyro11-maker/Newchalange/tree/claude/project-guidelines-architecture-dcn5vq/smart_assistant"
+}

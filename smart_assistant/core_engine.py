@@ -2,18 +2,23 @@
 core_engine.py — Core Engine للمساعد الذكي، بدون أي اعتماد على الواجهة.
 
 مسؤول عن: تسجيل الأوامر (Command Registry)، تنفيذها بالتتابع على Thread
-خلفي واحد (Task Queue) عشان الواجهة تفضل سلسة، وتشغيل مهام أتمتة إضافية
-(callables) بنفس الآلية.
+خلفي واحد (Task Queue) عشان الواجهة تفضل سلسة، تحميل الإضافات (Plugins)
+ديناميكياً من مجلد plugins/ عشان المشروع يتوسع بسهولة من غير ما نلمس
+الكود الأساسي، وتشغيل مهام أتمتة إضافية (callables) بنفس الآلية.
 """
 from __future__ import annotations
 
+import importlib.util
 import logging
+import pathlib
 import queue
 import shlex
 import subprocess
+import sys
 import threading
 import time
 import traceback
+from collections import deque
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -54,20 +59,51 @@ class CommandRegistry:
         return sorted(self._commands.values(), key=lambda c: c.name)
 
 
+def default_plugin_dirs() -> list[pathlib.Path]:
+    """
+    مجلدات الإضافات: لو التطبيق شغال كـ exe (PyInstaller onefile)، بنرجع
+    مجلد الإضافات المدمجة جوه الـ bundle *و* مجلد plugins/ جنب ملف الـ exe
+    نفسه (عشان المستخدم يقدر يضيف إضافات جديدة بمجرد ما يحط ملف .py فيه،
+    من غير ما يعيد بناء التطبيق). في وضع التطوير العادي بنرجع plugins/
+    جنب هذا الملف.
+    """
+    dirs: list[pathlib.Path] = []
+    if getattr(sys, "frozen", False):
+        bundled = pathlib.Path(getattr(sys, "_MEIPASS", "")) / "plugins"
+        if bundled.exists():
+            dirs.append(bundled)
+        dirs.append(pathlib.Path(sys.executable).resolve().parent / "plugins")
+    else:
+        dirs.append(pathlib.Path(__file__).resolve().parent / "plugins")
+    seen: set[pathlib.Path] = set()
+    unique: list[pathlib.Path] = []
+    for d in dirs:
+        key = d.resolve() if d.exists() else d
+        if key not in seen:
+            seen.add(key)
+            unique.append(d)
+    return unique
+
+
 class AssistantEngine:
     """
     المحرك الأساسي: يستقبل نصوص أوامر أو مهام أتمتة (callables) ويشغّلهم
-    بالتتابع على Thread خلفي واحد، ويبلغ الواجهة بالنتائج عبر callbacks.
+    بالتتابع على Thread خلفي واحد، ويبلغ الواجهة بالنتائج عبر callbacks،
+    ويحمّل إضافات (plugins) ديناميكياً لتوسيع الأوامر المتاحة.
     """
 
-    def __init__(self, on_log=None, on_status=None):
+    def __init__(self, on_log=None, on_status=None, plugins_dirs: Optional[list[pathlib.Path]] = None):
         self.on_log = on_log or (lambda msg, level="info": None)
         self.on_status = on_status or (lambda status: None)
         self.registry = CommandRegistry()
+        self.log_history: "deque[tuple[str, str]]" = deque(maxlen=300)
+        self.plugins_dirs = plugins_dirs or default_plugin_dirs()
+        self._loaded_plugins: list[str] = []
         self._queue: "queue.Queue[tuple[str, Optional[Callable]]]" = queue.Queue()
         self._stop_flag = threading.Event()
         self._worker: Optional[threading.Thread] = None
         self._register_builtin_commands()
+        self.load_plugins()
 
     # ── lifecycle ──────────────────────────────────────────────────────
     def start(self):
@@ -96,11 +132,42 @@ class AssistantEngine:
         """يضيف مهمة أتمتة (callable) لنفس طابور التنفيذ."""
         self._queue.put((name, fn))
 
+    # ── plugins ────────────────────────────────────────────────────────
+    def load_plugins(self) -> list[str]:
+        """
+        يمسح مجلدات الإضافات ويحمّل أي ملف .py فيه دالة register(engine).
+        بيُستدعى عند الإنشاء، وبيتقدر يتنادى تاني وقت التشغيل (أمر
+        reload_plugins) عشان يلتقط إضافات جديدة اتحطت من غير ريستارت.
+        """
+        loaded: list[str] = []
+        for plugins_dir in self.plugins_dirs:
+            plugins_dir.mkdir(parents=True, exist_ok=True)
+            for path in sorted(plugins_dir.glob("*.py")):
+                if path.name.startswith("_"):
+                    continue
+                try:
+                    spec = importlib.util.spec_from_file_location(f"assistant_plugin_{path.stem}", path)
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)  # type: ignore[union-attr]
+                    register = getattr(module, "register", None)
+                    if not callable(register):
+                        self._log(f"⚠ plugin {path.stem} has no register(engine)", "warn")
+                        continue
+                    register(self)
+                    loaded.append(path.stem)
+                    self._log(f"🧩 plugin loaded: {path.stem}", "ok")
+                except Exception:
+                    self._log(f"❌ failed to load plugin {path.name}:\n{traceback.format_exc()}", "error")
+        self._loaded_plugins = sorted(set(self._loaded_plugins) | set(loaded))
+        return loaded
+
     # ── builtin commands ──────────────────────────────────────────────
     def _register_builtin_commands(self):
         self.registry.register("help", self._cmd_help, "عرض كل الأوامر المتاحة")
         self.registry.register("echo", self._cmd_echo, "طباعة نص")
         self.registry.register("run", self._cmd_run, "تنفيذ أمر نظام (subprocess, بدون shell)")
+        self.registry.register("plugins", self._cmd_plugins, "عرض الإضافات المحمّلة حالياً")
+        self.registry.register("reload_plugins", self._cmd_reload_plugins, "إعادة مسح مجلد plugins/ وتحميل أي إضافة جديدة")
 
     def _cmd_help(self, ctx: CommandContext) -> str:
         return "\n".join(f"{c.name} — {c.description}" for c in self.registry.list_commands())
@@ -124,7 +191,22 @@ class AssistantEngine:
         except Exception as e:
             return f"❌ error: {e}"
 
+    def _cmd_plugins(self, ctx: CommandContext) -> str:
+        if not self._loaded_plugins:
+            return "no plugins loaded — drop a .py file with a register(engine) function into plugins/"
+        return "loaded plugins: " + ", ".join(self._loaded_plugins)
+
+    def _cmd_reload_plugins(self, ctx: CommandContext) -> str:
+        before = set(self._loaded_plugins)
+        self.load_plugins()
+        new = sorted(set(self._loaded_plugins) - before)
+        return f"reload done — {len(new)} new plugin(s): {', '.join(new) or 'none'}"
+
     # ── internal ───────────────────────────────────────────────────────
+    def _log(self, msg: str, level: str = "info"):
+        self.log_history.append((level, msg))
+        self.on_log(msg, level)
+
     def _run_loop(self):
         while not self._stop_flag.is_set():
             try:
@@ -139,7 +221,7 @@ class AssistantEngine:
                 else:
                     self._dispatch(text)
             except Exception:
-                self.on_log(traceback.format_exc(), "error")
+                self._log(traceback.format_exc(), "error")
         self.on_status("stopped")
 
     def _dispatch(self, text: str):
@@ -149,22 +231,22 @@ class AssistantEngine:
         try:
             parts = shlex.split(text)
         except ValueError as e:
-            self.on_log(f"❌ parse error: {e}", "error")
+            self._log(f"❌ parse error: {e}", "error")
             return
         if not parts:
             return
         name, args = parts[0], parts[1:]
         cmd = self.registry.get(name)
         if cmd is None:
-            self.on_log(f"❓ unknown command: {name} (try 'help')", "warn")
+            self._log(f"❓ unknown command: {name} (try 'help')", "warn")
             return
         ctx = CommandContext(raw=text, args=args, engine=self)
         start = time.time()
         try:
             result = cmd.handler(ctx)
         except Exception:
-            self.on_log(traceback.format_exc(), "error")
+            self._log(traceback.format_exc(), "error")
             return
         log.debug("command %s finished in %.3fs", name, time.time() - start)
         if result:
-            self.on_log(str(result), "info")
+            self._log(str(result), "info")

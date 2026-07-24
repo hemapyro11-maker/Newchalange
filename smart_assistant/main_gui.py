@@ -3,8 +3,10 @@ main_gui.py — واجهة المساعد الذكي (Smart Assistant)
 وحدة مستقلة بالكامل: واجهة عصرية بـ CustomTkinter، Dark Mode، ودعم عربي/إنجليزي.
 """
 import os
+import shlex
 import sys
 import tkinter as tk
+from tkinter import filedialog
 
 try:
     import customtkinter as ctk
@@ -109,6 +111,12 @@ class AssistantApp(ctk.CTk):
         input_row = ctk.CTkFrame(self, fg_color="transparent")
         input_row.pack(fill="x", padx=16, pady=(12, 0))
 
+        self.attach_btn = ctk.CTkButton(
+            input_row, width=44, height=42, fg_color=CARD, hover_color=BORDER,
+            text="📎", font=ctk.CTkFont(size=16), command=self._attach_file
+        )
+        self.attach_btn.pack(side="left", padx=(0, 8))
+
         self.cmd_entry = ctk.CTkEntry(
             input_row, fg_color=CARD, border_color=BORDER, height=42,
             font=ctk.CTkFont(size=13)
@@ -186,6 +194,19 @@ class AssistantApp(ctk.CTk):
         else:
             self.engine.start()
             self._apply_lang()
+
+    def _attach_file(self):
+        path = filedialog.askopenfilename(
+            title=self.t.t("attach_file"),
+            filetypes=[
+                ("Media", "*.mp4 *.mov *.mkv *.avi *.webm *.mp3 *.wav *.m4a *.flac *.jpg *.jpeg *.png"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not path:
+            return
+        self.__append_log(f"📎  {path}", "info")
+        self.engine.submit(f"probe {shlex.quote(path)}")
 
     def _send_command(self):
         text = self.cmd_entry.get().strip()
