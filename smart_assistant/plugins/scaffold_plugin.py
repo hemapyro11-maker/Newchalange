@@ -29,17 +29,70 @@ def _write(path: pathlib.Path, content: str):
     path.write_text(content, encoding="utf-8")
 
 
+def _slugify(name: str) -> str:
+    slug = "".join(c.lower() if c.isalnum() else "-" for c in name).strip("-")
+    while "--" in slug:
+        slug = slug.replace("--", "-")
+    return slug or "project"
+
+
 def _scaffold_web(root: pathlib.Path, name: str) -> list[str]:
-    _write(root / "index.html", (
-        '<!doctype html>\n<html lang="ar" dir="rtl">\n<head>\n'
-        '  <meta charset="utf-8">\n  <title>' + name + '</title>\n'
-        '  <link rel="stylesheet" href="style.css">\n</head>\n<body>\n'
-        '  <h1>' + name + '</h1>\n  <p>ابدأ هنا.</p>\n'
-        '  <script src="script.js"></script>\n</body>\n</html>\n'
+    slug = _slugify(name)
+    _write(root / "src" / "index.html", (
+        '<!doctype html>\n<html lang="ar" dir="rtl">\n  <head>\n'
+        '    <meta charset="utf-8" />\n'
+        '    <meta name="viewport" content="width=device-width, initial-scale=1" />\n'
+        '    <title>' + name + '</title>\n'
+        '    <link rel="stylesheet" href="styles/main.css" />\n  </head>\n  <body>\n'
+        '    <h1>' + name + '</h1>\n    <p>ابدأ هنا.</p>\n'
+        '    <script type="module" src="scripts/main.js"></script>\n  </body>\n</html>\n'
     ))
-    _write(root / "style.css", "body { font-family: sans-serif; margin: 2rem; }\n")
-    _write(root / "script.js", f"console.log('{name} جاهز');\n")
-    return ["index.html", "style.css", "script.js"]
+    _write(root / "src" / "styles" / "main.css", (
+        ":root {\n  --accent: #4f6ef7;\n  --bg: #0f1117;\n  --text: #f1f5f9;\n}\n\n"
+        "body {\n  font-family: system-ui, sans-serif;\n  margin: 2rem;\n"
+        "  background: var(--bg);\n  color: var(--text);\n}\n"
+    ))
+    _write(root / "src" / "scripts" / "main.js", (
+        f'console.log("{name} جاهز");\n\n'
+        "export function main() {\n  // ابدأ منطق التطبيق هنا\n}\n\nmain();\n"
+    ))
+    _write(root / "package.json", json.dumps({
+        "name": slug, "version": "0.1.0", "private": True, "type": "module",
+        "scripts": {
+            "lint": "eslint src",
+            "format": "prettier --check src",
+            "format:fix": "prettier --write src",
+        },
+        "devDependencies": {"eslint": "^9.0.0", "prettier": "^3.2.0"},
+    }, indent=2))
+    _write(root / "eslint.config.js", (
+        "export default [\n"
+        "  {\n"
+        "    languageOptions: {\n"
+        "      ecmaVersion: \"latest\",\n"
+        "      sourceType: \"module\",\n"
+        "      globals: {\n"
+        "        console: \"readonly\",\n"
+        "        window: \"readonly\",\n"
+        "        document: \"readonly\",\n"
+        "        fetch: \"readonly\",\n"
+        "        localStorage: \"readonly\",\n"
+        "      },\n"
+        "    },\n"
+        "    rules: { \"no-unused-vars\": \"warn\", \"no-undef\": \"error\" },\n"
+        "  },\n"
+        "];\n"
+    ))
+    _write(root / ".prettierrc.json", json.dumps({"semi": True, "singleQuote": False, "printWidth": 100}, indent=2))
+    _write(root / ".gitignore", "node_modules/\ndist/\n.DS_Store\n")
+    _write(root / "README.md", (
+        f"# {name}\n\n## التشغيل\n\nافتح `src/index.html` في المتصفح مباشرة — مفيش build step.\n\n"
+        "## جودة الكود\n\n```bash\nnpm install\nnpm run lint\nnpm run format\n```\n"
+    ))
+    return [
+        "src/index.html", "src/styles/main.css", "src/scripts/main.js",
+        "package.json", "eslint.config.js", ".prettierrc.json", ".gitignore", "README.md",
+    ]
 
 
 def _scaffold_android(root: pathlib.Path, name: str) -> list[str]:
@@ -163,48 +216,367 @@ pygame.quit()
 
 
 def _scaffold_python(root: pathlib.Path, name: str) -> list[str]:
-    _write(root / "main.py", f'"""{name}"""\n\n\ndef main():\n    print("{name} جاهز")\n\n\nif __name__ == "__main__":\n    main()\n')
-    _write(root / "requirements.txt", "")
-    _write(root / "README.md", f"# {name}\n")
-    return ["main.py", "requirements.txt", "README.md"]
+    slug = _slugify(name)
+    pkg = slug.replace("-", "_")
+
+    _write(root / "src" / pkg / "__init__.py", f'"""{name}."""\n\n__version__ = "0.1.0"\n')
+    _write(root / "src" / pkg / "main.py", f'''"""نقطة الدخول الرئيسية."""
+
+
+def greet(who: str = "world") -> str:
+    return f"{{who}} جاهز"
+
+
+def main() -> None:
+    print(greet("{name}"))
+
+
+if __name__ == "__main__":
+    main()
+''')
+    _write(root / "tests" / "__init__.py", "")
+    _write(root / "tests" / "test_main.py", f'''from {pkg}.main import greet
+
+
+def test_greet_default():
+    assert greet() == "world جاهز"
+
+
+def test_greet_custom():
+    assert greet("Ahmed") == "Ahmed جاهز"
+''')
+    _write(root / "pyproject.toml", f'''[project]
+name = "{slug}"
+version = "0.1.0"
+description = "{name}"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0", "ruff>=0.4.0", "black>=24.0.0", "mypy>=1.9.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+''')
+    _write(root / ".gitignore", "__pycache__/\n*.pyc\n.venv/\n.pytest_cache/\n.mypy_cache/\n.ruff_cache/\n*.egg-info/\n")
+    _write(root / "README.md", f'''# {name}
+
+## التشغيل
+
+```bash
+pip install -e ".[dev]"
+python -m {pkg}.main
+```
+
+## الاختبارات
+
+```bash
+pytest
+```
+
+## جودة الكود
+
+```bash
+ruff check .
+black --check .
+mypy src
+```
+''')
+    return [
+        f"src/{pkg}/__init__.py", f"src/{pkg}/main.py", "tests/test_main.py",
+        "pyproject.toml", ".gitignore", "README.md",
+    ]
 
 
 def _scaffold_backend(root: pathlib.Path, name: str) -> list[str]:
-    _write(root / "main.py", f'''"""{name} — FastAPI backend starter."""
-from fastapi import FastAPI
+    slug = _slugify(name)
 
-app = FastAPI(title="{name}")
+    _write(root / "app" / "__init__.py", "")
+    _write(root / "app" / "core" / "__init__.py", "")
+    _write(root / "app" / "core" / "config.py", f'''"""إعدادات التطبيق — بتتحمّل من متغيرات البيئة (.env)."""
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-@app.get("/health")
-def health():
-    return {{"status": "ok"}}
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    app_name: str = "{name}"
+    debug: bool = False
+    log_level: str = "INFO"
+
+
+settings = Settings()
+''')
+    _write(root / "app" / "core" / "logging.py", '''"""إعداد logging منظّم — يُستدعى مرة واحدة عند بدء التطبيق."""
+
+import logging
+import sys
+
+from app.core.config import settings
+
+
+def configure_logging() -> None:
+    logging.basicConfig(
+        level=settings.log_level,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        stream=sys.stdout,
+    )
+''')
+    _write(root / "app" / "api" / "__init__.py", "")
+    _write(root / "app" / "api" / "routes" / "__init__.py", "")
+    _write(root / "app" / "api" / "routes" / "health.py", '''from fastapi import APIRouter
+
+router = APIRouter(tags=["health"])
+
+
+@router.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+''')
+    _write(root / "app" / "models" / "__init__.py", "")
+    _write(root / "app" / "models" / "schemas.py", '''from pydantic import BaseModel
+
+
+class Message(BaseModel):
+    message: str
+''')
+    _write(root / "app" / "services" / "__init__.py", "")
+    _write(root / "app" / "services" / "example_service.py", '''"""مثال طبقة منطق العمل (business logic layer) — منفصلة عن الـ routes
+عمداً، عشان تقدر تختبرها من غير ما تشغّل سيرفر HTTP."""
+
+
+def build_welcome_message(app_name: str) -> str:
+    return f"{app_name} API جاهز"
+''')
+    _write(root / "app" / "main.py", '''from fastapi import FastAPI
+
+from app.api.routes import health
+from app.core.config import settings
+from app.core.logging import configure_logging
+from app.services.example_service import build_welcome_message
+
+configure_logging()
+
+app = FastAPI(title=settings.app_name, debug=settings.debug)
+app.include_router(health.router)
 
 
 @app.get("/")
-def root():
-    return {{"message": "{name} API جاهز"}}
+def root() -> dict[str, str]:
+    return {"message": build_welcome_message(settings.app_name)}
 ''')
-    _write(root / "requirements.txt", "fastapi>=0.110.0\nuvicorn>=0.27.0\n")
-    _write(root / "README.md", f"# {name}\n\n```bash\npip install -r requirements.txt\nuvicorn main:app --reload\n```\n")
-    return ["main.py", "requirements.txt", "README.md"]
+    _write(root / "tests" / "__init__.py", "")
+    _write(root / "tests" / "test_health.py", '''from fastapi.testclient import TestClient
+
+from app.main import app
+
+client = TestClient(app)
+
+
+def test_health_endpoint():
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_root_endpoint():
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "message" in response.json()
+''')
+    _write(root / "tests" / "test_services.py", '''from app.services.example_service import build_welcome_message
+
+
+def test_build_welcome_message():
+    assert "MyApp" in build_welcome_message("MyApp")
+''')
+    _write(root / "pyproject.toml", f'''[project]
+name = "{slug}"
+version = "0.1.0"
+description = "{name}"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "pydantic-settings>=2.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "httpx>=0.27.0",
+    "ruff>=0.4.0",
+    "black>=24.0.0",
+    "mypy>=1.9.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+''')
+    _write(root / ".env.example", f"APP_NAME={name}\nDEBUG=false\nLOG_LEVEL=INFO\n")
+    _write(root / ".gitignore", "__pycache__/\n*.pyc\n.venv/\n.env\n.pytest_cache/\n.mypy_cache/\n.ruff_cache/\n")
+    _write(root / ".pre-commit-config.yaml", '''repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+  - repo: https://github.com/psf/black
+    rev: 24.4.2
+    hooks:
+      - id: black
+''')
+    _write(root / "Dockerfile", '''FROM python:3.12-slim
+WORKDIR /app
+COPY pyproject.toml .
+RUN pip install --no-cache-dir .
+COPY app ./app
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+''')
+    _write(root / "README.md", f'''# {name}
+
+## التشغيل
+
+```bash
+pip install -e ".[dev]"
+cp .env.example .env
+uvicorn app.main:app --reload
+```
+
+## الاختبارات
+
+```bash
+pytest
+```
+
+## جودة الكود
+
+```bash
+ruff check .
+black --check .
+mypy app
+```
+
+## البنية
+
+```
+app/
+  core/      إعدادات ولوجينج
+  api/routes/  نقاط النهاية (endpoints)
+  models/    Pydantic schemas
+  services/  منطق العمل — منفصل عن الـ HTTP layer
+tests/       اختبارات pytest حقيقية (TestClient)
+```
+''')
+    return [
+        "app/main.py", "app/core/config.py", "app/core/logging.py",
+        "app/api/routes/health.py", "app/models/schemas.py", "app/services/example_service.py",
+        "tests/test_health.py", "tests/test_services.py",
+        "pyproject.toml", ".env.example", ".gitignore", ".pre-commit-config.yaml",
+        "Dockerfile", "README.md",
+    ]
 
 
 def _scaffold_fullstack(root: pathlib.Path, name: str) -> list[str]:
     files = [f"frontend/{f}" for f in _scaffold_web(root / "frontend", name)]
     files += [f"backend/{f}" for f in _scaffold_backend(root / "backend", name)]
+    _write(root / "docker-compose.yml", '''services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env.example
+
+  frontend:
+    image: nginx:alpine
+    volumes:
+      - ./frontend/src:/usr/share/nginx/html:ro
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+''')
+    _write(root / "README.md", f"# {name} — Full-Stack\n\n```bash\ndocker compose up\n```\n\n"
+           "- backend: http://localhost:8000\n- frontend: http://localhost:8080\n\n"
+           "أو شغّل كل جزء لوحده حسب التعليمات في `backend/README.md` و`frontend/README.md`.\n")
+    files += ["docker-compose.yml", "README.md"]
     return files
 
 
 def _scaffold_docker(root: pathlib.Path, name: str) -> list[str]:
-    _write(root / "Dockerfile", '''FROM python:3.12-slim
+    _write(root / "Dockerfile", '''# ---- مرحلة البناء (builder) ----
+# بتثبت المتطلبات في مجلد مستخدم منفصل، عشان الصورة النهائية متحتويش
+# على أدوات بناء (compilers, ...) أو ملفات مؤقتة زيادة عن اللزوم.
+FROM python:3.12-slim AS builder
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+# ---- المرحلة النهائية (runtime) — صورة نظيفة وصغيرة ----
+FROM python:3.12-slim
+WORKDIR /app
+
+# مستخدم غير root — تشغيل الحاوية كـ root ممارسة أمان سيئة
+RUN useradd --create-home --uid 1000 appuser
+COPY --from=builder /root/.local /home/appuser/.local
 COPY . .
+RUN chown -R appuser:appuser /app
+USER appuser
+ENV PATH=/home/appuser/.local/bin:$PATH
+
+HEALTHCHECK --interval=30s --timeout=3s --retries=3 CMD python -c "print('ok')" || exit 1
+
+# غيّر السطر ده لنقطة دخول مشروعك الفعلية (زي: uvicorn app.main:app --host 0.0.0.0)
 CMD ["python", "main.py"]
 ''')
-    _write(root / ".dockerignore", "__pycache__/\n*.pyc\n.venv/\n.git/\n")
+    _write(root / ".dockerignore", (
+        "__pycache__/\n*.pyc\n.venv/\n.git/\n.pytest_cache/\n.mypy_cache/\n.ruff_cache/\n"
+        "*.egg-info/\n.env\ntests/\nREADME.md\n"
+    ))
     return ["Dockerfile", ".dockerignore"]
 
 
@@ -217,52 +589,240 @@ on:
   pull_request:
 
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt
-      - run: pip install pytest
-      - run: pytest
+      - run: pip install ruff black
+      - run: ruff check .
+      - run: black --check .
+
+  test:
+    needs: lint
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+      - run: pip install -e ".[dev]"
+      - run: pytest --cov --cov-report=term-missing
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build package
+        run: |
+          pip install build
+          python -m build
 ''')
     return [".github/workflows/ci.yml"]
 
 
 def _scaffold_pytest(root: pathlib.Path, name: str) -> list[str]:
-    _write(root / "tests" / "test_example.py", '''def test_example():
-    assert 1 + 1 == 2
+    _write(root / "src" / "example.py", '''"""مثال كود عشان الاختبارات يكون ليها حاجة حقيقية تختبرها."""
+
+
+def add(a: int, b: int) -> int:
+    return a + b
+
+
+def divide(a: float, b: float) -> float:
+    if b == 0:
+        raise ValueError("القسمة على صفر غير مسموحة")
+    return a / b
 ''')
-    _write(root / "pytest.ini", "[pytest]\ntestpaths = tests\n")
-    return ["tests/test_example.py", "pytest.ini"]
+    _write(root / "tests" / "test_example.py", '''import pytest
+
+from example import add, divide
+
+
+def test_add():
+    assert add(2, 3) == 5
+
+
+def test_divide():
+    assert divide(10, 2) == 5
+
+
+def test_divide_by_zero_raises():
+    with pytest.raises(ValueError):
+        divide(1, 0)
+''')
+    _write(root / "pytest.ini", "[pytest]\ntestpaths = tests\npythonpath = src\naddopts = --cov=src --cov-report=term-missing\n")
+    _write(root / "tox.ini", '''[tox]
+envlist = py311, py312
+isolated_build = true
+
+[testenv]
+deps =
+    pytest
+    pytest-cov
+commands = pytest {posargs}
+
+[testenv:lint]
+deps = ruff
+commands = ruff check src tests
+''')
+    _write(root / "requirements-dev.txt", "pytest>=8.0.0\npytest-cov>=5.0.0\ntox>=4.0.0\nruff>=0.4.0\n")
+    _write(root / "README.md", f'''# {name} — QA/Test Automation
+
+```bash
+pip install -r requirements-dev.txt
+pytest                # اختبار على بايثون الحالي + تقرير تغطية
+tox                   # اختبار على كل نسخ بايثون في [tox] envlist
+```
+''')
+    return ["src/example.py", "tests/test_example.py", "pytest.ini", "tox.ini", "requirements-dev.txt", "README.md"]
 
 
 def _scaffold_ml(root: pathlib.Path, name: str) -> list[str]:
-    _write(root / "train.py", f'''"""{name} — scikit-learn training starter (Iris classifier)."""
+    slug = _slugify(name)
+    pkg = slug.replace("-", "_")
+
+    _write(root / "src" / pkg / "__init__.py", f'"""{name} — ML pipeline."""\n\n__version__ = "0.1.0"\n')
+    _write(root / "src" / pkg / "data.py", '''"""تحميل وتقسيم البيانات — طبقة منفصلة عشان تقدر تستبدلها ببيانات
+حقيقية من غير ما تلمس كود التدريب أو التقييم."""
+
 from sklearn.datasets import load_iris
 from sklearn.model_selection import train_test_split
+
+
+def load_data(test_size: float = 0.2, random_state: int = 42):
+    dataset = load_iris()
+    return train_test_split(
+        dataset.data, dataset.target, test_size=test_size, random_state=random_state
+    )
+''')
+    _write(root / "src" / pkg / "model.py", '''"""تعريف النموذج — منفصل عن التدريب عشان تقدر تجرب نماذج مختلفة بسهولة."""
+
 from sklearn.ensemble import RandomForestClassifier
+
+
+def build_model(random_state: int = 42) -> RandomForestClassifier:
+    return RandomForestClassifier(random_state=random_state)
+''')
+    _write(root / "src" / pkg / "train.py", f'''"""حلقة التدريب."""
+
+from {pkg}.data import load_data
+from {pkg}.model import build_model
+
+
+def train():
+    X_train, X_test, y_train, y_test = load_data()
+    model = build_model()
+    model.fit(X_train, y_train)
+    return model, X_test, y_test
+''')
+    _write(root / "src" / pkg / "evaluate.py", '''"""تقييم النموذج بعد التدريب."""
+
 from sklearn.metrics import accuracy_score
 
 
-def main():
-    data = load_iris()
-    X_train, X_test, y_train, y_test = train_test_split(
-        data.data, data.target, test_size=0.2, random_state=42
-    )
-    model = RandomForestClassifier(random_state=42)
-    model.fit(X_train, y_train)
+def evaluate(model, X_test, y_test) -> float:
     predictions = model.predict(X_test)
-    print(f"accuracy: {{accuracy_score(y_test, predictions):.3f}}")
+    return accuracy_score(y_test, predictions)
+''')
+    _write(root / "src" / pkg / "__main__.py", f'''"""نقطة الدخول: python -m {pkg}"""
+
+from {pkg}.evaluate import evaluate
+from {pkg}.train import train
+
+
+def main() -> None:
+    model, X_test, y_test = train()
+    accuracy = evaluate(model, X_test, y_test)
+    print(f"accuracy: {{accuracy:.3f}}")
 
 
 if __name__ == "__main__":
     main()
 ''')
-    _write(root / "requirements.txt", "scikit-learn>=1.4.0\n")
-    return ["train.py", "requirements.txt"]
+    _write(root / "tests" / "__init__.py", "")
+    _write(root / "tests" / "test_pipeline.py", f'''from {pkg}.evaluate import evaluate
+from {pkg}.train import train
+
+
+def test_pipeline_trains_and_reaches_reasonable_accuracy():
+    model, X_test, y_test = train()
+    accuracy = evaluate(model, X_test, y_test)
+    assert 0.0 <= accuracy <= 1.0
+    assert accuracy > 0.7  # Iris + RandomForest بيوصل غالباً لأكتر من 90%
+''')
+    _write(root / "data" / ".gitkeep", "")
+    _write(root / "models" / ".gitkeep", "")
+    _write(root / "pyproject.toml", f'''[project]
+name = "{slug}"
+version = "0.1.0"
+description = "{name}"
+requires-python = ">=3.11"
+dependencies = ["scikit-learn>=1.4.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0", "ruff>=0.4.0", "black>=24.0.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+''')
+    _write(root / ".gitignore", "__pycache__/\n*.pyc\n.venv/\n.pytest_cache/\n.ruff_cache/\n*.egg-info/\ndata/*\n!data/.gitkeep\nmodels/*\n!models/.gitkeep\n")
+    _write(root / "README.md", f'''# {name}
+
+## التشغيل
+
+```bash
+pip install -e ".[dev]"
+python -m {pkg}
+```
+
+## الاختبارات
+
+```bash
+pytest
+```
+
+## البنية
+
+```
+src/{pkg}/
+  data.py      تحميل/تقسيم البيانات
+  model.py     تعريف النموذج
+  train.py     حلقة التدريب
+  evaluate.py  التقييم
+data/          بياناتك الحقيقية (فاضي دلوقتي — placeholder)
+models/        النماذج المدرّبة المحفوظة
+```
+
+استبدل `src/{pkg}/data.py` ببياناتك الحقيقية بدل Iris demo dataset.
+''')
+    return [
+        f"src/{pkg}/data.py", f"src/{pkg}/model.py", f"src/{pkg}/train.py",
+        f"src/{pkg}/evaluate.py", f"src/{pkg}/__main__.py", "tests/test_pipeline.py",
+        "pyproject.toml", ".gitignore", "README.md",
+    ]
 
 
 def _scaffold_quantum(root: pathlib.Path, name: str) -> list[str]:

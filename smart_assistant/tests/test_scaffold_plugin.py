@@ -38,10 +38,12 @@ def test_scaffold_web_creates_valid_files(make_ctx, tmp_path):
     result = sp._cmd_scaffold(make_ctx("scaffold", ["web", "MySite", str(tmp_path)]))
     assert result.startswith("✅")
     root = tmp_path / "MySite"
-    assert (root / "index.html").is_file()
-    assert (root / "style.css").is_file()
-    assert (root / "script.js").is_file()
-    assert "MySite" in (root / "index.html").read_text(encoding="utf-8")
+    assert (root / "src" / "index.html").is_file()
+    assert (root / "src" / "styles" / "main.css").is_file()
+    assert (root / "src" / "scripts" / "main.js").is_file()
+    assert (root / "package.json").is_file()
+    assert (root / "eslint.config.js").is_file()
+    assert "MySite" in (root / "src" / "index.html").read_text(encoding="utf-8")
 
 
 def test_scaffold_android_produces_wellformed_manifest(make_ctx, tmp_path):
@@ -73,8 +75,14 @@ def test_scaffold_ios_creates_swift_files(make_ctx, tmp_path):
 def test_scaffold_python_creates_runnable_main(make_ctx, tmp_path):
     result = sp._cmd_scaffold(make_ctx("scaffold", ["python", "MyScript", str(tmp_path)]))
     assert result.startswith("✅")
-    import py_compile
-    py_compile.compile(str(tmp_path / "MyScript" / "main.py"), doraise=True)
+    root = tmp_path / "MyScript"
+    py_compile.compile(str(root / "src" / "myscript" / "main.py"), doraise=True)
+    assert (root / "pyproject.toml").is_file()
+    proc = subprocess.run(
+        ["python3", "-m", "myscript.main"], cwd=root / "src", capture_output=True, text=True,
+    )
+    assert proc.returncode == 0
+    assert "جاهز" in proc.stdout
 
 
 def test_scaffold_game_creates_runnable_pygame_source(make_ctx, tmp_path):
@@ -87,25 +95,40 @@ def test_scaffold_game_creates_runnable_pygame_source(make_ctx, tmp_path):
 def test_scaffold_backend_compiles(make_ctx, tmp_path):
     result = sp._cmd_scaffold(make_ctx("scaffold", ["backend", "MyAPI", str(tmp_path)]))
     assert result.startswith("✅")
-    py_compile.compile(str(tmp_path / "MyAPI" / "main.py"), doraise=True)
-    assert "fastapi" in (tmp_path / "MyAPI" / "requirements.txt").read_text(encoding="utf-8")
+    root = tmp_path / "MyAPI"
+    py_compile.compile(str(root / "app" / "main.py"), doraise=True)
+    assert (root / "pyproject.toml").is_file()
+    assert "fastapi" in (root / "pyproject.toml").read_text(encoding="utf-8")
+    assert (root / "Dockerfile").is_file()
+    assert (root / "tests" / "test_health.py").is_file()
 
 
 def test_scaffold_fullstack_creates_both_sides(make_ctx, tmp_path):
     result = sp._cmd_scaffold(make_ctx("scaffold", ["fullstack", "MyFS", str(tmp_path)]))
     assert result.startswith("✅")
     root = tmp_path / "MyFS"
-    assert (root / "frontend" / "index.html").is_file()
-    assert (root / "backend" / "main.py").is_file()
-    py_compile.compile(str(root / "backend" / "main.py"), doraise=True)
+    assert (root / "frontend" / "src" / "index.html").is_file()
+    assert (root / "backend" / "app" / "main.py").is_file()
+    assert (root / "docker-compose.yml").is_file()
+    py_compile.compile(str(root / "backend" / "app" / "main.py"), doraise=True)
+    yaml = pytest.importorskip("yaml")
+    compose = yaml.safe_load((root / "docker-compose.yml").read_text(encoding="utf-8"))
+    assert set(compose["services"]) == {"backend", "frontend"}
 
 
 def test_scaffold_docker_creates_valid_dockerfile(make_ctx, tmp_path):
     result = sp._cmd_scaffold(make_ctx("scaffold", ["docker", "MyDock", str(tmp_path)]))
     assert result.startswith("✅")
     content = (tmp_path / "MyDock" / "Dockerfile").read_text(encoding="utf-8")
-    assert content.startswith("FROM python")
+    # multi-stage build: builder stage + slim runtime stage
+    assert content.count("FROM python") == 2
+    assert "AS builder" in content
+    # non-root user + healthcheck are required, not optional, for production images
+    assert "USER appuser" in content
+    assert "HEALTHCHECK" in content
     assert "CMD" in content
+    dockerignore = (tmp_path / "MyDock" / ".dockerignore").read_text(encoding="utf-8")
+    assert ".git" in dockerignore and "__pycache__" in dockerignore
 
 
 def test_scaffold_ci_produces_valid_yaml(make_ctx, tmp_path):
@@ -114,7 +137,11 @@ def test_scaffold_ci_produces_valid_yaml(make_ctx, tmp_path):
     assert result.startswith("✅")
     workflow = tmp_path / "MyCI" / ".github" / "workflows" / "ci.yml"
     data = yaml.safe_load(workflow.read_text(encoding="utf-8"))
-    assert "jobs" in data and "test" in data["jobs"]
+    jobs = data["jobs"]
+    assert set(jobs) == {"lint", "test", "build"}
+    assert jobs["test"]["needs"] == "lint"
+    assert jobs["build"]["needs"] == "test"
+    assert "matrix" in jobs["test"]["strategy"]
 
 
 def test_scaffold_pytest_is_runnable(make_ctx, tmp_path):
@@ -123,14 +150,18 @@ def test_scaffold_pytest_is_runnable(make_ctx, tmp_path):
     root = tmp_path / "MyTests"
     proc = subprocess.run(["python3", "-m", "pytest", "-q", str(root)], capture_output=True, text=True)
     assert proc.returncode == 0
-    assert "1 passed" in proc.stdout
+    assert "3 passed" in proc.stdout
+    assert (root / "tox.ini").is_file()
+    assert (root / "requirements-dev.txt").is_file()
 
 
 def test_scaffold_ml_script_compiles(make_ctx, tmp_path):
     result = sp._cmd_scaffold(make_ctx("scaffold", ["ml", "MyML", str(tmp_path)]))
     assert result.startswith("✅")
-    py_compile.compile(str(tmp_path / "MyML" / "train.py"), doraise=True)
-    assert "scikit-learn" in (tmp_path / "MyML" / "requirements.txt").read_text(encoding="utf-8")
+    root = tmp_path / "MyML"
+    for mod in ("data", "model", "train", "evaluate", "__main__"):
+        py_compile.compile(str(root / "src" / "myml" / f"{mod}.py"), doraise=True)
+    assert "scikit-learn" in (root / "pyproject.toml").read_text(encoding="utf-8")
 
 
 @pytest.mark.skipif(
@@ -139,8 +170,11 @@ def test_scaffold_ml_script_compiles(make_ctx, tmp_path):
 )
 def test_scaffold_ml_script_actually_trains(make_ctx, tmp_path):
     sp._cmd_scaffold(make_ctx("scaffold", ["ml", "MyML", str(tmp_path)]))
-    proc = subprocess.run(["python3", str(tmp_path / "MyML" / "train.py")], capture_output=True, text=True)
-    assert proc.returncode == 0
+    root = tmp_path / "MyML"
+    proc = subprocess.run(
+        ["python3", "-m", "myml"], cwd=root / "src", capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
     assert "accuracy:" in proc.stdout
 
 

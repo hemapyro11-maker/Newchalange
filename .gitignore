@@ -1,6 +1,10 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.coverage
+.tox/
+.ruff_cache/
+.mypy_cache/
 build/
 dist/
 *.spec
