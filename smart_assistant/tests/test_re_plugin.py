@@ -2,7 +2,6 @@ import pathlib
 import struct
 
 import pytest
-
 import re_plugin as rp
 
 LS = pathlib.Path("/bin/ls")

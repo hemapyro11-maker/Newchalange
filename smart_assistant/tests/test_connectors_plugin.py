@@ -1,9 +1,8 @@
 import json
 import time
 
-import pytest
-
 import connectors_plugin as cp
+import pytest
 
 
 def _mcp_available() -> bool:

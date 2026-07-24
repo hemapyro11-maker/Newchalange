@@ -1,7 +1,7 @@
 """اختبارات Core Engine: CommandRegistry، الـ dispatch، تحميل الإضافات، وسجل المهارات."""
 import time
 
-from core_engine import AssistantEngine, CommandContext, CommandRegistry
+from core_engine import AssistantEngine, CommandRegistry
 
 
 def test_registry_register_and_get():

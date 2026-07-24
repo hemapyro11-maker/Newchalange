@@ -1,6 +1,5 @@
-import pytest
-
 import data_science_plugin as dsp
+import pytest
 
 requires_pandas = pytest.mark.skipif(not dsp.PANDAS_AVAILABLE, reason="pandas not installed")
 requires_matplotlib = pytest.mark.skipif(not dsp.MATPLOTLIB_AVAILABLE, reason="matplotlib not installed")

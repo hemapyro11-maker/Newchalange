@@ -1,6 +1,5 @@
-import pytest
-
 import design_plugin as dp
+import pytest
 
 requires_pil = pytest.mark.skipif(not dp.PIL_AVAILABLE, reason="Pillow not installed")
 

@@ -2,12 +2,10 @@ import hashlib
 import shutil
 import socket
 import ssl
-import stat
 import subprocess
 import threading
 
 import pytest
-
 import security_plugin as sp
 
 requires_openssl = pytest.mark.skipif(not shutil.which("openssl"), reason="openssl not installed")

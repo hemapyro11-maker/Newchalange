@@ -1,9 +1,8 @@
 import shutil
 import subprocess
 
-import pytest
-
 import media_plugin as mm
+import pytest
 
 requires_ffmpeg = pytest.mark.skipif(
     not (shutil.which("ffmpeg") and shutil.which("ffprobe")), reason="ffmpeg/ffprobe not installed",

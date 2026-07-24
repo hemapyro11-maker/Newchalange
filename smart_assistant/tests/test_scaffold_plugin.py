@@ -7,7 +7,6 @@ import subprocess
 import xml.etree.ElementTree as ET
 
 import pytest
-
 import scaffold_plugin as sp
 
 requires_gcc = pytest.mark.skipif(not shutil.which("gcc"), reason="gcc not installed")

@@ -295,7 +295,11 @@ def _cmd_db_indexes(ctx) -> str:
                 lines.append("    (مفيش أي index)")
             for idx in index_rows:
                 idx_name, is_unique, origin = idx[1], idx[2], idx[3]
-                cur.execute(f'PRAGMA index_info("{idx_name}")')
+                quoted_idx = _quote_identifier(idx_name)
+                if quoted_idx is None:
+                    lines.append(f"    📌 {idx_name} (اسم index غير صالح، اتخطّى)")
+                    continue
+                cur.execute(f"PRAGMA index_info({quoted_idx})")
                 cols = [row[2] for row in sorted(cur.fetchall(), key=lambda r: r[0])]
                 if cols:
                     indexed_leading_cols.add(cols[0])

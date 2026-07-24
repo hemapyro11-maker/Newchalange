@@ -1,9 +1,8 @@
 import shutil
 import subprocess
 
-import pytest
-
 import cinema_plugin as cp
+import pytest
 
 
 def _close(actual: tuple, expected: tuple, tol: int = 10) -> bool:

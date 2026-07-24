@@ -10,9 +10,10 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "plugins"))
 
-import pytest  # noqa: E402
-import core_engine  # noqa: E402
-from core_engine import AssistantEngine, CommandContext  # noqa: E402
+import pytest
+
+import core_engine
+from core_engine import AssistantEngine, CommandContext
 
 
 @pytest.fixture(autouse=True)

@@ -21,12 +21,12 @@ import threading
 import time
 import traceback
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Optional
 
 log = logging.getLogger("assistant.core")
 
-CommandHandler = Callable[["CommandContext"], Optional[str]]
+CommandHandler = Callable[["CommandContext"], str | None]
 
 
 @dataclass
@@ -34,7 +34,7 @@ class CommandContext:
     """يوصل معلومات الأمر الحالي لمنطق التنفيذ (raw text, args, المحرك نفسه)."""
     raw: str
     args: list[str]
-    engine: "AssistantEngine"
+    engine: AssistantEngine
 
 
 @dataclass
@@ -54,7 +54,7 @@ class CommandRegistry:
     def unregister(self, name: str):
         self._commands.pop(name.lower(), None)
 
-    def get(self, name: str) -> Optional[Command]:
+    def get(self, name: str) -> Command | None:
         return self._commands.get(name.lower())
 
     def list_commands(self) -> list[Command]:
@@ -101,18 +101,18 @@ class AssistantEngine:
     ويحمّل إضافات (plugins) ديناميكياً لتوسيع الأوامر المتاحة.
     """
 
-    def __init__(self, on_log=None, on_status=None, plugins_dirs: Optional[list[pathlib.Path]] = None):
+    def __init__(self, on_log=None, on_status=None, plugins_dirs: list[pathlib.Path] | None = None):
         self.on_log = on_log or (lambda msg, level="info": None)
         self.on_status = on_status or (lambda status: None)
         self.registry = CommandRegistry()
-        self.log_history: "deque[tuple[str, str]]" = deque(maxlen=300)
+        self.log_history: deque[tuple[str, str]] = deque(maxlen=300)
         self.plugins_dirs = plugins_dirs or default_plugin_dirs()
         self._loaded_plugins: list[str] = []
         self.skills_path = default_state_dir() / "skills.json"
         self.skills = self._load_skills()
-        self._queue: "queue.Queue[tuple[str, Optional[Callable]]]" = queue.Queue()
+        self._queue: queue.Queue[tuple[str, Callable | None]] = queue.Queue()
         self._stop_flag = threading.Event()
-        self._worker: Optional[threading.Thread] = None
+        self._worker: threading.Thread | None = None
         self._register_builtin_commands()
         self.load_plugins()
 
