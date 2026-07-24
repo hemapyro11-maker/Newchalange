@@ -99,8 +99,30 @@ def _scaffold_android(root: pathlib.Path, name: str) -> list[str]:
     slug = "".join(c.lower() for c in name if c.isalnum())
     pkg = "com.example." + slug if slug else "com.example.app"
     pkg_path = pkg.replace(".", "/")
-    _write(root / "settings.gradle.kts", f'rootProject.name = "{name}"\ninclude(":app")\n')
-    _write(root / "build.gradle.kts", "// top-level build file\n")
+    _write(root / "settings.gradle.kts", f'''pluginManagement {{
+    repositories {{
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }}
+}}
+dependencyResolutionManagement {{
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {{
+        google()
+        mavenCentral()
+    }}
+}}
+
+rootProject.name = "{name}"
+include(":app")
+''')
+    _write(root / "build.gradle.kts", "// top-level build file — لا تضيف dependencies هنا، استخدم app/build.gradle.kts\n")
+    _write(root / "gradle.properties", (
+        "org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8\n"
+        "android.useAndroidX=true\n"
+        "kotlin.code.style=official\n"
+    ))
     _write(root / "app" / "build.gradle.kts", f"""plugins {{
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -116,6 +138,21 @@ android {{
         versionCode = 1
         versionName = "1.0"
     }}
+    compileOptions {{
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }}
+    kotlinOptions {{
+        jvmTarget = "17"
+    }}
+}}
+
+dependencies {{
+    implementation("androidx.core:core-ktx:1.13.0")
+    implementation("androidx.appcompat:appcompat:1.6.1")
+    implementation("com.google.android.material:material:1.11.0")
+    testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
 }}
 """)
     _write(root / "app" / "src" / "main" / "AndroidManifest.xml", f"""<?xml version="1.0" encoding="utf-8"?>
@@ -130,6 +167,14 @@ android {{
     </application>
 </manifest>
 """)
+    _write(root / "app" / "src" / "main" / "java" / pkg_path / "Greeter.kt", f"""package {pkg}
+
+/** منطق بحت من غير أي اعتماد على Android framework — عشان يتاختبر
+ * كـ JVM unit test عادي (app/src/test/...) من غير محاكي/جهاز حقيقي. */
+object Greeter {{
+    fun greet(who: String): String = "Hello, $who!"
+}}
+""")
     _write(root / "app" / "src" / "main" / "java" / pkg_path / "MainActivity.kt", f"""package {pkg}
 
 import android.os.Bundle
@@ -140,13 +185,54 @@ class MainActivity : ComponentActivity() {{
     override fun onCreate(savedInstanceState: Bundle?) {{
         super.onCreate(savedInstanceState)
         val view = TextView(this)
-        view.text = "{name}"
+        view.text = Greeter.greet("{name}")
         setContentView(view)
     }}
 }}
 """)
-    return ["settings.gradle.kts", "build.gradle.kts", "app/build.gradle.kts",
-            "app/src/main/AndroidManifest.xml", f"app/src/main/java/{pkg_path}/MainActivity.kt"]
+    _write(root / "app" / "src" / "test" / "java" / pkg_path / "GreeterTest.kt", f"""package {pkg}
+
+import org.junit.Assert.assertEquals
+import org.junit.Test
+
+class GreeterTest {{
+    @Test
+    fun greet_includesTheName() {{
+        assertEquals("Hello, Ahmed!", Greeter.greet("Ahmed"))
+    }}
+
+    @Test
+    fun greet_isNeverEmpty() {{
+        assert(Greeter.greet("{name}").isNotEmpty())
+    }}
+}}
+""")
+    _write(root / ".gitignore", (
+        "*.iml\n.gradle/\n/local.properties\n/.idea/\n.DS_Store\n"
+        "/build/\napp/build/\ncaptures/\n.externalNativeBuild/\n.cxx/\nlocal.properties\n"
+    ))
+    _write(root / "README.md", f'''# {name} — Android (Kotlin) Starter
+
+افتح المجلد في Android Studio (هيحمّل Gradle wrapper تلقائيًا)، أو من
+سطر الأوامر لو عندك Gradle متثبت:
+
+```bash
+gradle test              # يشغّل JUnit unit tests (app/src/test)
+gradle assembleDebug     # يبني APK
+```
+
+منطق الترحيب في `Greeter.kt` منفصل عمدًا عن `MainActivity.kt` (اللي
+بيحتاج Android framework/emulator) — عشان يتاختبر كـ JVM unit test عادي
+في `GreeterTest.kt` من غير محاكي.
+''')
+    return [
+        "settings.gradle.kts", "build.gradle.kts", "gradle.properties", "app/build.gradle.kts",
+        "app/src/main/AndroidManifest.xml",
+        f"app/src/main/java/{pkg_path}/Greeter.kt",
+        f"app/src/main/java/{pkg_path}/MainActivity.kt",
+        f"app/src/test/java/{pkg_path}/GreeterTest.kt",
+        ".gitignore", "README.md",
+    ]
 
 
 def _scaffold_ios(root: pathlib.Path, name: str) -> list[str]:
@@ -162,11 +248,19 @@ struct {safe}App: App {{
     }}
 }}
 """)
+    _write(root / "Greeter.swift", '''// منطق بحت من غير أي اعتماد على SwiftUI/UIKit — عشان يتاختبر بـ XCTest
+// عادي (شوف GreeterTests.swift) من غير simulator ولا device حقيقي.
+enum Greeter {
+    static func greet(_ who: String) -> String {
+        "Hello, \\(who)!"
+    }
+}
+''')
     _write(root / "ContentView.swift", f"""import SwiftUI
 
 struct ContentView: View {{
     var body: some View {{
-        Text("{name}")
+        Text(Greeter.greet("{name}"))
             .padding()
     }}
 }}
@@ -175,7 +269,43 @@ struct ContentView: View {{
     ContentView()
 }}
 """)
-    return [f"{safe}App.swift", "ContentView.swift"]
+    _write(root / f"{safe}Tests" / "GreeterTests.swift", f"""import XCTest
+@testable import {safe}
+
+final class GreeterTests: XCTestCase {{
+    func testGreetIncludesTheName() {{
+        XCTAssertEqual(Greeter.greet("Ahmed"), "Hello, Ahmed!")
+    }}
+
+    func testGreetIsNeverEmpty() {{
+        XCTAssertFalse(Greeter.greet("{name}").isEmpty)
+    }}
+}}
+""")
+    _write(root / ".gitignore", (
+        ".build/\nDerivedData/\n*.xcuserstate\nxcuserdata/\n.swiftpm/\nPackage.resolved\n"
+    ))
+    _write(root / "README.md", f'''# {name} — SwiftUI Starter
+
+افتح المجلد في Xcode (على ماك)، أضف الملفات لمشروع iOS App جديد، وشغّل
+الاختبارات (⌘U) أو من سطر الأوامر:
+
+```bash
+xcodebuild test -scheme {safe} -destination 'platform=iOS Simulator,name=iPhone 15'
+```
+
+منطق الترحيب في `Greeter.swift` منفصل عمدًا عن `ContentView.swift` (اللي
+بيحتاج SwiftUI runtime) — عشان يتاختبر كـ XCTest عادي في
+`{safe}Tests/GreeterTests.swift` من غير simulator.
+
+**ملحوظة:** الملفات دي سقالة (starter files) لازم تتضاف لمشروع Xcode
+(.xcodeproj) — Xcode نفسه هو اللي بيولّد بنية المشروع الكاملة (project
+file، build settings، إلخ) وقت "New Project"، ومحتاج ماك لتشغيله.
+''')
+    return [
+        f"{safe}App.swift", "Greeter.swift", "ContentView.swift",
+        f"{safe}Tests/GreeterTests.swift", ".gitignore", "README.md",
+    ]
 
 
 def _scaffold_game(root: pathlib.Path, name: str) -> list[str]:

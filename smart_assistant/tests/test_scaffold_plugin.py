@@ -1,5 +1,6 @@
 import json
 import os
+import pathlib
 import py_compile
 import shutil
 import subprocess
@@ -51,8 +52,18 @@ def test_scaffold_web_creates_valid_files(make_ctx, tmp_path):
 def test_scaffold_android_produces_wellformed_manifest(make_ctx, tmp_path):
     result = sp._cmd_scaffold(make_ctx("scaffold", ["android", "MyApp", str(tmp_path)]))
     assert result.startswith("✅")
-    manifest = tmp_path / "MyApp" / "app" / "src" / "main" / "AndroidManifest.xml"
+    root = tmp_path / "MyApp"
+    manifest = root / "app" / "src" / "main" / "AndroidManifest.xml"
     ET.parse(manifest)  # raises if malformed
+    pkg_dir = root / "app" / "src" / "main" / "java" / "com" / "example" / "myapp"
+    assert (pkg_dir / "Greeter.kt").is_file()
+    assert (pkg_dir / "MainActivity.kt").is_file()
+    assert (root / "app" / "src" / "test" / "java" / "com" / "example" / "myapp" / "GreeterTest.kt").is_file()
+    assert "Greeter.greet(" in (pkg_dir / "MainActivity.kt").read_text(encoding="utf-8")
+    settings = (root / "settings.gradle.kts").read_text(encoding="utf-8")
+    assert "pluginManagement" in settings and "dependencyResolutionManagement" in settings
+    assert (root / "gradle.properties").is_file()
+    assert (root / ".gitignore").is_file()
 
 
 def test_scaffold_android_package_fallback_for_non_alnum_name(make_ctx, tmp_path):
@@ -62,16 +73,75 @@ def test_scaffold_android_package_fallback_for_non_alnum_name(make_ctx, tmp_path
     assert result.startswith("✅")
     manifest_kt_dir = tmp_path / "!!!" / "app" / "src" / "main" / "java" / "com" / "example" / "app"
     assert manifest_kt_dir.is_dir()
+    assert (manifest_kt_dir / "Greeter.kt").is_file()
     build_gradle = (tmp_path / "!!!" / "app" / "build.gradle.kts").read_text(encoding="utf-8")
     assert 'namespace = "com.example.app"' in build_gradle
     assert 'namespace = "com.example."' not in build_gradle
 
 
+def _find_jar(name_glob):
+    for base in ("/opt", "/usr/share/java", str(pathlib.Path.home() / ".gradle"), str(pathlib.Path.home() / ".m2")):
+        matches = list(pathlib.Path(base).glob(f"**/{name_glob}")) if pathlib.Path(base).is_dir() else []
+        if matches:
+            return matches[0]
+    return None
+
+
+_junit_jar = _find_jar("junit-4*.jar")
+_hamcrest_jar = _find_jar("hamcrest-core*.jar")
+requires_kotlinc_and_junit = pytest.mark.skipif(
+    not (shutil.which("kotlinc") and _junit_jar and _hamcrest_jar),
+    reason="kotlinc or junit/hamcrest jars not available",
+)
+
+
+@requires_kotlinc_and_junit
+def test_scaffold_android_greeter_actually_compiles_and_tests_pass(make_ctx, tmp_path):
+    result = sp._cmd_scaffold(make_ctx("scaffold", ["android", "MyApp", str(tmp_path)]))
+    assert result.startswith("✅")
+    root = tmp_path / "MyApp"
+    pkg_dir = "com/example/myapp"
+    classpath = f"{_junit_jar}:{_hamcrest_jar}"
+    out_jar = tmp_path / "greeter_test.jar"
+    compile_proc = subprocess.run(
+        [
+            "kotlinc",
+            str(root / "app" / "src" / "main" / "java" / pkg_dir / "Greeter.kt"),
+            str(root / "app" / "src" / "test" / "java" / pkg_dir / "GreeterTest.kt"),
+            "-cp", classpath, "-include-runtime", "-d", str(out_jar),
+        ],
+        capture_output=True, text=True,
+    )
+    assert out_jar.is_file(), compile_proc.stderr
+    run_proc = subprocess.run(
+        ["java", "-cp", f"{out_jar}:{classpath}", "org.junit.runner.JUnitCore", "com.example.myapp.GreeterTest"],
+        capture_output=True, text=True,
+    )
+    assert run_proc.returncode == 0, run_proc.stdout + run_proc.stderr
+    assert "OK (2 tests)" in run_proc.stdout
+
+
 def test_scaffold_ios_creates_swift_files(make_ctx, tmp_path):
     result = sp._cmd_scaffold(make_ctx("scaffold", ["ios", "MyIOSApp", str(tmp_path)]))
     assert result.startswith("✅")
-    assert (tmp_path / "MyIOSApp" / "MyIOSAppApp.swift").is_file()
-    assert (tmp_path / "MyIOSApp" / "ContentView.swift").is_file()
+    root = tmp_path / "MyIOSApp"
+    assert (root / "MyIOSAppApp.swift").is_file()
+    assert (root / "Greeter.swift").is_file()
+    assert (root / "ContentView.swift").is_file()
+    assert (root / "MyIOSAppTests" / "GreeterTests.swift").is_file()
+    assert (root / ".gitignore").is_file()
+    assert "Greeter.greet(" in (root / "ContentView.swift").read_text(encoding="utf-8")
+    tests_content = (root / "MyIOSAppTests" / "GreeterTests.swift").read_text(encoding="utf-8")
+    assert "@testable import MyIOSApp" in tests_content
+    assert "XCTAssertEqual" in tests_content
+
+
+def test_scaffold_ios_sanitizes_non_alnum_name(make_ctx, tmp_path):
+    result = sp._cmd_scaffold(make_ctx("scaffold", ["ios", "!!!", str(tmp_path)]))
+    assert result.startswith("✅")
+    root = tmp_path / "!!!"
+    assert (root / "AppApp.swift").is_file()
+    assert (root / "AppTests" / "GreeterTests.swift").is_file()
 
 
 def test_scaffold_python_creates_runnable_main(make_ctx, tmp_path):

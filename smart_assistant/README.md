@@ -258,20 +258,20 @@ Ghidra/radare2). كل النتائج اتقارنت واتأكد إنها مطا
 | Frontend Web Developer | `scaffold web <name>` | ✅ HTML/CSS/JS شغال فوراً |
 | Backend Web Developer | `scaffold backend <name>` | ✅ FastAPI شغال فوراً (`uvicorn main:app`) |
 | Full-Stack Web Developer | `scaffold fullstack <name>` | ✅ frontend+backend مع بعض |
-| Android Developer | `scaffold android <name>` | ✅ سقالة Kotlin/Gradle — افتحها في Android Studio (مجاني) |
-| iOS Developer | `scaffold ios <name>` | ✅ سقالة SwiftUI — محتاجة Xcode على ماك (قيد النظام، مش تكلفة) |
-| Game Developer | `scaffold game <name>` | ✅ لعبة Pygame **شغالة فعلياً** — اتجرب وشغلت نافذة حقيقية |
+| Android Developer | `scaffold android <name>` | ✅ Gradle settings/dependencies كاملة؛ منطق `Greeter.kt` منفصل عن Android framework — **اتجرب فعلياً**: كومبايل بـ kotlinc واختبارات JUnit عدّت (OK 2 tests) |
+| iOS Developer | `scaffold ios <name>` | ✅ سقالة SwiftUI + منطق `Greeter.swift` منفصل للاختبار بـ XCTest — محتاجة Xcode على ماك لتترجم فعليًا (قيد نظام موثّق، مش تكلفة) |
+| Game Developer | `scaffold game <name>` | ✅ لعبة Pygame **شغالة فعلياً** — منطق حركة اللاعب منفصل ومُختبر، واختبار headless حقيقي (`SDL_VIDEODRIVER=dummy`) بيشغّل حلقة اللعبة كاملة |
 | Data Scientist | `csv_describe`, `csv_plot`, `csv_correlate` | ✅ اتجرب على بيانات حقيقية (إحصائيات، رسومات، correlation) |
 | AI/ML Engineer | `scaffold ml <name>` | ✅ **اتجرب فعلياً** — درّب نموذج حقيقي بدقة 100% على بيانات اختبار |
-| Systems/Embedded Developer | `scaffold embedded <name>` | ✅ كود C اتأكد إنه يترجم (compiles) فعلاً |
+| Systems/Embedded Developer | `scaffold embedded <name>` | ✅ بنية HAL حقيقية (`blink.c` منفصل عن الهاردوير) — **اتجرب فعلياً**: `make check` (compile) و`make test` (منطق الـ blink شغال ومُختبر على الـ host) |
 | Cybersecurity/Pentest | `hash_file`, `port_scan`, `tls_check`, `file_perms`, `re_plugin`/`inspect_plugin` | ✅ اتجرب فعلياً: شهادة self-signed حقيقية + ملفات بصلاحيات SUID/world-writable حقيقية |
 | Cloud/DevOps Engineer | `scaffold docker <name>` (multi-stage, non-root, HEALTHCHECK), `scaffold ci <name>` (lint→test matrix→build) | ✅ Dockerfile اتفحص بـ `docker build`، YAML اتأكد بـ `yaml.safe_load` |
 | Database Engineer | `db_schema`, `db_query`, `db_export_csv`, `db_migration_status`, `db_migrate`, `db_indexes` | ✅ SQLite حقيقي؛ هجرات اتجربت فعلياً (نجاح/توقف عند خطأ/رفض tampering)، وكشف foreign key من غير index |
-| Blockchain Developer | `scaffold blockchain <name>` | ✅ عقد Solidity صحيح + إعداد Hardhat |
-| Quantum Computing | `scaffold quantum <name>` | ✅ دائرة Qiskit صحيحة (Bell state) |
-| AR/VR Developer | `scaffold arvr <name>` | ✅ WebXR (A-Frame، مجاني ومفتوح المصدر) |
-| QA/Test Automation | `scaffold pytest <name>` | ✅ سقالة pytest شغالة وبتعدي فعلاً |
-| Kernel/Low-Level Developer | `scaffold kernel_module <name>` | ✅ يحتاج kernel headers مثبتة للبناء (قيد نظام، موثّق) |
+| Blockchain Developer | `scaffold blockchain <name>` | ✅ عقد Solidity + Hardhat toolbox test حقيقي (deploy/تعديل/owner guard) — **اتجرب فعلياً**: العقد اتترجم بـ solc لـ bytecode حقيقي |
+| Quantum Computing | `scaffold quantum <name>` | ✅ دائرة Bell state — **اتجرب فعلياً** على AerSimulator: القياسات '00'/'11' بس (تشابك حقيقي)، pytest بيعدي |
+| AR/VR Developer | `scaffold arvr <name>` | ✅ WebXR (A-Frame) + component تفاعلي حقيقي — **اتجرب فعلياً**: `npm start` شغّل السيرفر وقدّم الملفات |
+| QA/Test Automation | `scaffold pytest <name>` | ✅ سقالة pytest + tox شغالة وبتعدي فعلاً (pytest و`tox -e py311` اتجربوا) |
+| Kernel/Low-Level Developer | `scaffold kernel_module <name>` | ✅ يحتاج kernel headers مثبتة للبناء (قيد نظام، موثّق) — README لـ insmod/rmmod/dmesg |
 | Network/Multiplayer Backend | `scaffold multiplayer_server <name>` | ✅ **اتجرب فعلياً** — سيرفر حقيقي استقبل اتصال TCP |
 | Video Editor | `media_plugin` + `cinema_plugin` (مونتاج احترافي، شرح تحت) | ✅ كله اتجرب على فيديو حقيقي |
 | Color Grading / VFX / Audio Mixing | `cinema_plugin` (`color_grade`, `chroma_key`, `master_audio`...) | ✅ |
