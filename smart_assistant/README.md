@@ -37,6 +37,16 @@ build_exe.bat
   - `self_improve_plugin.py` — يحلل السجل الأخير ويقترح تحسينات عبر
     نموذج محلي مجاني (Ollama)، بدون أي تعديل تلقائي للكود.
   - `update_plugin.py` — تحقق آمن (بدون تحديث تلقائي) من وجود إصدار أحدث.
+  - `connectors_plugin.py` — **Connectors** بنفس بروتوكول MCP اللي
+    بيستخدمه Claude/Claude Desktop (شرح تفصيلي تحت).
+  - `macros_plugin.py` — أوامر مخصصة (زي Custom Slash Commands في
+    Claude Code) من ملفات `.txt` في `commands/`.
+  - `todo_plugin.py` — قائمة مهام محلية (`todo add/list/done/clear`).
+  - `fetch_plugin.py` — تحميل صفحة ويب وعرض نصها (`fetch <url>`).
+- `connectors.example.json` — مثال لإعداد MCP Connectors (انسخه لـ
+  `connectors.json` وعدّله). `connectors.json` نفسه بيتعمل تلقائياً
+  أول ما التطبيق يشتغل ومش متتبع في git (ممكن يحتوي مسارات/أسرار خاصة بيك).
+- `commands/` — مجلد الـ macros (بيتعمل تلقائياً، فاضي في الأول).
 - `requirements.txt` — المتطلبات.
 - `build_exe.bat` — سكربت بناء ملف تنفيذي واحد باستخدام PyInstaller.
 
@@ -57,6 +67,56 @@ def register(engine):
 
 وبعدين من داخل التطبيق اكتب `reload_plugins` عشان يلقط الإضافة الجديدة
 من غير ما تعيد تشغيل التطبيق، أو `plugins` عشان تشوف كل الإضافات المحمّلة.
+
+## Connectors (MCP) — زي الموجودة في Claude
+
+المساعد بيدعم **Model Context Protocol (MCP)** — نفس البروتوكول المفتوح
+المصدر اللي Claude / Claude Desktop بيستخدمه للـ Connectors (Google Drive،
+Gmail، GitHub، filesystem محلي، ...). أي MCP server بتوصّله (محلي ومجاني
+زي `filesystem`/`git`/`fetch`، أو أي server تاني) بتظهر أدواته تلقائياً
+كأوامر في المساعد.
+
+**الإعداد:**
+
+1. `pip install mcp` (موجود في `requirements.txt`).
+2. انسخ `connectors.example.json` إلى `connectors.json` وعدّل السيرفرات
+   اللي عايزها — نفس شكل ملف إعداد Claude Desktop بالظبط:
+   ```json
+   {
+     "mcpServers": {
+       "filesystem": {
+         "command": "npx",
+         "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
+       }
+     }
+   }
+   ```
+3. شغّل التطبيق — بيتصل تلقائياً بكل connector معرّف. تابع الحالة بأمر
+   `connectors`، أو اتصل/افصل يدوياً بـ `connectors connect <name>` /
+   `connectors disconnect <name>`.
+4. أدوات كل connector بتظهر كأوامر باسم `<connector>.<tool>`، وباخد
+   الوسيطة كـ JSON، مثلاً:
+   ```
+   filesystem.read_file {"path": "/tmp/notes.txt"}
+   ```
+
+ملحوظة: بعض الـ MCP servers الجاهزة (زي `@modelcontextprotocol/server-*`)
+محتاجة Node.js (`npx`) أو Python (`uvx`) متثبتين على الجهاز — دول أدوات
+مجانية ومفتوحة المصدر برضه، مفيش أي اشتراك أو تكلفة.
+
+## أوامر مخصصة (Macros) — زي Custom Slash Commands في Claude Code
+
+حط ملف `.txt` في `commands/`، كل سطر أمر يتنفذ بالتتابع، و`{args}` بتتبدل
+بأي حاجة يكتبها المستخدم بعد اسم الأمر:
+
+```
+# commands/deploy.txt
+echo بدأ الديبلوي لـ {args}
+run git pull
+```
+
+بعدها اكتب `deploy production` في المساعد، وهيشغل السطرين بالترتيب.
+`macros` بتعرض كل الـ macros المتاحة، و`reload_macros` بتلقط أي ملف جديد.
 
 ## ليه مفيش "توليد فيديو/صورة بالذكاء الاصطناعي" زي Higgsfield؟
 

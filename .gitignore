@@ -6,3 +6,5 @@ dist/
 .venv/
 venv/
 y99_settings.json
+smart_assistant/todo.json
+smart_assistant/connectors.json
