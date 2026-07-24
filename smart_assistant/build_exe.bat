@@ -1,16 +1,16 @@
 @echo off
 echo ====================================
-echo   Smart Assistant - Build EXE
+echo   Nezuko (Smart Assistant) - Build EXE
 echo ====================================
 
 :: تثبيت المتطلبات
-py -m pip install customtkinter pyinstaller mcp capstone Pillow pandas matplotlib --quiet
+py -m pip install customtkinter pyinstaller mcp capstone Pillow pandas matplotlib edge-tts piper-tts --quiet
 
 :: بناء الـ EXE
 py -m PyInstaller ^
     --onefile ^
     --windowed ^
-    --name "SmartAssistant" ^
+    --name "Nezuko" ^
     --hidden-import customtkinter ^
     --hidden-import core_engine ^
     --hidden-import i18n ^
@@ -20,6 +20,9 @@ py -m PyInstaller ^
     --collect-all PIL ^
     --collect-all pandas ^
     --collect-all matplotlib ^
+    --collect-all edge_tts ^
+    --collect-all piper ^
+    --collect-all onnxruntime ^
     --add-data "core_engine.py;." ^
     --add-data "i18n.py;." ^
     --add-data "version.py;." ^
@@ -30,7 +33,7 @@ py -m PyInstaller ^
 
 echo.
 echo ====================================
-echo   تم البناء! الملف في مجلد dist\SmartAssistant.exe
+echo   تم البناء! الملف في مجلد dist\Nezuko.exe
 echo   ملحوظات:
 echo   - أوامر الميديا (probe/convert/trim/...) محتاجة FFmpeg
 echo     متثبت على الجهاز ومضاف للـ PATH: https://ffmpeg.org/download.html
@@ -47,5 +50,11 @@ echo     https://www.clamav.org/downloads — شغّل freshclam بعد التث
 echo   - vuln_scan بيستخدم pip-audit (اختياري: pip install pip-audit) و
 echo     npm audit (لو Node.js متثبت) لفحص ثغرات المكتبات المعروفة —
 echo     من غيرهم بيفحص الأسرار المكشوفة وصلاحيات الملفات بس.
+echo   - أمر speak (صوت نيزوكو) محتاج ffplay (جزء من FFmpeg، شوف فوق)
+echo     عشان يشغّل الصوت. أفضل جودة (صوت مصري أنثوي حقيقي) محتاجة
+echo     إنترنت وقت الاستخدام (edge-tts، مجاني بالكامل). من غير إنترنت،
+echo     بيرجع لـ Piper (صوت عربي محلي، بيتحمّل مرة واحدة ~60MB) وبعدين
+echo     espeak-ng (لازم يتثبت يدوي من espeak-ng.github.io، صوت روبوتي
+echo     بس ضامن يشتغل offline بالكامل من غير أي تحميل).
 echo ====================================
 pause

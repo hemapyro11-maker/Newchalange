@@ -6,12 +6,12 @@ from __future__ import annotations
 
 STRINGS = {
     "ar": {
-        "app_title": "المساعد الذكي",
-        "app_subtitle": "منصة أوامر وأتمتة",
-        "status_idle": "جاهز",
-        "status_running": "شغال",
-        "status_stopped": "متوقف",
-        "input_placeholder": "اكتب أمرك هنا... (help لعرض الأوامر)",
+        "app_title": "نيزوكو",
+        "app_subtitle": "مساعدتك الذكية المصرية",
+        "status_idle": "جاهزة",
+        "status_running": "شغالة",
+        "status_stopped": "متوقفة",
+        "input_placeholder": "اكتبي أمرك هنا... (help لعرض الأوامر)",
         "send": "تنفيذ",
         "clear_log": "مسح",
         "log_title": "السجل",
@@ -21,10 +21,12 @@ STRINGS = {
         "attach_file": "إرفاق ملف للتحليل",
         "scan_file": "فحص ملف أمنيًا (أي نوع، أي حجم)",
         "scanning_file": "📡  بيتفحص",
+        "voice_toggle_on": "🔊  الصوت شغال",
+        "voice_toggle_off": "🔇  الصوت مقفول",
     },
     "en": {
-        "app_title": "Smart Assistant",
-        "app_subtitle": "Command & automation platform",
+        "app_title": "Nezuko",
+        "app_subtitle": "Your Egyptian AI assistant",
         "status_idle": "Ready",
         "status_running": "Running",
         "status_stopped": "Stopped",
@@ -38,6 +40,8 @@ STRINGS = {
         "attach_file": "Attach file to analyze",
         "scan_file": "Security-scan a file (any type, any size)",
         "scanning_file": "📡  Scanning",
+        "voice_toggle_on": "🔊  Voice on",
+        "voice_toggle_off": "🔇  Voice off",
     },
 }
 

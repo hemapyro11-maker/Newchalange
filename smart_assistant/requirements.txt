@@ -5,3 +5,5 @@ capstone>=5.0.0
 Pillow>=10.0.0
 pandas>=2.0.0
 matplotlib>=3.8.0
+edge-tts>=6.1.0
+piper-tts>=1.2.0

@@ -53,6 +53,8 @@ class AssistantApp(ctk.CTk):
 
         self.t = Translator("ar")
         self.engine = AssistantEngine(on_log=self._on_log, on_status=self._on_status)
+        self.voice_enabled = False
+        self._last_command_name = ""
 
         self.geometry("820x620")
         self.minsize(700, 520)
@@ -78,7 +80,13 @@ class AssistantApp(ctk.CTk):
         self.subtitle_label = ctk.CTkLabel(
             self.header, font=ctk.CTkFont(size=12), text_color=TEXT_DIM
         )
-        self.subtitle_label.place(relx=1.0, x=-120, rely=0.5, anchor="e")
+        self.subtitle_label.place(relx=1.0, x=-252, rely=0.5, anchor="e")
+
+        self.voice_btn = ctk.CTkButton(
+            self.header, width=130, height=32, fg_color=BORDER, hover_color=ACCENT,
+            command=self._toggle_voice
+        )
+        self.voice_btn.place(relx=1.0, x=-114, rely=0.5, anchor="e")
 
         self.lang_btn = ctk.CTkButton(
             self.header, width=90, height=32, fg_color=BORDER, hover_color=ACCENT,
@@ -177,6 +185,7 @@ class AssistantApp(ctk.CTk):
         self.title_label.configure(text=t.t("app_title"))
         self.subtitle_label.configure(text=t.t("app_subtitle"))
         self.lang_btn.configure(text=t.t("lang_toggle"))
+        self.voice_btn.configure(text=t.t("voice_toggle_on") if self.voice_enabled else t.t("voice_toggle_off"))
         self.status_label.configure(
             text=t.t("status_running") if self.engine.is_running() else t.t("status_stopped")
         )
@@ -191,6 +200,10 @@ class AssistantApp(ctk.CTk):
 
     def _toggle_lang(self):
         self.t.toggle()
+        self._apply_lang()
+
+    def _toggle_voice(self):
+        self.voice_enabled = not self.voice_enabled
         self._apply_lang()
 
     # ── Actions ─────────────────────────────────────────────────────────
@@ -212,6 +225,7 @@ class AssistantApp(ctk.CTk):
         if not path:
             return
         self.__append_log(f"📎  {path}", "info")
+        self._last_command_name = "probe"
         self.engine.submit(f"probe {shlex.quote(path)}")
 
     def _scan_file(self):
@@ -226,6 +240,7 @@ class AssistantApp(ctk.CTk):
         if not path:
             return
         self.__append_log(f"{self.t.t('scanning_file')}  {path}", "info")
+        self._last_command_name = "security_report"
         self.engine.submit(f"security_report {shlex.quote(path)}")
 
     def _send_command(self):
@@ -233,8 +248,23 @@ class AssistantApp(ctk.CTk):
         if not text:
             return
         self.__append_log(f"›  {text}", "info")
+        self._last_command_name = text.split(maxsplit=1)[0].lower()
         self.engine.submit(text)
         self.cmd_entry.delete(0, "end")
+
+    def _speak_async(self, text: str):
+        # بتتنادى من _on_log لما الصوت شغال — بتبعت نتيجة الأمر الأخيرة
+        # لأمر speak نفسه عشان نيزوكو "تقرا" الرد بصوتها. بننضّف الاقتباسات
+        # عشان shlex.split جوه core_engine._dispatch ميوقعش في نص فيه
+        # علامات اقتباس فردية (زي مسار ملف أو snippet كود)، وبنقصّر
+        # النص الطويل عشان مانطلبش TTS لتقرير كامل صفحات.
+        snippet = " ".join(text.split()).replace('"', "").replace("'", "")
+        if len(snippet) > 300:
+            snippet = snippet[:300] + "..."
+        if not snippet:
+            return
+        self._last_command_name = "speak"
+        self.engine.submit(f"speak {snippet}")
 
     def _clear_log(self):
         self.log_box.configure(state="normal")
@@ -248,6 +278,12 @@ class AssistantApp(ctk.CTk):
     # ── Callbacks (from engine thread) ────────────────────────────────
     def _on_log(self, msg: str, level: str = "info"):
         self.after(0, self.__append_log, msg, level)
+        # بس نتيجة أمر فعلي (level="info") بتتقال بصوت — مش رسائل تحميل
+        # الإضافات ("ok") ولا الأخطاء/التحذيرات. وبنستثني نتيجة speak/
+        # voice_status نفسها عشان نيزوكو ماتفضلش تقرا تأكيد إنها قالت
+        # حاجة لغاية ما تدخل في حلقة نطق بلا نهاية.
+        if level == "info" and self.voice_enabled and self._last_command_name not in ("speak", "voice_status"):
+            self._speak_async(msg)
 
     def __append_log(self, msg, level):
         self.log_box.configure(state="normal")
