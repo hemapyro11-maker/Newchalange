@@ -51,15 +51,20 @@ build_exe.bat
   - `scaffold_plugin.py` — سقالات مشاريع جاهزة لـ 19 نوع (`scaffold
     <type> <name>` — شرح تفصيلي تحت).
   - `database_plugin.py` — أدوات قواعد بيانات حقيقية (sqlite3):
-    `db_schema`, `db_query`, `db_export_csv`.
+    `db_schema`, `db_query`, `db_export_csv`, `db_migration_status`,
+    `db_migrate` (تطبيق هجرات SQL بترتيب داخل transaction، مع تتبّع
+    checksum لكل هجرة اتطبقت وتوقف فوري لو محتواها اتغير)، `db_indexes`
+    (عرض indexes كل جدول وتنبيه لأعمدة foreign key من غير index).
   - `data_science_plugin.py` — تحليل بيانات حقيقي (pandas/matplotlib):
     `csv_describe`, `csv_plot`, `csv_correlate`.
   - `screenplay_plugin.py` — تحليل سيناريو حقيقي بصيغة Fountain:
     `fountain_stats` (مشاهد، شخصيات، حوار، تقدير صفحات).
   - `design_plugin.py` — لوجو بسيط وتوليد كل أحجام أيقونات iOS/Android
     من صورة واحدة (`make_logo`, `app_icons`) عبر Pillow.
-  - `security_plugin.py` — `hash_file` (تحقق سلامة) و`port_scan` (فحص
-    منافذ محلي بنطاق محدود، لأجهزتك المصرح لك باختبارها بس).
+  - `security_plugin.py` — `hash_file` (تحقق سلامة)، `port_scan` (فحص
+    منافذ محلي بنطاق محدود، لأجهزتك المصرح لك باختبارها بس)، `tls_check`
+    (فحص شهادة TLS: تاريخ انتهاء، مُصدر، SAN)، `file_perms` (تدقيق
+    صلاحيات: world-writable, SUID/SGID, ملفات حساسة مقروءة).
   - `plugin_forge_plugin.py` — المساعد يصمم plugins جديدة بنفسه ويصلح
     أخطاءها تلقائياً (شرح تفصيلي تحت).
   - `cinema_plugin.py` — مونتاج وتصحيح ألوان بمستوى احترافي: تصحيح
@@ -259,9 +264,9 @@ Ghidra/radare2). كل النتائج اتقارنت واتأكد إنها مطا
 | Data Scientist | `csv_describe`, `csv_plot`, `csv_correlate` | ✅ اتجرب على بيانات حقيقية (إحصائيات، رسومات، correlation) |
 | AI/ML Engineer | `scaffold ml <name>` | ✅ **اتجرب فعلياً** — درّب نموذج حقيقي بدقة 100% على بيانات اختبار |
 | Systems/Embedded Developer | `scaffold embedded <name>` | ✅ كود C اتأكد إنه يترجم (compiles) فعلاً |
-| Cybersecurity/Pentest | `hash_file`, `port_scan`, `re_plugin`/`inspect_plugin` | ✅ |
-| Cloud/DevOps Engineer | `scaffold docker <name>`, `scaffold ci <name>` | ✅ Dockerfile + GitHub Actions YAML صحيحة |
-| Database Engineer | `db_schema`, `db_query`, `db_export_csv` | ✅ SQLite حقيقي، محمي من SQL injection في أسماء الجداول |
+| Cybersecurity/Pentest | `hash_file`, `port_scan`, `tls_check`, `file_perms`, `re_plugin`/`inspect_plugin` | ✅ اتجرب فعلياً: شهادة self-signed حقيقية + ملفات بصلاحيات SUID/world-writable حقيقية |
+| Cloud/DevOps Engineer | `scaffold docker <name>` (multi-stage, non-root, HEALTHCHECK), `scaffold ci <name>` (lint→test matrix→build) | ✅ Dockerfile اتفحص بـ `docker build`، YAML اتأكد بـ `yaml.safe_load` |
+| Database Engineer | `db_schema`, `db_query`, `db_export_csv`, `db_migration_status`, `db_migrate`, `db_indexes` | ✅ SQLite حقيقي؛ هجرات اتجربت فعلياً (نجاح/توقف عند خطأ/رفض tampering)، وكشف foreign key من غير index |
 | Blockchain Developer | `scaffold blockchain <name>` | ✅ عقد Solidity صحيح + إعداد Hardhat |
 | Quantum Computing | `scaffold quantum <name>` | ✅ دائرة Qiskit صحيحة (Bell state) |
 | AR/VR Developer | `scaffold arvr <name>` | ✅ WebXR (A-Frame، مجاني ومفتوح المصدر) |

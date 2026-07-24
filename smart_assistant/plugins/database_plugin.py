@@ -2,16 +2,20 @@
 database_plugin.py — أدوات قواعد بيانات حقيقية عبر sqlite3 (مكتبة
 بايثون القياسية، بدون أي باكدج خارجي أو خدمة سحابية مدفوعة).
 
-الأوامر: db_schema, db_query, db_export_csv
+الأوامر: db_schema, db_query, db_export_csv, db_migration_status,
+db_migrate, db_indexes
 """
 from __future__ import annotations
 
 import csv
+import datetime
+import hashlib
 import pathlib
 import re
 import sqlite3
 
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_MIGRATIONS_TABLE = "_schema_migrations"
 
 
 def _quote_identifier(name: str) -> str | None:
@@ -128,7 +132,196 @@ def _cmd_db_export_csv(ctx) -> str:
     return f"✅ اتصدّر {len(rows)} صف من {table} في {out_path}"
 
 
+def _ensure_migrations_table(conn: sqlite3.Connection) -> None:
+    conn.execute(f'''CREATE TABLE IF NOT EXISTS "{_MIGRATIONS_TABLE}" (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        filename TEXT NOT NULL UNIQUE,
+        checksum TEXT NOT NULL,
+        applied_at TEXT NOT NULL
+    )''')
+
+
+def _migration_files(migrations_dir: pathlib.Path) -> list[pathlib.Path]:
+    return sorted(migrations_dir.glob("*.sql"), key=lambda p: p.name)
+
+
+def _checksum(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _cmd_db_migration_status(ctx) -> str:
+    if len(ctx.args) < 2:
+        return "usage: db_migration_status <sqlite_file> <migrations_dir>"
+    db_path, migrations_dir = pathlib.Path(ctx.args[0]), pathlib.Path(ctx.args[1])
+    if db_path.is_dir():
+        return f"❌ ده مجلد مش ملف قاعدة بيانات: {db_path}"
+    if not migrations_dir.is_dir():
+        return f"❌ مجلد الهجرات مش موجود: {migrations_dir}"
+
+    files = _migration_files(migrations_dir)
+    if not files:
+        return f"مفيش ملفات *.sql في {migrations_dir}"
+
+    try:
+        conn = sqlite3.connect(str(db_path))
+        _ensure_migrations_table(conn)
+        conn.commit()
+        applied = {
+            row[0]: (row[1], row[2])
+            for row in conn.execute(f'SELECT filename, checksum, applied_at FROM "{_MIGRATIONS_TABLE}"')
+        }
+    except sqlite3.Error as e:
+        return f"❌ خطأ SQLite: {e}"
+    finally:
+        try:
+            conn.close()
+        except UnboundLocalError:
+            pass
+
+    lines = [f"📋 {len(files)} ملف هجرة في {migrations_dir}:"]
+    pending = mismatched = ok = 0
+    for f in files:
+        checksum = _checksum(f.read_text(encoding="utf-8"))
+        record = applied.get(f.name)
+        if record is None:
+            lines.append(f"  ⏳ {f.name} — لسه متطبقتش")
+            pending += 1
+        else:
+            applied_checksum, applied_at = record
+            if applied_checksum == checksum:
+                lines.append(f"  ✅ {f.name} — اتطبقت في {applied_at}")
+                ok += 1
+            else:
+                lines.append(f"  ⚠️ {f.name} — اتطبقت في {applied_at} بس المحتوى اتغير من ساعتها (checksum mismatch)")
+                mismatched += 1
+    lines.append(f"— {ok} متطبقة، {pending} في الانتظار، {mismatched} فيها تعارض checksum")
+    return "\n".join(lines)
+
+
+def _cmd_db_migrate(ctx) -> str:
+    if len(ctx.args) < 2:
+        return "usage: db_migrate <sqlite_file> <migrations_dir>"
+    db_path, migrations_dir = pathlib.Path(ctx.args[0]), pathlib.Path(ctx.args[1])
+    if db_path.is_dir():
+        return f"❌ ده مجلد مش ملف قاعدة بيانات: {db_path}"
+    if not migrations_dir.is_dir():
+        return f"❌ مجلد الهجرات مش موجود: {migrations_dir}"
+
+    files = _migration_files(migrations_dir)
+    if not files:
+        return f"مفيش ملفات *.sql في {migrations_dir}"
+
+    try:
+        conn = sqlite3.connect(str(db_path))
+        _ensure_migrations_table(conn)
+        conn.commit()
+        applied = dict(conn.execute(f'SELECT filename, checksum FROM "{_MIGRATIONS_TABLE}"'))
+
+        applied_now = []
+        for f in files:
+            sql_text = f.read_text(encoding="utf-8")
+            checksum = _checksum(sql_text)
+            existing_checksum = applied.get(f.name)
+            if existing_checksum is not None:
+                if existing_checksum != checksum:
+                    return (
+                        f"❌ توقف عند {f.name}: اتطبقت قبل كده بمحتوى مختلف (checksum mismatch) — "
+                        f"عدّل اسم الملف لو ده تعديل مقصود، ماتعدلش هجرة اتطبقت خلاص"
+                        + (f"\n✅ اتطبق {len(applied_now)} هجرة قبل كده: {', '.join(applied_now)}" if applied_now else "")
+                    )
+                continue  # applied and unchanged — skip
+            try:
+                conn.executescript(sql_text)
+            except sqlite3.Error as e:
+                conn.rollback()
+                return (
+                    f"❌ فشلت الهجرة {f.name}: {e}"
+                    + (f"\n✅ اتطبق {len(applied_now)} هجرة قبل كده: {', '.join(applied_now)}" if applied_now else "")
+                )
+            conn.execute(
+                f'INSERT INTO "{_MIGRATIONS_TABLE}" (filename, checksum, applied_at) VALUES (?, ?, ?)',
+                (f.name, checksum, datetime.datetime.now(datetime.timezone.utc).isoformat()),
+            )
+            conn.commit()
+            applied_now.append(f.name)
+    except sqlite3.Error as e:
+        return f"❌ خطأ SQLite: {e}"
+    finally:
+        try:
+            conn.close()
+        except UnboundLocalError:
+            pass
+
+    if not applied_now:
+        return "✅ كل الهجرات متطبقة بالفعل — مفيش جديد"
+    return f"✅ اتطبق {len(applied_now)} هجرة: {', '.join(applied_now)}"
+
+
+def _cmd_db_indexes(ctx) -> str:
+    if not ctx.args:
+        return "usage: db_indexes <sqlite_file> [table]"
+    path = pathlib.Path(ctx.args[0])
+    if not path.is_file():
+        return f"❌ الملف مش موجود: {path}"
+
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        cur = conn.cursor()
+        if len(ctx.args) > 1:
+            table_arg = ctx.args[1]
+            quoted = _quote_identifier(table_arg)
+            if quoted is None:
+                return f"❌ اسم جدول غير صالح: {table_arg}"
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_arg,))
+            if cur.fetchone() is None:
+                return f"❌ مفيش جدول اسمه {table_arg}"
+            tables = [table_arg]
+        else:
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            tables = [row[0] for row in cur.fetchall()]
+            if not tables:
+                return "مفيش جداول في القاعدة دي"
+
+        lines = []
+        for table in tables:
+            quoted = _quote_identifier(table)
+            if quoted is None:
+                continue
+            lines.append(f"🗂  {table}")
+            cur.execute(f"PRAGMA index_list({quoted})")
+            index_rows = cur.fetchall()
+            indexed_leading_cols = set()
+            if not index_rows:
+                lines.append("    (مفيش أي index)")
+            for idx in index_rows:
+                idx_name, is_unique, origin = idx[1], idx[2], idx[3]
+                cur.execute(f'PRAGMA index_info("{idx_name}")')
+                cols = [row[2] for row in sorted(cur.fetchall(), key=lambda r: r[0])]
+                if cols:
+                    indexed_leading_cols.add(cols[0])
+                origin_desc = {"pk": "PRIMARY KEY", "u": "UNIQUE constraint", "c": "manual"}.get(origin, origin)
+                unique_tag = "UNIQUE" if is_unique else "non-unique"
+                lines.append(f"    📌 {idx_name} ({', '.join(cols)}) — {unique_tag}, {origin_desc}")
+
+            cur.execute(f"PRAGMA foreign_key_list({quoted})")
+            for fk in cur.fetchall():
+                ref_table, from_col = fk[2], fk[3]
+                if from_col not in indexed_leading_cols:
+                    lines.append(f"    ⚠️ عمود {from_col} (foreign key لـ {ref_table}) من غير index — ممكن يبطّئ الـ JOINs")
+        return "\n".join(lines)
+    except sqlite3.Error as e:
+        return f"❌ خطأ SQLite: {e}"
+    finally:
+        try:
+            conn.close()
+        except UnboundLocalError:
+            pass
+
+
 def register(engine):
     engine.registry.register("db_schema", _cmd_db_schema, "db_schema <file.sqlite> — عرض كل الجداول وأعمدتها")
     engine.registry.register("db_query", _cmd_db_query, "db_query <file.sqlite> <SQL> — تنفيذ استعلام SQL")
     engine.registry.register("db_export_csv", _cmd_db_export_csv, "db_export_csv <file.sqlite> <table> <out.csv> — تصدير جدول لملف CSV")
+    engine.registry.register("db_migration_status", _cmd_db_migration_status, "db_migration_status <file.sqlite> <migrations_dir> — حالة كل هجرة (متطبقة/معلقة/checksum mismatch)")
+    engine.registry.register("db_migrate", _cmd_db_migrate, "db_migrate <file.sqlite> <migrations_dir> — تطبيق الهجرات المعلقة بالترتيب داخل transaction")
+    engine.registry.register("db_indexes", _cmd_db_indexes, "db_indexes <file.sqlite> [table] — عرض الـ indexes وتنبيه لأعمدة foreign key من غير index")
