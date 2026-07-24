@@ -921,17 +921,29 @@ models/        النماذج المدرّبة المحفوظة
 
 
 def _scaffold_quantum(root: pathlib.Path, name: str) -> list[str]:
-    _write(root / "bell_state.py", f'''"""{name} — Qiskit starter: Bell state circuit (تشابك كمّي بسيط)."""
+    _write(root / "circuit.py", '''"""circuit.py — بناء دائرة Bell state (تشابك كمّي) بحت، منفصل عن أي
+محاكي — نفس فكرة فصل المنطق عن التنفيذ زي embedded/game scaffolds، عشان
+نقدر نتأكد من بنية الدائرة نفسها في الاختبارات من غير ما نحتاج نشغّل
+محاكي في كل مرة."""
 from qiskit import QuantumCircuit
-from qiskit_aer import AerSimulator
 
 
-def main():
+def build_bell_circuit() -> QuantumCircuit:
     qc = QuantumCircuit(2, 2)
     qc.h(0)
     qc.cx(0, 1)
     qc.measure([0, 1], [0, 1])
+    return qc
+''')
+    _write(root / "bell_state.py", f'''"""{name} — Qiskit starter: تشغيل دائرة Bell state (تشابك كمّي) فعليًا
+على محاكي محلي (AerSimulator) — بدون أي خدمة سحابية أو حساب IBM Quantum."""
+from qiskit_aer import AerSimulator
 
+from circuit import build_bell_circuit
+
+
+def main():
+    qc = build_bell_circuit()
     simulator = AerSimulator()
     result = simulator.run(qc, shots=1000).result()
     counts = result.get_counts()
@@ -941,8 +953,62 @@ def main():
 if __name__ == "__main__":
     main()
 ''')
+    _write(root / "tests" / "test_circuit.py", '''from circuit import build_bell_circuit
+
+
+def test_circuit_has_expected_gate_structure():
+    qc = build_bell_circuit()
+    gate_names = [instr.operation.name for instr in qc.data]
+    assert gate_names == ["h", "cx", "measure", "measure"]
+
+
+def test_circuit_measures_both_qubits():
+    qc = build_bell_circuit()
+    assert qc.num_qubits == 2
+    assert qc.num_clbits == 2
+''')
+    _write(root / "tests" / "test_bell_state_simulation.py", '''"""يشغّل الدائرة فعليًا على AerSimulator ويتأكد من خاصية التشابك
+الأساسية: القياسات لازم تطلع '00' أو '11' بس — أبدًا '01' أو '10' —
+وده بالظبط تعريف Bell state، مش مجرد اختبار إن الكود بيتنفذ من غير error."""
+from qiskit_aer import AerSimulator
+
+from circuit import build_bell_circuit
+
+
+def test_bell_state_only_produces_correlated_outcomes():
+    qc = build_bell_circuit()
+    simulator = AerSimulator()
+    result = simulator.run(qc, shots=500).result()
+    counts = result.get_counts()
+    assert set(counts.keys()) <= {"00", "11"}
+    assert "00" in counts or "11" in counts
+''')
+    _write(root / "pytest.ini", "[pytest]\ntestpaths = tests\npythonpath = .\n")
     _write(root / "requirements.txt", "qiskit>=1.0.0\nqiskit-aer>=0.14.0\n")
-    return ["bell_state.py", "requirements.txt"]
+    _write(root / "requirements-dev.txt", "-r requirements.txt\npytest>=8.0.0\n")
+    _write(root / ".gitignore", "__pycache__/\n*.pyc\n.pytest_cache/\n")
+    _write(root / "README.md", f'''# {name} — Qiskit Bell State Starter
+
+```bash
+pip install -r requirements.txt
+python bell_state.py     # يشغّل الدائرة فعليًا ويطبع نتائج القياس
+```
+
+## الاختبارات
+
+```bash
+pip install -r requirements-dev.txt
+pytest    # بنية الدائرة + تحقق فعلي من خاصية التشابك عبر AerSimulator
+```
+
+منطق بناء الدائرة في `circuit.py` منفصل عن التنفيذ (`bell_state.py`)
+عشان يتاختبر مباشرة.
+''')
+    return [
+        "circuit.py", "bell_state.py", "tests/test_circuit.py",
+        "tests/test_bell_state_simulation.py", "pytest.ini",
+        "requirements.txt", "requirements-dev.txt", ".gitignore", "README.md",
+    ]
 
 
 def _scaffold_blockchain(root: pathlib.Path, name: str) -> list[str]:
@@ -1213,7 +1279,38 @@ all:
 clean:
 \tmake -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
 """)
-    return [f"{safe}.c", "Makefile"]
+    _write(root / ".gitignore", (
+        "*.o\n*.ko\n*.mod\n*.mod.c\n*.mod.o\n*.symvers\n*.order\n"
+        "*.cmd\n.tmp_versions/\n.cache.mk\nModule.symvers\nmodules.order\n"
+    ))
+    _write(root / "README.md", f'''# {name} — Linux Kernel Module Starter
+
+## البناء (محتاج kernel headers متثبتة — `apt install linux-headers-$(uname -r)`)
+
+```bash
+make            # بيبني {safe}.ko
+```
+
+## التحميل والتشغيل
+
+```bash
+sudo insmod {safe}.ko    # تحميل الموديول
+dmesg | tail              # تشوف "module loaded" في الـ kernel log
+sudo rmmod {safe}         # تفريغ الموديول
+dmesg | tail               # تشوف "module unloaded"
+```
+
+## التنظيف
+
+```bash
+make clean
+```
+
+**ملحوظة أمان:** موديولات الكernel بتشتغل بصلاحيات الـ kernel نفسه (ring 0) —
+أي باج فيها ممكن يهنّج أو يخرّب النظام كله، مش زي أي كراش عادي في برنامج
+مستخدم عادي. جرّبه في VM لحد ما تتأكد منه.
+''')
+    return [f"{safe}.c", "Makefile", ".gitignore", "README.md"]
 
 
 def _scaffold_multiplayer_server(root: pathlib.Path, name: str) -> list[str]:
@@ -1275,16 +1372,52 @@ def _scaffold_arvr(root: pathlib.Path, name: str) -> list[str]:
   <meta charset="utf-8">
   <title>{name}</title>
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script src="src/main.js"></script>
 </head>
 <body>
   <a-scene>
-    <a-box position="0 1.5 -3" rotation="0 45 0" color="#4f6ef7"></a-box>
+    <a-box position="0 1.5 -3" rotation="0 45 0" color="#4f6ef7"
+           cursor-listener class="clickable"></a-box>
     <a-sky color="#ECECEC"></a-sky>
+    <a-entity camera look-controls position="0 1.6 0">
+      <a-cursor></a-cursor>
+    </a-entity>
   </a-scene>
 </body>
 </html>
 ''')
-    return ["index.html"]
+    _write(root / "src" / "main.js", '''// component بسيط: كل نقرة على الصندوق بتلوّنه بلون تاني من دورة ألوان ثابتة —
+// عشان الأسس تكون واضحة: تسجيل component، الاستماع لحدث click، وتعديل
+// خاصية color وقت التفاعل، من غير أي مكتبة خارجية غير A-Frame نفسها.
+AFRAME.registerComponent("cursor-listener", {
+  init: function () {
+    const colors = ["#4f6ef7", "#f74f6e", "#4ff7a0", "#f7d24f"];
+    let index = 0;
+    this.el.addEventListener("click", () => {
+      index = (index + 1) % colors.length;
+      this.el.setAttribute("color", colors[index]);
+    });
+  },
+});
+''')
+    _write(root / "package.json", json.dumps({
+        "name": _slugify(name),
+        "version": "1.0.0",
+        "scripts": {"start": "http-server -p 8080"},
+        "devDependencies": {"http-server": "^14.1.0"},
+    }, indent=2))
+    _write(root / ".gitignore", "node_modules/\n")
+    _write(root / "README.md", f'''# {name} — WebXR (A-Frame) Starter
+
+```bash
+npm install
+npm start        # يشغّل http-server على http://localhost:8080
+```
+
+افتح الرابط في متصفح (أو headset يدعم WebXR) — دوس على الصندوق يغيّر لونه
+(المنطق في `src/main.js`، A-Frame component مسجّل باسم `cursor-listener`).
+''')
+    return ["index.html", "src/main.js", "package.json", ".gitignore", "README.md"]
 
 
 def _scaffold_screenplay(root: pathlib.Path, name: str) -> list[str]:

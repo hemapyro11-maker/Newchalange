@@ -204,7 +204,41 @@ def test_scaffold_ml_script_actually_trains(make_ctx, tmp_path):
 def test_scaffold_quantum_script_compiles(make_ctx, tmp_path):
     result = sp._cmd_scaffold(make_ctx("scaffold", ["quantum", "MyQ", str(tmp_path)]))
     assert result.startswith("✅")
-    py_compile.compile(str(tmp_path / "MyQ" / "bell_state.py"), doraise=True)
+    root = tmp_path / "MyQ"
+    py_compile.compile(str(root / "bell_state.py"), doraise=True)
+    py_compile.compile(str(root / "circuit.py"), doraise=True)
+    assert (root / "tests" / "test_circuit.py").is_file()
+    assert (root / "tests" / "test_bell_state_simulation.py").is_file()
+
+
+requires_qiskit_aer = pytest.mark.skipif(
+    subprocess.run(["python3", "-c", "import qiskit_aer"], capture_output=True).returncode != 0,
+    reason="qiskit-aer not installed",
+)
+
+
+@requires_qiskit_aer
+def test_scaffold_quantum_tests_actually_pass(make_ctx, tmp_path):
+    result = sp._cmd_scaffold(make_ctx("scaffold", ["quantum", "MyQ", str(tmp_path)]))
+    assert result.startswith("✅")
+    root = tmp_path / "MyQ"
+    proc = subprocess.run(["python3", "-m", "pytest", "-q"], cwd=root, capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "3 passed" in proc.stdout
+
+
+@requires_qiskit_aer
+def test_scaffold_quantum_bell_state_runs_and_shows_entanglement(make_ctx, tmp_path):
+    result = sp._cmd_scaffold(make_ctx("scaffold", ["quantum", "MyQ", str(tmp_path)]))
+    assert result.startswith("✅")
+    root = tmp_path / "MyQ"
+    proc = subprocess.run(["python3", "bell_state.py"], cwd=root, capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    # الـ dict بيتطبع بمفاتيح متعلّمة بـ quotes زي {'11': 499, '00': 501} —
+    # بندوّر على المفاتيح المقتبسة بالظبط عشان مانتلخبطش مع أرقام الـ counts
+    # نفسها (501 مثلاً بيحتوي على substring "01").
+    assert "'00'" in proc.stdout or "'11'" in proc.stdout
+    assert "'01'" not in proc.stdout and "'10'" not in proc.stdout
 
 
 def test_scaffold_blockchain_valid_solidity_and_json(make_ctx, tmp_path):
@@ -276,8 +310,13 @@ def test_scaffold_embedded_blink_logic_actually_runs_and_passes(make_ctx, tmp_pa
 def test_scaffold_kernel_module_has_real_tabs_in_makefile(make_ctx, tmp_path):
     result = sp._cmd_scaffold(make_ctx("scaffold", ["kernel_module", "MyMod", str(tmp_path)]))
     assert result.startswith("✅")
-    makefile = (tmp_path / "MyMod" / "Makefile").read_text(encoding="utf-8")
+    root = tmp_path / "MyMod"
+    makefile = (root / "Makefile").read_text(encoding="utf-8")
     assert "\n\tmake -C" in makefile  # recipe lines need literal tabs, not spaces
+    gitignore = (root / ".gitignore").read_text(encoding="utf-8")
+    assert "*.ko" in gitignore and "Module.symvers" in gitignore
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    assert "insmod" in readme and "rmmod" in readme and "dmesg" in readme
 
 
 def test_scaffold_multiplayer_server_compiles(make_ctx, tmp_path):
@@ -315,9 +354,23 @@ def test_scaffold_multiplayer_server_actually_accepts_connections(make_ctx, tmp_
 def test_scaffold_arvr_references_aframe(make_ctx, tmp_path):
     result = sp._cmd_scaffold(make_ctx("scaffold", ["arvr", "MyVR", str(tmp_path)]))
     assert result.startswith("✅")
-    html = (tmp_path / "MyVR" / "index.html").read_text(encoding="utf-8")
+    root = tmp_path / "MyVR"
+    html = (root / "index.html").read_text(encoding="utf-8")
     assert "a-scene" in html
     assert "aframe" in html.lower()
+    assert "src/main.js" in html
+    data = json.loads((root / "package.json").read_text(encoding="utf-8"))
+    assert data["scripts"]["start"].startswith("http-server")
+
+
+@requires_node
+def test_scaffold_arvr_main_js_is_valid_and_registers_component(make_ctx, tmp_path):
+    result = sp._cmd_scaffold(make_ctx("scaffold", ["arvr", "MyVR", str(tmp_path)]))
+    assert result.startswith("✅")
+    main_js = tmp_path / "MyVR" / "src" / "main.js"
+    proc = subprocess.run(["node", "--check", str(main_js)], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    assert "AFRAME.registerComponent" in main_js.read_text(encoding="utf-8")
 
 
 def test_scaffold_screenplay_valid_fountain(make_ctx, tmp_path):
