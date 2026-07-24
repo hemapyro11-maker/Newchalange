@@ -4,7 +4,7 @@ echo   Smart Assistant - Build EXE
 echo ====================================
 
 :: تثبيت المتطلبات
-py -m pip install customtkinter pyinstaller mcp --quiet
+py -m pip install customtkinter pyinstaller mcp capstone --quiet
 
 :: بناء الـ EXE
 py -m PyInstaller ^
@@ -16,6 +16,7 @@ py -m PyInstaller ^
     --hidden-import i18n ^
     --hidden-import version ^
     --collect-all mcp ^
+    --collect-all capstone ^
     --add-data "core_engine.py;." ^
     --add-data "i18n.py;." ^
     --add-data "version.py;." ^
