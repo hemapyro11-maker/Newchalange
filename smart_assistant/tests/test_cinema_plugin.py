@@ -14,6 +14,8 @@ def _close(actual: tuple, expected: tuple, tol: int = 10) -> bool:
 requires_ffmpeg = pytest.mark.skipif(
     not (shutil.which("ffmpeg") and shutil.which("ffprobe")), reason="ffmpeg/ffprobe not installed",
 )
+requires_auto_editor = pytest.mark.skipif(not shutil.which("auto-editor"), reason="auto-editor not installed")
+requires_scenedetect = pytest.mark.skipif(not cp._HAS_SCENEDETECT, reason="scenedetect not installed")
 
 
 @pytest.fixture
@@ -33,6 +35,31 @@ def clip2(tmp_path):
     subprocess.run(
         ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc2=duration=4:size=320x240:rate=15",
          "-f", "lavfi", "-i", "sine=frequency=880:duration=4", "-shortest", str(out), "-loglevel", "error"],
+        check=True, capture_output=True,
+    )
+    return out
+
+
+@pytest.fixture
+def clip_with_silence(tmp_path):
+    """كليب فيديو 7 ثواني: 2 ثانية صوت + 3 ثواني صمت تام + 2 ثانية صوت —
+    عشان نتأكد إن auto_trim_silence فعلاً بيقص الصمت مش بس بيرجع نجاح
+    وهمي. بنولّد الصوت (تون-صمت-تون) في ملف منفصل الأول، وبعدين ندمجه
+    مع الفيديو — أسهل من محاولة بناء الاتنين في أمر ffmpeg واحد."""
+    out = tmp_path / "clip_silence.mp4"
+    audio = tmp_path / "silence_audio.wav"
+    subprocess.run(
+        ["ffmpeg", "-y",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+         "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono:d=3",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+         "-filter_complex", "[0][1][2]concat=n=3:v=0:a=1[aout]", "-map", "[aout]", str(audio), "-loglevel", "error"],
+        check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["ffmpeg", "-y",
+         "-f", "lavfi", "-i", "testsrc=duration=7:size=320x240:rate=15",
+         "-i", str(audio), "-shortest", str(out), "-loglevel", "error"],
         check=True, capture_output=True,
     )
     return out
@@ -248,3 +275,95 @@ def test_stabilize_produces_valid_output(make_ctx, clip1, tmp_path):
     assert result.startswith("✅")
     assert out.is_file()
     assert _duration(out) > 0
+
+
+# ── auto_trim_silence ───────────────────────────────────────────────────
+
+def test_auto_trim_silence_no_args(make_ctx):
+    result = cp._cmd_auto_trim_silence(make_ctx("auto_trim_silence", []))
+    assert result.startswith("usage")
+
+
+def test_auto_trim_silence_reports_missing_tool(make_ctx, tmp_path, monkeypatch):
+    monkeypatch.setattr(cp.shutil, "which", lambda name: None)
+    f = tmp_path / "in.mp4"
+    f.write_bytes(b"x")
+    result = cp._cmd_auto_trim_silence(make_ctx("auto_trim_silence", [str(f), str(tmp_path / "out.mp4")]))
+    assert "auto-editor مش متثبت" in result
+    assert "pip install auto-editor" in result
+
+
+@requires_auto_editor
+def test_auto_trim_silence_missing_input(make_ctx, tmp_path):
+    result = cp._cmd_auto_trim_silence(
+        make_ctx("auto_trim_silence", [str(tmp_path / "nope.mp4"), str(tmp_path / "out.mp4")])
+    )
+    assert result.startswith("❌")
+
+
+@requires_auto_editor
+def test_auto_trim_silence_cuts_real_silence(make_ctx, clip_with_silence, tmp_path):
+    out = tmp_path / "trimmed.mp4"
+    result = cp._cmd_auto_trim_silence(make_ctx("auto_trim_silence", [str(clip_with_silence), str(out)]))
+    assert result.startswith("✅")
+    assert out.is_file()
+    # الأصل 7 ثواني (2 صوت + 3 صمت + 2 صوت) — بعد القص المفروض يقرب من
+    # 4 ثواني (الصوت بس)، مع هامش لـ margin الافتراضي (0.2s) حوالين كل قصة.
+    assert _duration(out) < 6.0
+
+
+# ── detect_scenes ────────────────────────────────────────────────────────
+
+def test_detect_scenes_no_args(make_ctx):
+    result = cp._cmd_detect_scenes(make_ctx("detect_scenes", []))
+    assert result.startswith("usage")
+
+
+def test_detect_scenes_reports_missing_tool(make_ctx, tmp_path, monkeypatch):
+    monkeypatch.setattr(cp, "_HAS_SCENEDETECT", False)
+    f = tmp_path / "in.mp4"
+    f.write_bytes(b"x")
+    result = cp._cmd_detect_scenes(make_ctx("detect_scenes", [str(f)]))
+    assert "PySceneDetect مش متثبت" in result
+    assert "pip install scenedetect" in result
+
+
+@requires_scenedetect
+def test_detect_scenes_missing_input(make_ctx, tmp_path):
+    result = cp._cmd_detect_scenes(make_ctx("detect_scenes", [str(tmp_path / "nope.mp4")]))
+    assert result.startswith("❌")
+
+
+@requires_scenedetect
+def test_detect_scenes_rejects_non_numeric_threshold(make_ctx, tmp_path):
+    f = tmp_path / "in.mp4"
+    f.write_bytes(b"x")
+    result = cp._cmd_detect_scenes(make_ctx("detect_scenes", [str(f), "bogus"]))
+    assert result.startswith("❌")
+    assert "threshold" in result
+
+
+@requires_scenedetect
+@requires_ffmpeg
+def test_detect_scenes_finds_real_cut(make_ctx, tmp_path):
+    out = tmp_path / "two_scenes.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y",
+         "-f", "lavfi", "-i", "color=c=red:s=320x240:d=2",
+         "-f", "lavfi", "-i", "color=c=blue:s=320x240:d=2",
+         "-filter_complex", "[0][1]concat=n=2:v=1:a=0", "-r", "15", str(out), "-loglevel", "error"],
+        check=True, capture_output=True,
+    )
+    result = cp._cmd_detect_scenes(make_ctx("detect_scenes", [str(out)]))
+    assert result.startswith("🎬")
+    assert "2 مشهد" in result
+
+
+@requires_scenedetect
+@requires_ffmpeg
+def test_detect_scenes_no_cuts_in_continuous_clip(make_ctx, clip1):
+    # clip1 نمط testsrc متحرك بسلاسة، من غير أي قطع مفاجئ — ContentDetector
+    # المفروض ميلاقيش أي "مشهد" منفصل فيه.
+    result = cp._cmd_detect_scenes(make_ctx("detect_scenes", [str(clip1)]))
+    assert result.startswith("ℹ️")
+    assert "مفيش تغييرات مشاهد" in result

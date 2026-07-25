@@ -8,6 +8,18 @@ color grading، stabilization، loudness mastering زي معايير البث)،
 الاحترافية (Premiere/DaVinci Resolve/Avid) بتستخدمها تحت الغطاء — لكن
 "جودة هوليوود" في النهاية شغل فني بيعمله مونتير/مصحح ألوان بشري بيقرر
 التوقيت والذوق والقصة. السوفت وير بيوفر الأدوات مش الفن.
+
+كمان فيه `auto_trim_silence` — أداة خارجية اختيارية (auto-editor،
+https://github.com/WyattBlue/auto-editor، `pip install auto-editor`)
+بتقص الصمت/اللقطات الميتة من فيديو أو بودكاست تلقائيًا، بنفس أسلوب
+subprocess اللي ffmpeg نفسه بيتنادى بيه هنا — من غيرها الأمر بيرجع
+رسالة واضحة تقول تتثبت إزاي.
+
+و`detect_scenes` — كشف تلقائي لتغييرات المشاهد (scene cuts) عبر مكتبة
+PySceneDetect (اختيارية، `pip install scenedetect[opencv]`) — مفيد
+لتوليد فصول/timestamps تلقائيًا لفيديو طويل. مكتبة Python حقيقية
+(import مباشر، مش subprocess) فبتتبع نفس نمط الـ import الاختياري
+اللي faster-whisper بيستخدمه في voice_plugin.py.
 """
 from __future__ import annotations
 
@@ -16,6 +28,13 @@ import pathlib
 import shutil
 import subprocess
 import tempfile
+
+try:
+    from scenedetect import ContentDetector
+    from scenedetect import detect as _scenedetect_detect
+    _HAS_SCENEDETECT = True
+except ImportError:
+    _HAS_SCENEDETECT = False
 
 
 def _run_ffmpeg(args: list[str], timeout: int) -> tuple[bool, str]:
@@ -433,6 +452,61 @@ def _cmd_title_card(ctx) -> str:
     return f"✅ اتعمل title card في {dst}"
 
 
+# ═══════════════════════════════════════════════════════════════════
+# قص تلقائي (auto-editor) — أداة مفتوحة المصدر منفصلة
+# ═══════════════════════════════════════════════════════════════════
+
+def _cmd_auto_trim_silence(ctx) -> str:
+    if len(ctx.args) < 2:
+        return "usage: auto_trim_silence <input> <output> [threshold=4%] — بيقص الصمت/اللقطات الميتة تلقائيًا"
+    if not shutil.which("auto-editor"):
+        return "❌ auto-editor مش متثبت — نزّله بـ: pip install auto-editor (مجاني ومفتوح المصدر، https://github.com/WyattBlue/auto-editor)"
+    src, dst = ctx.args[0], ctx.args[1]
+    missing = _missing_files(src)
+    if missing:
+        return f"❌ الملف مش موجود: {missing[0]}"
+    threshold = ctx.args[2] if len(ctx.args) > 2 else "4%"
+    ok, err = _run_ffmpeg(
+        ["auto-editor", src, "--edit", f"audio:threshold={threshold}", "-o", dst, "--no-open", "--quiet"],
+        timeout=900,  # ملفات المونتاج الطويلة بتاخد وقت أطول من فلاتر ffmpeg العادية
+    )
+    if not ok:
+        return f"❌ فشل: {err}"
+    return f"✅ اتقص الصمت/اللقطات الميتة تلقائيًا (threshold={threshold}) في {dst}"
+
+
+# ═══════════════════════════════════════════════════════════════════
+# كشف مشاهد (PySceneDetect) — مكتبة مفتوحة المصدر منفصلة
+# ═══════════════════════════════════════════════════════════════════
+
+def _cmd_detect_scenes(ctx) -> str:
+    if not ctx.args:
+        return "usage: detect_scenes <video> [threshold=27.0] — يكتشف تغييرات المشاهد (scene cuts) تلقائيًا"
+    if not _HAS_SCENEDETECT:
+        return "❌ PySceneDetect مش متثبت — نزّله بـ: pip install scenedetect[opencv] (مجاني ومفتوح المصدر)"
+    src = ctx.args[0]
+    missing = _missing_files(src)
+    if missing:
+        return f"❌ الملف مش موجود: {missing[0]}"
+    try:
+        threshold = float(ctx.args[1]) if len(ctx.args) > 1 else 27.0
+    except ValueError:
+        return "❌ threshold لازم يكون رقم (كل ما قل، كشف أحسّ بتغييرات أبسط)"
+
+    try:
+        scenes = _scenedetect_detect(src, ContentDetector(threshold=threshold))
+    except Exception as e:
+        return f"❌ فشل كشف المشاهد: {e}"
+
+    if not scenes:
+        return f"ℹ️ مفيش تغييرات مشاهد واضحة اتلقت (threshold={threshold}) — يمكن الفيديو مشهد واحد مستمر"
+
+    lines = [f"🎬 {len(scenes)} مشهد اتلقى (threshold={threshold}):"]
+    for i, (start, end) in enumerate(scenes, start=1):
+        lines.append(f"  {i}. {start.get_timecode()} → {end.get_timecode()}  ({end.seconds - start.seconds:.1f}s)")
+    return "\n".join(lines)
+
+
 def register(engine):
     engine.registry.register("color_grade", _cmd_color_grade, "color_grade <in> <out> [preset] — تصحيح ألوان سينمائي")
     engine.registry.register("transition", _cmd_transition, "transition <c1> <c2> <out> [style] [dur] — انتقال احترافي بين كليبين")
@@ -443,4 +517,6 @@ def register(engine):
     engine.registry.register("chroma_key", _cmd_chroma_key, "chroma_key <fg> <bg> <out> [color] [similarity] — دمج خلفية خضراء")
     engine.registry.register("master_audio", _cmd_master_audio, "master_audio <in> <out> [lufs] — توحيد جهارة الصوت لمعيار بث")
     engine.registry.register("denoise_audio", _cmd_denoise_audio, "denoise_audio <in> <out> — إزالة ضوضاء الصوت")
+    engine.registry.register("auto_trim_silence", _cmd_auto_trim_silence, "auto_trim_silence <in> <out> [threshold=4%] — قص الصمت/اللقطات الميتة تلقائيًا (auto-editor)")
+    engine.registry.register("detect_scenes", _cmd_detect_scenes, "detect_scenes <video> [threshold=27.0] — كشف تغييرات المشاهد تلقائيًا (PySceneDetect)")
     engine.registry.register("title_card", _cmd_title_card, "title_card <text> <out> [duration] [size] — لوحة عنوان متحركة")
