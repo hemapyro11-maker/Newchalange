@@ -1,3 +1,6 @@
+import datetime
+import threading
+
 import discord_plugin as dc
 import pytest
 
@@ -82,6 +85,36 @@ def test_request_pairing_caps_pending_and_evicts_oldest():
     assert "99999" in data["pending_pairs"]
 
 
+def test_generate_pair_code_retries_on_collision(monkeypatch):
+    # لو أول كودين اتولدوا مصادفين أكواد موجودة فعلاً، الدالة لازم
+    # تعيد المحاولة لغاية ما تلاقي كود فريد — بدل ما ترجّع كود متصادم
+    # ممكن يخلي صاحب الجهاز يوافق بالغلط على مرسل تاني.
+    calls = iter([111111, 111111, 222222])
+    monkeypatch.setattr(dc.secrets, "randbelow", lambda n: next(calls))
+    code = dc._generate_pair_code({"111111"})
+    assert code == "222222"
+
+
+def test_concurrent_pairing_requests_do_not_lose_data():
+    # راجع: _request_pairing كانت بتعمل load→modify→save من غير قفل —
+    # لو طلبين وصلوا في نفس اللحظة (من threads مختلفة، زي ما بيحصل
+    # فعليًا بين thread البوت وthread المحرك)، كان ممكن كل واحد يقرا
+    # نفس النسخة القديمة من الملف ويكتب فوق تعديل التاني، فيضيع طلب
+    # كامل بصمت. بنطلق عدد كبير من الطلبات المتزامنة الحقيقية (threads
+    # فعلية، مش موك) ونتأكد إن كل واحد فيهم اتسجل فعلاً.
+    sender_ids = list(range(200, 200 + dc._MAX_PENDING_PAIRS))
+    threads = [threading.Thread(target=dc._request_pairing, args=(sid,)) for sid in sender_ids]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+
+    data = dc._load_config()
+    assert len(data["pending_pairs"]) == len(sender_ids)
+    for sid in sender_ids:
+        assert str(sid) in data["pending_pairs"]
+
+
 # ── discord_approve / discord_deauthorize ────────────────────────────
 
 def test_approve_moves_pending_to_owner(make_ctx, bare_engine):
@@ -102,6 +135,34 @@ def test_approve_unknown_code_rejected(make_ctx, bare_engine):
 def test_approve_no_args_shows_usage(make_ctx, bare_engine):
     result = dc._cmd_discord_approve(make_ctx("discord_approve", [], engine=bare_engine))
     assert result.startswith("usage")
+
+
+def test_approve_rejects_expired_code(make_ctx, bare_engine):
+    code = dc._request_pairing(777)
+    data = dc._load_config()
+    old_time = datetime.datetime.now() - dc._PAIR_CODE_TTL - datetime.timedelta(hours=1)
+    data["pending_pairs"]["777"]["requested_at"] = old_time.isoformat(timespec="seconds")
+    dc._save_config(data)
+
+    result = dc._cmd_discord_approve(make_ctx(f"discord_approve {code}", [code], engine=bare_engine))
+    assert result.startswith("❌")
+    assert "منتهي" in result
+    data = dc._load_config()
+    assert 777 not in data["owner_ids"]
+    assert "777" not in data["pending_pairs"]  # الكود المنتهي اتشال برضو، مش فاضل معلّق للأبد
+
+
+def test_approve_accepts_code_within_ttl(make_ctx, bare_engine):
+    code = dc._request_pairing(778)
+    data = dc._load_config()
+    recent_time = datetime.datetime.now() - datetime.timedelta(hours=1)
+    data["pending_pairs"]["778"]["requested_at"] = recent_time.isoformat(timespec="seconds")
+    dc._save_config(data)
+
+    result = dc._cmd_discord_approve(make_ctx(f"discord_approve {code}", [code], engine=bare_engine))
+    assert result.startswith("✅")
+    data = dc._load_config()
+    assert 778 in data["owner_ids"]
 
 
 def test_deauthorize_removes_owner(make_ctx, bare_engine):

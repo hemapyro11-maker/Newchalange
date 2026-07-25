@@ -37,7 +37,7 @@ import datetime
 import json
 import pathlib
 import queue
-import random
+import secrets
 import sys
 import threading
 
@@ -60,6 +60,15 @@ _KEYRING_SERVICE = "nezuko-discord"
 _TOKEN_KEY = "bot_token"
 _MAX_PENDING_PAIRS = 20
 _DISPATCH_TIMEOUT = 30
+_PAIR_CODE_TTL = datetime.timedelta(hours=24)
+
+# discord_config.json بيتقرا/يتكتب من تريدين مختلفين: thread البوت نفسه
+# (asyncio، بينادي _request_pairing لما حد جديد يبعت رسالة) وthread
+# المحرك الرئيسي (لما صاحب الجهاز يكتب discord_approve/discord_deauthorize/
+# discord_set_token). من غير قفل، الاتنين ممكن يقروا نفس النسخة القديمة
+# من الملف، يعدّلوا نسختهم في الذاكرة كل واحد لوحده، ويكتبوا فوق بعض —
+# مين ما كتب أخيراً بيمسح تعديل التاني بالكامل (TOCTOU حقيقي، مش نظري).
+_config_lock = threading.Lock()
 
 
 def _config_path() -> pathlib.Path:
@@ -115,36 +124,47 @@ def _set_token(token: str) -> bool:
         keyring.set_password(_KEYRING_SERVICE, _TOKEN_KEY, token)
     except KeyringError:
         return False
-    data = _load_config()
-    if data.get("bot_token"):
-        data["bot_token"] = None
-        _save_config(data)
+    with _config_lock:
+        data = _load_config()
+        if data.get("bot_token"):
+            data["bot_token"] = None
+            _save_config(data)
     return True
 
 
 # ── pairing ──────────────────────────────────────────────────────────────
 
-def _generate_pair_code() -> str:
-    return f"{random.randint(0, 999999):06d}"
+def _generate_pair_code(existing_codes: set[str]) -> str:
+    """كود عشوائي حقيقي عبر secrets (مش random العادية — مش آمنة
+    تشفيريًا، وده كود بيتحكم في صلاحية وصول كاملة لنيزوكو) وفريد فعليًا
+    بين الطلبات المعلّقة الحالية — عشان لو حصل تصادم كود بين طلبين،
+    صاحب الجهاز يوافق بالغلط على مرسل مش قاصده."""
+    for _ in range(50):
+        code = f"{secrets.randbelow(1_000_000):06d}"
+        if code not in existing_codes:
+            return code
+    return f"{secrets.randbelow(1_000_000):06d}"  # احتمال شبه مستحيل، لكن مينفعش نعلّق
 
 
 def _request_pairing(sender_id: int) -> str:
     """بيسجل (أو يرجع الموجود) كود موافقة لمرسل مش معروف. مفيش تنفيذ
     أي أمر هنا خالص — بس توليد/استرجاع كود."""
-    data = _load_config()
-    key = str(sender_id)
-    existing = data["pending_pairs"].get(key)
-    if existing:
-        return existing["code"]
-    code = _generate_pair_code()
-    if len(data["pending_pairs"]) >= _MAX_PENDING_PAIRS:
-        oldest_key = min(data["pending_pairs"], key=lambda k: data["pending_pairs"][k]["requested_at"])
-        del data["pending_pairs"][oldest_key]
-    data["pending_pairs"][key] = {
-        "code": code, "requested_at": datetime.datetime.now().isoformat(timespec="seconds"),
-    }
-    _save_config(data)
-    return code
+    with _config_lock:
+        data = _load_config()
+        key = str(sender_id)
+        existing = data["pending_pairs"].get(key)
+        if existing:
+            return existing["code"]
+        existing_codes = {info["code"] for info in data["pending_pairs"].values()}
+        code = _generate_pair_code(existing_codes)
+        if len(data["pending_pairs"]) >= _MAX_PENDING_PAIRS:
+            oldest_key = min(data["pending_pairs"], key=lambda k: data["pending_pairs"][k]["requested_at"])
+            del data["pending_pairs"][oldest_key]
+        data["pending_pairs"][key] = {
+            "code": code, "requested_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        }
+        _save_config(data)
+        return code
 
 
 # ── تنفيذ حقيقي عبر نفس طابور core_engine (مش مسار مختصر) ───────────────
@@ -201,9 +221,10 @@ def _cmd_discord_set_token(ctx) -> str:
     if _set_token(token):
         secure_note = "✅ اتحفظ الـ token بأمان في مخزن أسرار نظام التشغيل (keyring)."
     else:
-        data = _load_config()
-        data["bot_token"] = token
-        _save_config(data)
+        with _config_lock:
+            data = _load_config()
+            data["bot_token"] = token
+            _save_config(data)
         secure_note = (
             "⚠️ اتحفظ الـ token كنص عادي في discord_config.json — تخزين keyring الآمن مش متاح دلوقتي.\n"
             "   لتخزين أأمن: pip install keyring"
@@ -222,14 +243,23 @@ def _cmd_discord_approve(ctx) -> str:
     if not ctx.args:
         return "usage: discord_approve <code>"
     code = ctx.args[0]
-    data = _load_config()
-    match_id = next((sid for sid, info in data["pending_pairs"].items() if info["code"] == code), None)
-    if match_id is None:
-        return "❌ الكود ده مش موجود أو منتهي"
-    del data["pending_pairs"][match_id]
-    if int(match_id) not in data["owner_ids"]:
-        data["owner_ids"].append(int(match_id))
-    _save_config(data)
+    with _config_lock:
+        data = _load_config()
+        match_id = next((sid for sid, info in data["pending_pairs"].items() if info["code"] == code), None)
+        if match_id is None:
+            return "❌ الكود ده مش موجود أو منتهي"
+        requested_at = data["pending_pairs"][match_id].get("requested_at", "")
+        try:
+            age = datetime.datetime.now() - datetime.datetime.fromisoformat(requested_at)
+        except ValueError:
+            age = datetime.timedelta(0)
+        del data["pending_pairs"][match_id]
+        if age > _PAIR_CODE_TTL:
+            _save_config(data)
+            return "❌ الكود ده منتهي (أكتر من 24 ساعة) — اطلب من المرسل يبعت رسالة تاني للبوت عشان ياخد كود جديد"
+        if int(match_id) not in data["owner_ids"]:
+            data["owner_ids"].append(int(match_id))
+        _save_config(data)
     return f"✅ اتوافق على المستخدم {match_id} — بقى يقدر يتحكم في نيزوكو بالكامل من ديسكورد (زي ما لو قاعد على جهازك)"
 
 
@@ -237,11 +267,12 @@ def _cmd_discord_deauthorize(ctx) -> str:
     if not ctx.args or not ctx.args[0].lstrip("-").isdigit():
         return "usage: discord_deauthorize <id>"
     target = int(ctx.args[0])
-    data = _load_config()
-    if target not in data["owner_ids"]:
-        return f"❌ المستخدم {target} مش موافق عليه أصلاً"
-    data["owner_ids"].remove(target)
-    _save_config(data)
+    with _config_lock:
+        data = _load_config()
+        if target not in data["owner_ids"]:
+            return f"❌ المستخدم {target} مش موافق عليه أصلاً"
+        data["owner_ids"].remove(target)
+        _save_config(data)
     return f"🚫 اتشال {target} — مش هيقدر يتحكم في نيزوكو من ديسكورد تاني"
 
 
