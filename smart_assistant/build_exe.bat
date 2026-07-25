@@ -31,7 +31,18 @@ echo ====================================
 :: Secret Service) وقت التشغيل عبر entry points، فمحتاج --collect-all
 :: عشان الميتاداتا دي تتجمع صح — اتجرب فعليًا (onefile Linux مبني بنفس
 :: الفلاج ده اشتغل وكشف حالة الـ backend صح من غير أي crash).
-py -m pip install customtkinter pyinstaller mcp typer capstone Pillow pandas matplotlib edge-tts piper-tts sounddevice python-telegram-bot discord.py keyring --quiet
+:: faster-whisper: أول محاولة تفريغ صوتي (STT) للأمر listen — نيزوكو
+:: بيعمل import ليها فعليًا (voice_plugin.py) فمحتاجة collect-all زيها
+:: زي sounddevice. بتجيب معاها ctranslate2 (حزمة compiled تقيلة) —
+:: اتجرب فعليًا (onefile Linux بنفس الفلاج ده بنى واشتغل من غير أي
+:: crash، بعكس مخاوفنا الأولانية من نفس مشكلة mcp.cli).
+:: vosk: الضمانة الأخيرة لتفريغ الصوت، خفيفة وبتتجمع بنفس الأمان
+:: (اتجرب فعليًا في نفس البناء اللي فوق). النموذج نفسه (~40-50MB)
+:: **مش** بيتحمّل هنا ولا يتضم في الـ exe — لازم المستخدم يحمّله يدويًا
+:: (شوف الملاحظات تحت) لأنه مفيش نموذج قياسي واحد نقدر نحطه هنا.
+:: openai-whisper لسه عن قصد **مش** هنا زي ما هو موضح فوق — بيتنادى
+:: بس عن طريق subprocess (أمر whisper CLI)، مش import مباشر.
+py -m pip install customtkinter pyinstaller mcp typer capstone Pillow pandas matplotlib edge-tts piper-tts sounddevice faster-whisper vosk python-telegram-bot discord.py keyring --quiet
 
 :: بناء الـ EXE
 py -m PyInstaller ^
@@ -51,6 +62,8 @@ py -m PyInstaller ^
     --collect-all piper ^
     --collect-all onnxruntime ^
     --collect-all sounddevice ^
+    --collect-all faster_whisper ^
+    --collect-all vosk ^
     --collect-all telegram ^
     --collect-all discord ^
     --collect-all keyring ^
@@ -87,10 +100,13 @@ echo     إنترنت وقت الاستخدام (edge-tts، مجاني بالك�
 echo     بيرجع لـ Piper (صوت عربي محلي، بيتحمّل مرة واحدة ~60MB) وبعدين
 echo     espeak-ng (لازم يتثبت يدوي من espeak-ng.github.io، صوت روبوتي
 echo     بس ضامن يشتغل offline بالكامل من غير أي تحميل).
-echo   - أوامر listen/listen_run (استماع صوتي) محتاجة: pip install
-echo     openai-whisper على جهاز المستخدم النهائي (بيوصّل أمر whisper،
-echo     أول استخدام بيحمّل نموذجه مرة واحدة وبعدين offline بالكامل).
-echo     sounddevice (تسجيل المايك) متضمّن في الـ exe نفسه أصلاً.
+echo   - أوامر listen/listen_run (استماع صوتي): sounddevice + faster-whisper
+echo     + Vosk متضمّنين في الـ exe نفسه أصلاً (أول استخدام لـ
+echo     faster-whisper بيحمّل نموذجه مرة واحدة، وبعدين offline بالكامل).
+echo     Vosk محتاج تحميل نموذج يدوي في voice_cache\vosk-model\ من
+echo     alphacephei.com/vosk/models (أو مسار NEZUKO_VOSK_MODEL) —
+echo     الضمانة الأخيرة لو مفيش إنترنت وقت أول استخدام لـ faster-whisper.
+echo     whisper CLI (pip install openai-whisper) احتياطي اختياري تالت.
 echo   - قناة تليجرام (telegram_set_token) محتاجة إنترنت وقت التشغيل
 echo     (بوليينج عادي، مفيش سيرفر عام مطلوب). أول مستخدم يكلم البوت
 echo     لازم يتوافق عليه من على الجهاز نفسه بـ telegram_approve

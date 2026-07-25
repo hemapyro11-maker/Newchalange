@@ -1,6 +1,8 @@
 import pathlib
 import shutil
 import subprocess
+import sys
+import types
 
 import pytest
 import voice_plugin as vp
@@ -276,19 +278,89 @@ def test_record_audio_mic_exception_reported(monkeypatch, tmp_path):
     assert "no mic found" in err
 
 
-# ── STT: _transcribe ─────────────────────────────────────────────────────
+# ── STT: _transcribe_faster_whisper ──────────────────────────────────────
 
-def test_transcribe_whisper_not_installed(monkeypatch, tmp_path):
+def test_transcribe_faster_whisper_not_installed(monkeypatch, tmp_path):
+    monkeypatch.setitem(sys.modules, "faster_whisper", None)
+    wav = tmp_path / "in.wav"
+    wav.write_bytes(b"fake")
+    text, available = vp._transcribe_faster_whisper(wav, "base")
+    assert text is None
+    assert available is False
+
+
+def test_transcribe_faster_whisper_success(monkeypatch, tmp_path):
+    class FakeSegment:
+        def __init__(self, text):
+            self.text = text
+
+    class FakeModel:
+        def __init__(self, model_size, **kwargs):
+            pass
+
+        def transcribe(self, path):
+            return [FakeSegment("شغّل"), FakeSegment("الأمر ده")], object()
+
+    fake_module = types.ModuleType("faster_whisper")
+    fake_module.WhisperModel = FakeModel
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake_module)
+    monkeypatch.setattr(vp, "_faster_whisper_models", {})
+    wav = tmp_path / "in.wav"
+    wav.write_bytes(b"fake")
+    text, available = vp._transcribe_faster_whisper(wav, "base")
+    assert available is True
+    assert text == "شغّل الأمر ده"
+
+
+def test_transcribe_faster_whisper_caches_model_by_size(monkeypatch, tmp_path):
+    calls = []
+
+    class FakeModel:
+        def __init__(self, model_size, **kwargs):
+            calls.append(model_size)
+
+        def transcribe(self, path):
+            return [], object()
+
+    fake_module = types.ModuleType("faster_whisper")
+    fake_module.WhisperModel = FakeModel
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake_module)
+    monkeypatch.setattr(vp, "_faster_whisper_models", {})
+    wav = tmp_path / "in.wav"
+    wav.write_bytes(b"fake")
+    vp._transcribe_faster_whisper(wav, "base")
+    vp._transcribe_faster_whisper(wav, "base")
+    assert calls == ["base"]
+
+
+def test_transcribe_faster_whisper_model_error_reported_as_available(monkeypatch, tmp_path):
+    class FakeModel:
+        def __init__(self, model_size, **kwargs):
+            raise RuntimeError("boom")
+
+    fake_module = types.ModuleType("faster_whisper")
+    fake_module.WhisperModel = FakeModel
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake_module)
+    monkeypatch.setattr(vp, "_faster_whisper_models", {})
+    wav = tmp_path / "in.wav"
+    wav.write_bytes(b"fake")
+    text, available = vp._transcribe_faster_whisper(wav, "base")
+    assert text is None
+    assert available is True
+
+
+# ── STT: _transcribe_whisper_cli ─────────────────────────────────────────
+
+def test_transcribe_whisper_cli_not_installed(monkeypatch, tmp_path):
     monkeypatch.setattr(vp.shutil, "which", lambda name: None)
     wav = tmp_path / "in.wav"
     wav.write_bytes(b"fake")
-    text, err = vp._transcribe(wav)
+    text, available = vp._transcribe_whisper_cli(wav, vp.WHISPER_MODEL)
     assert text is None
-    assert "whisper" in err
-    assert "pip install openai-whisper" in err
+    assert available is False
 
 
-def test_transcribe_success(monkeypatch, tmp_path):
+def test_transcribe_whisper_cli_success(monkeypatch, tmp_path):
     monkeypatch.setattr(vp.shutil, "which", lambda name: "/usr/bin/whisper" if name == "whisper" else None)
 
     def fake_run(cmd, **kwargs):
@@ -300,22 +372,22 @@ def test_transcribe_success(monkeypatch, tmp_path):
     monkeypatch.setattr(vp.subprocess, "run", fake_run)
     wav = tmp_path / "in.wav"
     wav.write_bytes(b"fake")
-    text, err = vp._transcribe(wav)
-    assert err is None
+    text, available = vp._transcribe_whisper_cli(wav, vp.WHISPER_MODEL)
+    assert available is True
     assert text == "شغّل الأمر ده"
 
 
-def test_transcribe_nonzero_exit(monkeypatch, tmp_path):
+def test_transcribe_whisper_cli_nonzero_exit(monkeypatch, tmp_path):
     monkeypatch.setattr(vp.shutil, "which", lambda name: "/usr/bin/whisper" if name == "whisper" else None)
     monkeypatch.setattr(vp.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom"))
     wav = tmp_path / "in.wav"
     wav.write_bytes(b"fake")
-    text, err = vp._transcribe(wav)
+    text, available = vp._transcribe_whisper_cli(wav, vp.WHISPER_MODEL)
     assert text is None
-    assert "boom" in err
+    assert available is True
 
 
-def test_transcribe_timeout(monkeypatch, tmp_path):
+def test_transcribe_whisper_cli_timeout(monkeypatch, tmp_path):
     monkeypatch.setattr(vp.shutil, "which", lambda name: "/usr/bin/whisper" if name == "whisper" else None)
 
     def fake_run(cmd, **kwargs):
@@ -324,12 +396,12 @@ def test_transcribe_timeout(monkeypatch, tmp_path):
     monkeypatch.setattr(vp.subprocess, "run", fake_run)
     wav = tmp_path / "in.wav"
     wav.write_bytes(b"fake")
-    text, err = vp._transcribe(wav)
+    text, available = vp._transcribe_whisper_cli(wav, vp.WHISPER_MODEL)
     assert text is None
-    assert "⏱" in err
+    assert available is True
 
 
-def test_transcribe_empty_output_reported_as_no_speech(monkeypatch, tmp_path):
+def test_transcribe_whisper_cli_empty_output_reported_as_available(monkeypatch, tmp_path):
     monkeypatch.setattr(vp.shutil, "which", lambda name: "/usr/bin/whisper" if name == "whisper" else None)
 
     def fake_run(cmd, **kwargs):
@@ -339,6 +411,141 @@ def test_transcribe_empty_output_reported_as_no_speech(monkeypatch, tmp_path):
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     monkeypatch.setattr(vp.subprocess, "run", fake_run)
+    wav = tmp_path / "in.wav"
+    wav.write_bytes(b"fake")
+    text, available = vp._transcribe_whisper_cli(wav, vp.WHISPER_MODEL)
+    assert text is None
+    assert available is True
+
+
+# ── STT: _transcribe_vosk ────────────────────────────────────────────────
+
+def _write_silent_wav(path: pathlib.Path) -> None:
+    import wave as _wave
+
+    with _wave.open(str(path), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(16000)
+        wf.writeframes(b"\x00\x00" * 1600)
+
+
+def test_transcribe_vosk_no_model_dir(monkeypatch, tmp_path):
+    monkeypatch.setattr(vp, "_vosk_model_dir", lambda: tmp_path / "missing-model")
+    wav = tmp_path / "in.wav"
+    _write_silent_wav(wav)
+    text, available = vp._transcribe_vosk(wav)
+    assert text is None
+    assert available is False
+
+
+def test_transcribe_vosk_package_not_installed(monkeypatch, tmp_path):
+    model_dir = tmp_path / "vosk-model"
+    model_dir.mkdir()
+    monkeypatch.setattr(vp, "_vosk_model_dir", lambda: model_dir)
+    monkeypatch.setitem(sys.modules, "vosk", None)
+    wav = tmp_path / "in.wav"
+    _write_silent_wav(wav)
+    text, available = vp._transcribe_vosk(wav)
+    assert text is None
+    assert available is False
+
+
+def test_transcribe_vosk_success(monkeypatch, tmp_path):
+    model_dir = tmp_path / "vosk-model"
+    model_dir.mkdir()
+    monkeypatch.setattr(vp, "_vosk_model_dir", lambda: model_dir)
+
+    class FakeRecognizer:
+        def __init__(self, model, rate):
+            pass
+
+        def AcceptWaveform(self, data):
+            return False
+
+        def Result(self):
+            return "{}"
+
+        def FinalResult(self):
+            return '{"text": "شغّل الأمر ده"}'
+
+    fake_module = types.ModuleType("vosk")
+    fake_module.SetLogLevel = lambda level: None
+    fake_module.Model = lambda path: object()
+    fake_module.KaldiRecognizer = FakeRecognizer
+    monkeypatch.setitem(sys.modules, "vosk", fake_module)
+
+    wav = tmp_path / "in.wav"
+    _write_silent_wav(wav)
+    text, available = vp._transcribe_vosk(wav)
+    assert available is True
+    assert text == "شغّل الأمر ده"
+
+
+def test_transcribe_vosk_error_reported_as_available(monkeypatch, tmp_path):
+    model_dir = tmp_path / "vosk-model"
+    model_dir.mkdir()
+    monkeypatch.setattr(vp, "_vosk_model_dir", lambda: model_dir)
+
+    fake_module = types.ModuleType("vosk")
+    fake_module.SetLogLevel = lambda level: None
+
+    def _boom(path):
+        raise RuntimeError("boom")
+
+    fake_module.Model = _boom
+    fake_module.KaldiRecognizer = object
+    monkeypatch.setitem(sys.modules, "vosk", fake_module)
+
+    wav = tmp_path / "in.wav"
+    _write_silent_wav(wav)
+    text, available = vp._transcribe_vosk(wav)
+    assert text is None
+    assert available is True
+
+
+# ── STT: _transcribe (orchestrator) ──────────────────────────────────────
+
+def test_transcribe_no_engine_installed_reports_missing_message(monkeypatch, tmp_path):
+    monkeypatch.setattr(vp, "_transcribe_faster_whisper", lambda wav, model: (None, False))
+    monkeypatch.setattr(vp, "_transcribe_whisper_cli", lambda wav, model: (None, False))
+    monkeypatch.setattr(vp, "_transcribe_vosk", lambda wav: (None, False))
+    wav = tmp_path / "in.wav"
+    wav.write_bytes(b"fake")
+    text, err = vp._transcribe(wav)
+    assert text is None
+    assert err is vp._STT_MISSING_MSG
+
+
+def test_transcribe_prefers_faster_whisper_over_other_backends(monkeypatch, tmp_path):
+    def _fail(*a, **kw):
+        raise AssertionError("shouldn't be called — faster-whisper already succeeded")
+
+    monkeypatch.setattr(vp, "_transcribe_faster_whisper", lambda wav, model: ("نتيجة faster-whisper", True))
+    monkeypatch.setattr(vp, "_transcribe_whisper_cli", _fail)
+    monkeypatch.setattr(vp, "_transcribe_vosk", _fail)
+    wav = tmp_path / "in.wav"
+    wav.write_bytes(b"fake")
+    text, err = vp._transcribe(wav)
+    assert err is None
+    assert text == "نتيجة faster-whisper"
+
+
+def test_transcribe_falls_back_to_whisper_cli_then_vosk(monkeypatch, tmp_path):
+    monkeypatch.setattr(vp, "_transcribe_faster_whisper", lambda wav, model: (None, False))
+    monkeypatch.setattr(vp, "_transcribe_whisper_cli", lambda wav, model: (None, True))
+    monkeypatch.setattr(vp, "_transcribe_vosk", lambda wav: ("نتيجة vosk", True))
+    wav = tmp_path / "in.wav"
+    wav.write_bytes(b"fake")
+    text, err = vp._transcribe(wav)
+    assert err is None
+    assert text == "نتيجة vosk"
+
+
+def test_transcribe_all_backends_available_but_silent(monkeypatch, tmp_path):
+    monkeypatch.setattr(vp, "_transcribe_faster_whisper", lambda wav, model: (None, True))
+    monkeypatch.setattr(vp, "_transcribe_whisper_cli", lambda wav, model: (None, True))
+    monkeypatch.setattr(vp, "_transcribe_vosk", lambda wav: (None, True))
     wav = tmp_path / "in.wav"
     wav.write_bytes(b"fake")
     text, err = vp._transcribe(wav)
@@ -393,20 +600,32 @@ def test_listen_run_does_not_submit_on_error(monkeypatch, make_ctx, bare_engine)
     assert bare_engine._queue.empty()
 
 
-def test_stt_status_reports_missing(make_ctx, monkeypatch):
+def test_stt_status_reports_missing(make_ctx, monkeypatch, tmp_path):
     monkeypatch.setattr(vp, "sd", None)
     monkeypatch.setattr(vp.shutil, "which", lambda name: None)
+    monkeypatch.setitem(sys.modules, "faster_whisper", None)
+    monkeypatch.setitem(sys.modules, "vosk", None)
+    monkeypatch.setattr(vp, "_vosk_model_dir", lambda: tmp_path / "missing-vosk")
     result = vp._cmd_stt_status(make_ctx("stt_status", []))
-    assert result.count("❌") == 2
+    assert result.count("❌") == 4
     assert "pip install sounddevice" in result
+    assert "pip install faster-whisper" in result
     assert "pip install openai-whisper" in result
+    assert "pip install vosk" in result
 
 
-def test_stt_status_reports_available(make_ctx, monkeypatch):
+def test_stt_status_reports_available(make_ctx, monkeypatch, tmp_path):
     monkeypatch.setattr(vp, "sd", _FakeSD())
     monkeypatch.setattr(vp.shutil, "which", lambda name: "/usr/bin/whisper" if name == "whisper" else None)
+    fake_faster_whisper = types.ModuleType("faster_whisper")
+    fake_faster_whisper.WhisperModel = object
+    monkeypatch.setitem(sys.modules, "faster_whisper", fake_faster_whisper)
+    monkeypatch.setitem(sys.modules, "vosk", types.ModuleType("vosk"))
+    vosk_dir = tmp_path / "vosk-model"
+    vosk_dir.mkdir()
+    monkeypatch.setattr(vp, "_vosk_model_dir", lambda: vosk_dir)
     result = vp._cmd_stt_status(make_ctx("stt_status", []))
-    assert result.count("✅") == 2
+    assert result.count("✅") == 4
 
 
 def test_register_adds_stt_commands():

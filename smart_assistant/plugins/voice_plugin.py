@@ -23,12 +23,25 @@ voice_plugin.py — نطق نصوص بصوت أنثوي مصري (نيزوكو) 
 ("Voice Interaction Pipeline"). `listen`/`listen_run` بيسجلوا من
 المايك عبر `sounddevice` (مكتبة بايثون خفيفة، مش أداة CLI منفصلة —
 من غير تعقيد تحديد اسم جهاز المايك يدويًا زي ما ffmpeg بيحتاج على
-ويندوز) ويفرّغوا الصوت لنص عبر `whisper` CLI (من حزمة `openai-whisper`
-مفتوحة المصدر — بيتحمّل نموذجه مرة واحدة زي Piper، وبعدين offline
-بالكامل). `listen` بس بيرجع النص من غير تنفيذ؛ `listen_run` بينفذ
-النص كأمر فعلي فورًا (لو مش أمر مطابق حرفيًا، بيمر على نفس نظام
-تصحيح الأخطاء الإملائية والتأكيد بتاع core_engine — نفس الحماية
-اللي أي نص متكتوب بييجي منها).
+ويندوز)، وبعدين بيفرّغوا الصوت لنص عبر سلسلة احتياطية حقيقية من ثلاث
+محركات، من الأفضل جودة/أسرع للأضمن توفر:
+
+1. **faster-whisper** (عبر CTranslate2، مش PyTorch) — أدق وأسرع لغاية
+   4 أضعاف من openai-whisper الكلاسيكي، وأخف بكتير في الحجم (بالظبط
+   نفس السبب اللي خلانا ماندمجش openai-whisper جوه الـ exe نفسه).
+   نموذج محلي، بيتحمّل مرة واحدة زي Piper.
+2. **whisper CLI** (من حزمة `openai-whisper`) — احتياطي لو faster-whisper
+   مش متثبت، بنفس الجودة تقريبًا بس أبطأ وأتقل.
+3. **Vosk** — الضمانة الأخيرة: نموذج offline بالكامل وخفيف جدًا (زي
+   espeak-ng للنطق)، لكن محتاج تحميل نموذج يدوي (مش أوتوماتيك زي
+   الاتنين اللي فوق) من [alphacephei.com/vosk/models](https://alphacephei.com/vosk/models)
+   وفكه في `voice_cache/vosk-model/` (أو مسار تحدده بمتغير بيئة
+   `NEZUKO_VOSK_MODEL`).
+
+`listen` بس بيرجع النص من غير تنفيذ؛ `listen_run` بينفذ النص كأمر
+فعلي فورًا (لو مش أمر مطابق حرفيًا، بيمر على نفس نظام تصحيح الأخطاء
+الإملائية والتأكيد بتاع core_engine — نفس الحماية اللي أي نص متكتوب
+بييجي منها).
 
 **ملحوظة منصة (اتجرب فعليًا):** على ويندوز/ماك، wheel بتاع
 `sounddevice` بيجي ومعاه PortAudio جاهز — من غير خطوة إضافية. على
@@ -44,6 +57,7 @@ voice_plugin.py — نطق نصوص بصوت أنثوي مصري (نيزوكو) 
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import shutil
 import subprocess
@@ -254,10 +268,31 @@ def _record_audio(seconds: int, out_path: pathlib.Path) -> str | None:
     return None
 
 
-def _transcribe(wav_path: pathlib.Path, model: str = WHISPER_MODEL) -> tuple[str | None, str | None]:
-    """يرجع (النص، None) لو نجح، أو (None، رسالة خطأ) لو فشل."""
+_faster_whisper_models: dict[str, object] = {}
+
+
+def _transcribe_faster_whisper(wav_path: pathlib.Path, model_size: str) -> tuple[str | None, bool]:
+    """يرجع (النص أو None، هل المحرك متاح أصلاً). لو متاح لكن مسمعش
+    كلام واضح، بيرجع (None, True)."""
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError:
+        return None, False
+    try:
+        model = _faster_whisper_models.get(model_size)
+        if model is None:
+            model = WhisperModel(model_size, device="cpu", compute_type="int8")
+            _faster_whisper_models[model_size] = model
+        segments, _info = model.transcribe(str(wav_path))
+        text = " ".join(seg.text for seg in segments).strip()
+    except Exception:
+        return None, True
+    return (text or None), True
+
+
+def _transcribe_whisper_cli(wav_path: pathlib.Path, model: str) -> tuple[str | None, bool]:
     if not shutil.which("whisper"):
-        return None, "❌ أداة whisper مش متثبتة — pip install openai-whisper (محتاج FFmpeg برضه، موجود أصلاً في نيزوكو)"
+        return None, False
     with tempfile.TemporaryDirectory(prefix="nezuko_stt_") as tmp:
         cmd = [
             "whisper", str(wav_path), "--model", model,
@@ -266,16 +301,82 @@ def _transcribe(wav_path: pathlib.Path, model: str = WHISPER_MODEL) -> tuple[str
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_TRANSCRIBE_TIMEOUT)
         except subprocess.TimeoutExpired:
-            return None, f"⏱ التفريغ أخد وقت أطول من {_TRANSCRIBE_TIMEOUT}s"
+            return None, True
         if proc.returncode != 0:
-            return None, f"❌ whisper فشل: {(proc.stderr or '').strip()[:300]}"
+            return None, True
         txt_path = pathlib.Path(tmp) / f"{wav_path.stem}.txt"
         if not txt_path.is_file():
-            return None, "❌ whisper ما رجعش أي ملف نص"
+            return None, True
         text = txt_path.read_text(encoding="utf-8").strip()
-        if not text:
-            return None, "🔇 مسمعتش أي كلام واضح"
-        return text, None
+    return (text or None), True
+
+
+def _vosk_model_dir() -> pathlib.Path:
+    override = os.environ.get("NEZUKO_VOSK_MODEL")
+    if override:
+        return pathlib.Path(override)
+    return _voice_cache_dir() / "vosk-model"
+
+
+def _transcribe_vosk(wav_path: pathlib.Path) -> tuple[str | None, bool]:
+    model_dir = _vosk_model_dir()
+    if not model_dir.is_dir():
+        return None, False
+    try:
+        import json as _json
+
+        import vosk
+    except ImportError:
+        return None, False
+    try:
+        vosk.SetLogLevel(-1)
+        model = vosk.Model(str(model_dir))
+        with wave.open(str(wav_path), "rb") as wf:
+            rec = vosk.KaldiRecognizer(model, wf.getframerate())
+            parts = []
+            while True:
+                data = wf.readframes(4000)
+                if not data:
+                    break
+                if rec.AcceptWaveform(data):
+                    chunk = _json.loads(rec.Result()).get("text", "")
+                    if chunk:
+                        parts.append(chunk)
+            final = _json.loads(rec.FinalResult()).get("text", "")
+            if final:
+                parts.append(final)
+        text = " ".join(parts).strip()
+    except Exception:
+        return None, True
+    return (text or None), True
+
+
+_STT_MISSING_MSG = (
+    "❌ مفيش أي محرك تفريغ صوتي متثبت — ثبّت واحد على الأقل:\n"
+    "   pip install faster-whisper   (الأفضل — أدق وأخف وأسرع)\n"
+    "   pip install openai-whisper\n"
+    "   أو حمّل نموذج Vosk صغير: https://alphacephei.com/vosk/models\n"
+    "     وفكه في voice_cache/vosk-model/ (أو اضبط NEZUKO_VOSK_MODEL)"
+)
+
+
+def _transcribe(wav_path: pathlib.Path, model: str = WHISPER_MODEL) -> tuple[str | None, str | None]:
+    """يرجع (النص، None) لو نجح، أو (None، رسالة خطأ) لو كل المحركات
+    فشلت أو مفيش ولا واحد متثبت. بيجرب faster-whisper الأول (أدق
+    وأخف)، بعدين whisper CLI، وأخيرًا Vosk (لو نموذجه متحمّل يدويًا)."""
+    any_available = False
+    for backend_fn in (
+        lambda: _transcribe_faster_whisper(wav_path, model),
+        lambda: _transcribe_whisper_cli(wav_path, model),
+        lambda: _transcribe_vosk(wav_path),
+    ):
+        text, available = backend_fn()
+        any_available = any_available or available
+        if text:
+            return text, None
+    if not any_available:
+        return None, _STT_MISSING_MSG
+    return None, "🔇 مسمعتش أي كلام واضح"
 
 
 def _parse_listen_seconds(ctx) -> tuple[int, str | None]:
@@ -325,13 +426,40 @@ def _cmd_stt_status(ctx) -> str:
         f"  {'✅' if mic_ok else '❌'} sounddevice (تسجيل من المايك)"
         + ("" if mic_ok else " — pip install sounddevice")
     )
+
+    try:
+        import faster_whisper  # noqa: F401
+        faster_ok = True
+    except ImportError:
+        faster_ok = False
+    lines.append(
+        f"  {'✅' if faster_ok else '❌'} faster-whisper (الأفضل — أدق وأخف، نموذج: {WHISPER_MODEL})"
+        + ("" if faster_ok else " — pip install faster-whisper")
+    )
+
     whisper_ok = shutil.which("whisper") is not None
     lines.append(
-        f"  {'✅' if whisper_ok else '❌'} whisper (تفريغ الصوت لنص، نموذج: {WHISPER_MODEL})"
+        f"  {'✅' if whisper_ok else '❌'} whisper CLI (احتياطي، نموذج: {WHISPER_MODEL})"
         + ("" if whisper_ok else " — pip install openai-whisper")
     )
-    if not (mic_ok and whisper_ok):
-        lines.append("\n⚠️ لازم الاتنين شغالين عشان listen/listen_run يشتغلوا.")
+
+    vosk_dir_ok = _vosk_model_dir().is_dir()
+    try:
+        import vosk  # noqa: F401
+        vosk_pkg_ok = True
+    except ImportError:
+        vosk_pkg_ok = False
+    vosk_ok = vosk_dir_ok and vosk_pkg_ok
+    vosk_note = ""
+    if not vosk_pkg_ok:
+        vosk_note = " — pip install vosk"
+    elif not vosk_dir_ok:
+        vosk_note = f" — حمّل نموذج في {_vosk_model_dir()} (https://alphacephei.com/vosk/models)"
+    lines.append(f"  {'✅' if vosk_ok else '❌'} Vosk (الضمانة الأخيرة، offline بالكامل){vosk_note}")
+
+    stt_engine_ok = faster_ok or whisper_ok or vosk_ok
+    if not mic_ok or not stt_engine_ok:
+        lines.append("\n⚠️ لازم sounddevice + محرك تفريغ واحد على الأقل عشان listen/listen_run يشتغلوا.")
     return "\n".join(lines)
 
 
