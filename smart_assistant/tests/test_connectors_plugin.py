@@ -122,3 +122,41 @@ def test_async_connect_rejects_config_missing_command(bare_engine):
             await mgr._async_connect("badcfg", {})
 
     asyncio.run(run())
+
+
+# ── shutdown / reload leak ─────────────────────────────────────────────
+
+@requires_mcp_pkg
+def test_shutdown_stops_the_event_loop_thread(bare_engine):
+    mgr = cp.ConnectorManager(bare_engine)
+    thread = mgr._loop_thread
+    assert thread.is_alive()
+    mgr.shutdown()
+    thread.join(timeout=2)
+    assert not thread.is_alive()
+
+
+@requires_mcp_pkg
+def test_register_called_twice_shuts_down_previous_manager(tmp_path, monkeypatch, bare_engine):
+    # راجع: core_engine.load_plugins() بينادي register() لكل الإضافات
+    # (حتى المحمّلة قبل كده) في كل reload_plugins — من غير shutdown
+    # صريح، كل reload كان بيسرّب thread + event loop قديم بلا حدود
+    # لأن engine.connector_manager كان بيتستبدل بس من غير ما القديم
+    # يتقفل.
+    config_path = tmp_path / "connectors.json"
+    monkeypatch.setattr(cp, "_config_path", lambda: config_path)
+
+    cp.register(bare_engine)
+    first_manager = bare_engine.connector_manager
+    first_thread = first_manager._loop_thread
+    assert first_thread.is_alive()
+
+    cp.register(bare_engine)
+    second_manager = bare_engine.connector_manager
+    assert second_manager is not first_manager
+
+    first_thread.join(timeout=2)
+    assert not first_thread.is_alive()  # القديم اتقفل صراحةً، مش متسرّب
+    assert second_manager._loop_thread.is_alive()
+
+    second_manager.shutdown()

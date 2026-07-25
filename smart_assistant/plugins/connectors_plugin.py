@@ -45,6 +45,19 @@ class ConnectorManager:
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
         return future.result(timeout=timeout)
 
+    def shutdown(self):
+        """يقفل كل جلسات MCP المتصلة، ويوقف event loop thread بتاع
+        المدير ده بأمان. لازم تتنادى على أي مدير قديم قبل ما نستبدله
+        بواحد جديد — core_engine.load_plugins() بينادي register() لكل
+        الإضافات (حتى المحمّلة قبل كده) في كل reload_plugins، فمن غير
+        shutdown صريح كان كل reload بيسرّب thread + event loop + أي
+        جلسات MCP متصلة قديمة بلا حدود (المدير القديم كان بيتنسى
+        وبيفضل شغال في الخلفية من غير أي إشارة)."""
+        for name in list(self._stacks):
+            self.disconnect(name)
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        self._loop_thread.join(timeout=5)
+
     def load_config(self) -> dict:
         path = _config_path()
         if not path.exists():
@@ -179,6 +192,10 @@ def register(engine):
             return "❌ باكدج mcp مش متثبت — ثبّته بـ: pip install mcp"
         engine.registry.register("connectors", _cmd_missing, "MCP Connectors (يحتاج: pip install mcp)")
         return
+
+    existing_manager = getattr(engine, "connector_manager", None)
+    if existing_manager is not None:
+        existing_manager.shutdown()
 
     manager = ConnectorManager(engine)
     engine.connector_manager = manager  # متاح لأي إضافة تانية لو حابة تستخدمه
