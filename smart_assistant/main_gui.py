@@ -413,8 +413,15 @@ class AssistantApp(ctk.CTk):
         # الإضافات ("ok") ولا الأخطاء/التحذيرات. وبنستثني نتيجة speak/
         # voice_status نفسها عشان نيزوكو ماتفضلش تقرا تأكيد إنها قالت
         # حاجة لغاية ما تدخل في حلقة نطق بلا نهاية.
+        # ملحوظة مهمة: _on_log بتتنادى من Thread الخلفي بتاع المحرك
+        # (worker thread)، مش Tk main thread — لازم أي كتابة لـ
+        # self._last_command_name (اللي بيحصلها قراءة/كتابة كمان من
+        # _send_command/_attach_file/_scan_file على الـ main thread)
+        # تتمرّر عبر self.after(0, ...) عشان تحصل حصريًا على نفس الـ
+        # thread، وإلا كتابة من الـ worker thread ممكن تتزاحم مع كتابة
+        # من الـ main thread وتكسر الحماية من حلقة النطق اللانهائية.
         if level == "info" and self.voice_enabled and self._last_command_name not in ("speak", "voice_status"):
-            self._speak_async(msg)
+            self.after(0, self._speak_async, msg)
 
     def _on_status(self, status: str):
         self.after(0, self.__update_status, status)
