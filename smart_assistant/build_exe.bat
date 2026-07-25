@@ -26,7 +26,12 @@ echo ====================================
 :: بـ --collect-all telegram.
 :: discord.py: نفس الفكرة بالظبط لقناة ديسكورد (discord_plugin.py) —
 :: اسم الحزمة discord.py، اسم الـ import discord.
-py -m pip install customtkinter pyinstaller mcp typer capstone Pillow pandas matplotlib edge-tts piper-tts sounddevice python-telegram-bot discord.py --quiet
+:: keyring: تخزين آمن لتوكنات تليجرام/ديسكورد ومفتاح YouTube API عبر
+:: مخزن أسرار نظام التشغيل. بيكتشف backend المنصة (Windows/macOS/Linux
+:: Secret Service) وقت التشغيل عبر entry points، فمحتاج --collect-all
+:: عشان الميتاداتا دي تتجمع صح — اتجرب فعليًا (onefile Linux مبني بنفس
+:: الفلاج ده اشتغل وكشف حالة الـ backend صح من غير أي crash).
+py -m pip install customtkinter pyinstaller mcp typer capstone Pillow pandas matplotlib edge-tts piper-tts sounddevice python-telegram-bot discord.py keyring --quiet
 
 :: بناء الـ EXE
 py -m PyInstaller ^
@@ -48,6 +53,7 @@ py -m PyInstaller ^
     --collect-all sounddevice ^
     --collect-all telegram ^
     --collect-all discord ^
+    --collect-all keyring ^
     --add-data "core_engine.py;." ^
     --add-data "i18n.py;." ^
     --add-data "version.py;." ^

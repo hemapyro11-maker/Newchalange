@@ -5,6 +5,10 @@ Console — تسجيل مجاني بدون فلوس)، بالإضافة لتحل
 كفاءة المشاهدات) وخطة تقويم نشر — من غير أي مفتاح، بيوضح ده صراحةً بدل
 ما يورّي بيانات وهمية.
 
+**تخزين المفتاح بأمان (keyring):** المفتاح بيتحفظ في مخزن أسرار نظام
+التشغيل عبر `keyring` بدل نص عادي في youtube_config.json، مع fallback
+تلقائي لنص عادي لو keyring مش متاح — نفس نموذج telegram_plugin.py.
+
 الأوامر: youtube_set_key, youtube_key_status, channel_stats,
 channel_strategy_report, content_calendar, competitor_compare
 """
@@ -20,8 +24,19 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
+try:
+    import keyring
+    from keyring.errors import KeyringError
+    _HAS_KEYRING = True
+except ImportError:
+    keyring = None
+    KeyringError = Exception
+    _HAS_KEYRING = False
+
 API_BASE = "https://www.googleapis.com/youtube/v3"
 TIMEOUT = 15
+_KEYRING_SERVICE = "nezuko-youtube"
+_API_KEY_NAME = "api_key"
 _CHANNEL_ID_RE = re.compile(r"^UC[\w-]{22}$")
 _DAY_NAMES_AR = ["الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
 
@@ -42,6 +57,13 @@ def _config_path() -> pathlib.Path:
 
 
 def _api_key() -> str | None:
+    if _HAS_KEYRING:
+        try:
+            key = keyring.get_password(_KEYRING_SERVICE, _API_KEY_NAME)
+        except KeyringError:
+            key = None
+        if key:
+            return key
     path = _config_path()
     if not path.is_file():
         return None
@@ -51,6 +73,30 @@ def _api_key() -> str | None:
         return None
     key = data.get("api_key")
     return key if key else None
+
+
+def _set_api_key_keyring(key: str) -> bool:
+    """يحاول يحفظ المفتاح في keyring، يرجع True لو نجح، وبيمسح أي نسخة
+    نص عادي قديمة كانت متسجلة لو نجح الحفظ الآمن."""
+    if not _HAS_KEYRING:
+        return False
+    try:
+        keyring.set_password(_KEYRING_SERVICE, _API_KEY_NAME, key)
+    except KeyringError:
+        return False
+    path = _config_path()
+    if path.is_file():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = None
+        if data and data.get("api_key"):
+            data["api_key"] = None
+            try:
+                path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            except OSError:
+                pass
+    return True
 
 
 def _yt_get(endpoint: str, params: dict) -> dict:
@@ -115,6 +161,11 @@ def _cmd_youtube_set_key(ctx) -> str:
     key = ctx.args[0].strip()
     if not key:
         return "❌ مفتاح فاضي مش هيتحفظ"
+    if _set_api_key_keyring(key):
+        return (
+            "✅ اتحفظ مفتاح YouTube API بأمان في مخزن أسرار نظام التشغيل (keyring).\n"
+            "جرّب: channel_stats <channel_id_or_@handle>"
+        )
     path = _config_path()
     data = {}
     if path.is_file():
@@ -127,7 +178,11 @@ def _cmd_youtube_set_key(ctx) -> str:
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError as e:
         return f"❌ تعذر حفظ المفتاح: {e}"
-    return "✅ اتحفظ مفتاح YouTube API. جرّب: channel_stats <channel_id_or_@handle>"
+    return (
+        "⚠️ اتحفظ المفتاح كنص عادي في youtube_config.json — تخزين keyring الآمن مش متاح دلوقتي.\n"
+        "   لتخزين أأمن: pip install keyring\n"
+        "جرّب: channel_stats <channel_id_or_@handle>"
+    )
 
 
 def _cmd_youtube_key_status(ctx) -> str:
@@ -135,7 +190,10 @@ def _cmd_youtube_key_status(ctx) -> str:
     if not key:
         return "❌ مفيش مفتاح متظبط — استخدم youtube_set_key <key>"
     masked = key[:4] + "…" + key[-2:] if len(key) > 8 else "…"
-    return f"✅ فيه مفتاح متظبط ({masked}) — {_config_path()}"
+    line = f"✅ فيه مفتاح متظبط ({masked})"
+    if not _HAS_KEYRING:
+        line += "\n⚠️ keyring مش متثبت — بيتخزن كنص عادي (pip install keyring لتخزين أأمن)"
+    return line
 
 
 def _fmt_int(n) -> str:

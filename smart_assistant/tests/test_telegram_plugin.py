@@ -7,6 +7,29 @@ def _isolate_config(tmp_path, monkeypatch):
     monkeypatch.setattr(tg, "_config_path", lambda: tmp_path / "telegram_config.json")
 
 
+@pytest.fixture(autouse=True)
+def _isolate_keyring(monkeypatch):
+    """افتراضيًا نخلي keyring "مش متاح" وقت الاختبار — عشان (أ) الاختبارات
+    الحالية تتحقق من سلوك fallback النص العادي بشكل ثابت بغض النظر عن
+    الجهاز اللي الاختبارات شغالة عليه، و(ب) محدش يلمس مخزن أسرار نظام
+    التشغيل الحقيقي بتاع اللي بيشغل الاختبارات. اختبارات "keyring متاح"
+    بتعمل override صريح بنفسها (monkeypatch لـ _HAS_KEYRING و keyring)."""
+    monkeypatch.setattr(tg, "_HAS_KEYRING", False)
+
+
+class _FakeKeyring:
+    """مخزن أسرار وهمي في الذاكرة — بديل آمن للاختبار بدل ما نلمس
+    مخزن أسرار نظام التشغيل الحقيقي."""
+    def __init__(self):
+        self._store: dict[tuple[str, str], str] = {}
+
+    def get_password(self, service, key):
+        return self._store.get((service, key))
+
+    def set_password(self, service, key, value):
+        self._store[(service, key)] = value
+
+
 # ── config load/save ─────────────────────────────────────────────────
 
 def test_load_config_defaults_when_missing():
@@ -106,15 +129,72 @@ def test_deauthorize_no_args_shows_usage(make_ctx, bare_engine):
 
 # ── telegram_set_token / telegram_status ─────────────────────────────
 
-def test_set_token_saves_and_reports(make_ctx, bare_engine):
+def test_set_token_saves_and_reports_without_keyring(make_ctx, bare_engine):
+    # _isolate_keyring بيوقف keyring افتراضيًا في كل الاختبارات دي، فده
+    # بيتحقق من مسار fallback النص العادي تحديدًا.
     result = tg._cmd_telegram_set_token(make_ctx("telegram_set_token mytok123", ["mytok123"], engine=bare_engine))
-    assert "✅" in result
+    assert "⚠️" in result
     assert tg._load_config()["bot_token"] == "mytok123"
+    assert tg._get_token() == "mytok123"
 
 
 def test_set_token_no_args_shows_usage(make_ctx, bare_engine):
     result = tg._cmd_telegram_set_token(make_ctx("telegram_set_token", [], engine=bare_engine))
     assert result.startswith("usage")
+
+
+# ── تخزين آمن للتوكن عبر keyring ──────────────────────────────────────
+
+def test_set_token_uses_keyring_when_available(monkeypatch, make_ctx, bare_engine):
+    fake = _FakeKeyring()
+    monkeypatch.setattr(tg, "_HAS_KEYRING", True)
+    monkeypatch.setattr(tg, "keyring", fake)
+
+    result = tg._cmd_telegram_set_token(make_ctx("telegram_set_token sectok", ["sectok"], engine=bare_engine))
+    assert "✅" in result
+    assert "keyring" in result
+    assert fake.get_password(tg._KEYRING_SERVICE, tg._TOKEN_KEY) == "sectok"
+    assert tg._get_token() == "sectok"
+    # ما بيتحفظش نص عادي في الملف لما keyring ينجح
+    assert not tg._load_config().get("bot_token")
+
+
+def test_set_token_clears_old_plaintext_after_keyring_success(monkeypatch, make_ctx, bare_engine):
+    tg._save_config({**tg._default_config(), "bot_token": "oldplain"})
+    fake = _FakeKeyring()
+    monkeypatch.setattr(tg, "_HAS_KEYRING", True)
+    monkeypatch.setattr(tg, "keyring", fake)
+
+    tg._cmd_telegram_set_token(make_ctx("telegram_set_token newsecure", ["newsecure"], engine=bare_engine))
+    assert not tg._load_config().get("bot_token")
+    assert tg._get_token() == "newsecure"
+
+
+def test_set_token_keyring_error_falls_back_to_plaintext(monkeypatch, make_ctx, bare_engine):
+    import keyring.errors as kerrors
+
+    class _BrokenKeyring:
+        def get_password(self, *a):
+            raise kerrors.NoKeyringError("no backend")
+
+        def set_password(self, *a):
+            raise kerrors.NoKeyringError("no backend")
+
+    monkeypatch.setattr(tg, "_HAS_KEYRING", True)
+    monkeypatch.setattr(tg, "keyring", _BrokenKeyring())
+
+    result = tg._cmd_telegram_set_token(make_ctx("telegram_set_token fallbacktok", ["fallbacktok"], engine=bare_engine))
+    assert "⚠️" in result
+    assert tg._load_config()["bot_token"] == "fallbacktok"
+    assert tg._get_token() == "fallbacktok"
+
+
+def test_get_token_reads_legacy_plaintext_when_keyring_has_nothing(monkeypatch, bare_engine):
+    fake = _FakeKeyring()
+    monkeypatch.setattr(tg, "_HAS_KEYRING", True)
+    monkeypatch.setattr(tg, "keyring", fake)
+    tg._save_config({**tg._default_config(), "bot_token": "legacytok"})
+    assert tg._get_token() == "legacytok"
 
 
 def test_status_reports_no_token(make_ctx, bare_engine):

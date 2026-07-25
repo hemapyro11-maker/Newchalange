@@ -7,6 +7,24 @@ def _isolate_config(tmp_path, monkeypatch):
     monkeypatch.setattr(dc, "_config_path", lambda: tmp_path / "discord_config.json")
 
 
+@pytest.fixture(autouse=True)
+def _isolate_keyring(monkeypatch):
+    """افتراضيًا نخلي keyring "مش متاح" وقت الاختبار — نفس السبب
+    المذكور في test_telegram_plugin.py بالظبط."""
+    monkeypatch.setattr(dc, "_HAS_KEYRING", False)
+
+
+class _FakeKeyring:
+    def __init__(self):
+        self._store: dict[tuple[str, str], str] = {}
+
+    def get_password(self, service, key):
+        return self._store.get((service, key))
+
+    def set_password(self, service, key, value):
+        self._store[(service, key)] = value
+
+
 # ── config load/save ─────────────────────────────────────────────────
 
 def test_load_config_defaults_when_missing():
@@ -106,15 +124,69 @@ def test_deauthorize_no_args_shows_usage(make_ctx, bare_engine):
 
 # ── discord_set_token / discord_status ───────────────────────────────
 
-def test_set_token_saves_and_reports(make_ctx, bare_engine):
+def test_set_token_saves_and_reports_without_keyring(make_ctx, bare_engine):
     result = dc._cmd_discord_set_token(make_ctx("discord_set_token mytok123", ["mytok123"], engine=bare_engine))
-    assert "✅" in result
+    assert "⚠️" in result
     assert dc._load_config()["bot_token"] == "mytok123"
+    assert dc._get_token() == "mytok123"
 
 
 def test_set_token_no_args_shows_usage(make_ctx, bare_engine):
     result = dc._cmd_discord_set_token(make_ctx("discord_set_token", [], engine=bare_engine))
     assert result.startswith("usage")
+
+
+# ── تخزين آمن للتوكن عبر keyring ──────────────────────────────────────
+
+def test_set_token_uses_keyring_when_available(monkeypatch, make_ctx, bare_engine):
+    fake = _FakeKeyring()
+    monkeypatch.setattr(dc, "_HAS_KEYRING", True)
+    monkeypatch.setattr(dc, "keyring", fake)
+
+    result = dc._cmd_discord_set_token(make_ctx("discord_set_token sectok", ["sectok"], engine=bare_engine))
+    assert "✅" in result
+    assert "keyring" in result
+    assert fake.get_password(dc._KEYRING_SERVICE, dc._TOKEN_KEY) == "sectok"
+    assert dc._get_token() == "sectok"
+    assert not dc._load_config().get("bot_token")
+
+
+def test_set_token_clears_old_plaintext_after_keyring_success(monkeypatch, make_ctx, bare_engine):
+    dc._save_config({**dc._default_config(), "bot_token": "oldplain"})
+    fake = _FakeKeyring()
+    monkeypatch.setattr(dc, "_HAS_KEYRING", True)
+    monkeypatch.setattr(dc, "keyring", fake)
+
+    dc._cmd_discord_set_token(make_ctx("discord_set_token newsecure", ["newsecure"], engine=bare_engine))
+    assert not dc._load_config().get("bot_token")
+    assert dc._get_token() == "newsecure"
+
+
+def test_set_token_keyring_error_falls_back_to_plaintext(monkeypatch, make_ctx, bare_engine):
+    import keyring.errors as kerrors
+
+    class _BrokenKeyring:
+        def get_password(self, *a):
+            raise kerrors.NoKeyringError("no backend")
+
+        def set_password(self, *a):
+            raise kerrors.NoKeyringError("no backend")
+
+    monkeypatch.setattr(dc, "_HAS_KEYRING", True)
+    monkeypatch.setattr(dc, "keyring", _BrokenKeyring())
+
+    result = dc._cmd_discord_set_token(make_ctx("discord_set_token fallbacktok", ["fallbacktok"], engine=bare_engine))
+    assert "⚠️" in result
+    assert dc._load_config()["bot_token"] == "fallbacktok"
+    assert dc._get_token() == "fallbacktok"
+
+
+def test_get_token_reads_legacy_plaintext_when_keyring_has_nothing(monkeypatch, bare_engine):
+    fake = _FakeKeyring()
+    monkeypatch.setattr(dc, "_HAS_KEYRING", True)
+    monkeypatch.setattr(dc, "keyring", fake)
+    dc._save_config({**dc._default_config(), "bot_token": "legacytok"})
+    assert dc._get_token() == "legacytok"
 
 
 def test_status_reports_no_token(make_ctx, bare_engine):

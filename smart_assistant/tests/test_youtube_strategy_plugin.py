@@ -12,6 +12,25 @@ def isolated_config(tmp_path, monkeypatch):
     return tmp_path
 
 
+@pytest.fixture(autouse=True)
+def _isolate_keyring(monkeypatch):
+    """افتراضيًا نخلي keyring "مش متاح" وقت الاختبار — عشان الاختبارات
+    الحالية تتحقق من سلوك fallback النص العادي بشكل ثابت، ومحدش يلمس
+    مخزن أسرار نظام التشغيل الحقيقي بتاع اللي بيشغل الاختبارات."""
+    monkeypatch.setattr(ysp, "_HAS_KEYRING", False)
+
+
+class _FakeKeyring:
+    def __init__(self):
+        self._store: dict[tuple[str, str], str] = {}
+
+    def get_password(self, service, key):
+        return self._store.get((service, key))
+
+    def set_password(self, service, key, value):
+        self._store[(service, key)] = value
+
+
 class FakeResp:
     def __init__(self, payload: bytes):
         self._payload = payload
@@ -75,6 +94,52 @@ def test_set_key_preserves_other_config_keys(make_ctx, isolated_config):
     data = json.loads((isolated_config / "youtube_config.json").read_text())
     assert data["other_field"] == "keep_me"
     assert data["api_key"] == "newkey"
+
+
+# ── تخزين آمن للمفتاح عبر keyring ──────────────────────────────────────
+
+def test_set_key_uses_keyring_when_available(monkeypatch, make_ctx):
+    fake = _FakeKeyring()
+    monkeypatch.setattr(ysp, "_HAS_KEYRING", True)
+    monkeypatch.setattr(ysp, "keyring", fake)
+
+    result = ysp._cmd_youtube_set_key(make_ctx("youtube_set_key", ["seckey123"]))
+    assert "✅" in result
+    assert "keyring" in result
+    assert fake.get_password(ysp._KEYRING_SERVICE, ysp._API_KEY_NAME) == "seckey123"
+    assert ysp._api_key() == "seckey123"
+
+
+def test_set_key_clears_old_plaintext_after_keyring_success(monkeypatch, make_ctx, isolated_config):
+    (isolated_config / "youtube_config.json").write_text(
+        json.dumps({"api_key": "oldplain"}), encoding="utf-8",
+    )
+    fake = _FakeKeyring()
+    monkeypatch.setattr(ysp, "_HAS_KEYRING", True)
+    monkeypatch.setattr(ysp, "keyring", fake)
+
+    ysp._cmd_youtube_set_key(make_ctx("youtube_set_key", ["newsecure"]))
+    data = json.loads((isolated_config / "youtube_config.json").read_text())
+    assert not data.get("api_key")
+    assert ysp._api_key() == "newsecure"
+
+
+def test_set_key_keyring_error_falls_back_to_plaintext(monkeypatch, make_ctx):
+    import keyring.errors as kerrors
+
+    class _BrokenKeyring:
+        def get_password(self, *a):
+            raise kerrors.NoKeyringError("no backend")
+
+        def set_password(self, *a):
+            raise kerrors.NoKeyringError("no backend")
+
+    monkeypatch.setattr(ysp, "_HAS_KEYRING", True)
+    monkeypatch.setattr(ysp, "keyring", _BrokenKeyring())
+
+    result = ysp._cmd_youtube_set_key(make_ctx("youtube_set_key", ["fallbackkey"]))
+    assert "⚠️" in result
+    assert ysp._api_key() == "fallbackkey"
 
 
 # ── channel_stats ───────────────────────────────────────────────────────

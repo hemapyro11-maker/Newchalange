@@ -25,6 +25,13 @@ telegram_plugin.py — قناة تحكم عن بُعد: تتحكم في نيزو
 معاملة أي أمر متكتوب على الجهاز (فحص typo correction، تأكيد الأوامر
 الغامضة، تسجيل في اللوج المحلي كمان — مش مخفي عن صاحب الجهاز).
 
+**تخزين التوكن بأمان (keyring):** التوكن بيتحفظ في مخزن أسرار نظام
+التشغيل الحقيقي (Windows Credential Locker / macOS Keychain / Linux
+Secret Service) عبر مكتبة `keyring` مفتوحة المصدر، بدل نص عادي في
+`telegram_config.json`. لو `keyring` مش متثبت أو مفيش backend متاح
+(زي سيرفرات لينكس من غير Secret Service)، بيرجع تلقائيًا لتخزين نص
+عادي زي الأول مع تحذير واضح — التوافق الخلفي محفوظ بالكامل.
+
 الأوامر (على الجهاز، مش على تليجرام): telegram_set_token,
 telegram_approve, telegram_deauthorize, telegram_status
 """
@@ -44,6 +51,17 @@ try:
 except ImportError:
     _HAS_PTB = False
 
+try:
+    import keyring
+    from keyring.errors import KeyringError
+    _HAS_KEYRING = True
+except ImportError:
+    keyring = None
+    KeyringError = Exception
+    _HAS_KEYRING = False
+
+_KEYRING_SERVICE = "nezuko-telegram"
+_TOKEN_KEY = "bot_token"
 _MAX_PENDING_PAIRS = 20
 _DISPATCH_TIMEOUT = 30
 
@@ -79,6 +97,37 @@ def _save_config(data: dict) -> None:
         _config_path().write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError:
         pass
+
+
+# ── تخزين آمن للتوكن (keyring أولاً، نص عادي كـ fallback) ────────────────
+
+def _get_token() -> str | None:
+    """بيرجع التوكن من keyring لو متاح ومسجّل فيه، وإلا من نسخة نص عادي
+    قديمة في telegram_config.json (توافق خلفي مع نسخ قبل ما نضيف keyring)."""
+    if _HAS_KEYRING:
+        try:
+            token = keyring.get_password(_KEYRING_SERVICE, _TOKEN_KEY)
+        except KeyringError:
+            token = None
+        if token:
+            return token
+    return _load_config().get("bot_token")
+
+
+def _set_token(token: str) -> bool:
+    """يحاول يحفظ التوكن في keyring (مخزن أسرار نظام التشغيل)، ويرجع
+    True لو نجح. لو نجح، بيمسح أي نسخة نص عادي قديمة كانت متسجلة."""
+    if not _HAS_KEYRING:
+        return False
+    try:
+        keyring.set_password(_KEYRING_SERVICE, _TOKEN_KEY, token)
+    except KeyringError:
+        return False
+    data = _load_config()
+    if data.get("bot_token"):
+        data["bot_token"] = None
+        _save_config(data)
+    return True
 
 
 # ── pairing ──────────────────────────────────────────────────────────────
@@ -159,12 +208,20 @@ def _handle_incoming(engine, sender_id: int, text: str) -> str:
 def _cmd_telegram_set_token(ctx) -> str:
     if not ctx.args:
         return "usage: telegram_set_token <token>   (احصل عليه من @BotFather على تليجرام)"
-    data = _load_config()
-    data["bot_token"] = ctx.args[0]
-    _save_config(data)
+    token = ctx.args[0]
+    if _set_token(token):
+        secure_note = "✅ اتحفظ الـ token بأمان في مخزن أسرار نظام التشغيل (keyring)."
+    else:
+        data = _load_config()
+        data["bot_token"] = token
+        _save_config(data)
+        secure_note = (
+            "⚠️ اتحفظ الـ token كنص عادي في telegram_config.json — تخزين keyring الآمن مش متاح دلوقتي.\n"
+            "   لتخزين أأمن: pip install keyring"
+        )
     _ensure_bot_started(ctx.engine)
     return (
-        "✅ اتسجل الـ token.\n"
+        f"{secure_note}\n"
         "لو مفيش owner متظبط لسه، أول حد يكلم البوت على تليجرام هيحتاج "
         "يتوافق عليه من هنا بـ: telegram_approve <code>"
     )
@@ -199,15 +256,18 @@ def _cmd_telegram_deauthorize(ctx) -> str:
 
 def _cmd_telegram_status(ctx) -> str:
     data = _load_config()
+    token = _get_token()
     bot_thread = getattr(ctx.engine, "_telegram_thread", None)
     lines = [
         "📱 حالة قناة تليجرام:",
-        f"  Token: {'✅ متظبط' if data['bot_token'] else '❌ مش متظبط — telegram_set_token <token>'}",
+        f"  Token: {'✅ متظبط' if token else '❌ مش متظبط — telegram_set_token <token>'}",
         f"  البوت: {'✅ شغال' if bot_thread is not None and bot_thread.is_alive() else '❌ مش شغال'}",
         f"  Owners معتمدين: {', '.join(str(i) for i in data['owner_ids']) or '(مفيش)'}",
     ]
     if data["pending_pairs"]:
         lines.append(f"  طلبات موافقة معلّقة: {len(data['pending_pairs'])}")
+    if not _HAS_KEYRING:
+        lines.append("  ⚠️ keyring مش متثبت — التوكن بيتخزن كنص عادي (pip install keyring لتخزين أأمن)")
     if not _HAS_PTB:
         lines.append("  ⚠️ python-telegram-bot مش متثبت — pip install python-telegram-bot")
     return "\n".join(lines)
@@ -251,8 +311,7 @@ def _ensure_bot_started(engine) -> None:
     existing = getattr(engine, "_telegram_thread", None)
     if existing is not None and existing.is_alive():
         return
-    data = _load_config()
-    token = data.get("bot_token")
+    token = _get_token()
     if not token:
         return
     stop_event = threading.Event()

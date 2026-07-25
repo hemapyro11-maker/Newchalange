@@ -11,3 +11,4 @@ sounddevice>=0.4.6
 openai-whisper>=20231117
 python-telegram-bot>=21.0
 discord.py>=2.3.0
+keyring>=24.0.0

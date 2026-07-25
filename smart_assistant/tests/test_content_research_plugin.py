@@ -10,8 +10,26 @@ def isolated_config(tmp_path, monkeypatch):
     return tmp_path
 
 
+@pytest.fixture(autouse=True)
+def _isolate_keyring(monkeypatch):
+    """افتراضيًا نخلي keyring "مش متاح" وقت الاختبار — عشان القراءة
+    ترجع من youtube_config.json بشكل ثابت، ومحدش يلمس مخزن أسرار نظام
+    التشغيل الحقيقي بتاع اللي بيشغل الاختبارات."""
+    monkeypatch.setattr(crp, "_HAS_KEYRING", False)
+
+
 def _set_key(tmp_path, key="fakekey"):
     (tmp_path / "youtube_config.json").write_text(json.dumps({"api_key": key}), encoding="utf-8")
+
+
+def test_api_key_reads_from_keyring_when_available(monkeypatch):
+    class _FakeKeyring:
+        def get_password(self, service, key):
+            return "fromkeyring" if key == crp._API_KEY_NAME else None
+
+    monkeypatch.setattr(crp, "_HAS_KEYRING", True)
+    monkeypatch.setattr(crp, "keyring", _FakeKeyring())
+    assert crp._api_key() == "fromkeyring"
 
 
 class FakeResp:

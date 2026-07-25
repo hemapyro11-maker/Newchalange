@@ -24,6 +24,10 @@ Discord Developer Portal (إعدادات البوت) — من غيرها ديس�
 دي مش مشكلة (allowlist بيحميك برضه) لكن الأفضل تستخدمه في رسائل خاصة
 (DM) بس لتجربة أنضف.
 
+**تخزين التوكن بأمان (keyring):** نفس فكرة telegram_plugin.py بالظبط —
+التوكن بيتحفظ في مخزن أسرار نظام التشغيل عبر `keyring` بدل نص عادي،
+مع fallback تلقائي لنص عادي لو `keyring` مش متاح.
+
 الأوامر (على الجهاز، مش على ديسكورد): discord_set_token,
 discord_approve, discord_deauthorize, discord_status
 """
@@ -43,6 +47,17 @@ try:
 except ImportError:
     _HAS_DISCORD = False
 
+try:
+    import keyring
+    from keyring.errors import KeyringError
+    _HAS_KEYRING = True
+except ImportError:
+    keyring = None
+    KeyringError = Exception
+    _HAS_KEYRING = False
+
+_KEYRING_SERVICE = "nezuko-discord"
+_TOKEN_KEY = "bot_token"
 _MAX_PENDING_PAIRS = 20
 _DISPATCH_TIMEOUT = 30
 
@@ -78,6 +93,33 @@ def _save_config(data: dict) -> None:
         _config_path().write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError:
         pass
+
+
+# ── تخزين آمن للتوكن (keyring أولاً، نص عادي كـ fallback) ────────────────
+
+def _get_token() -> str | None:
+    if _HAS_KEYRING:
+        try:
+            token = keyring.get_password(_KEYRING_SERVICE, _TOKEN_KEY)
+        except KeyringError:
+            token = None
+        if token:
+            return token
+    return _load_config().get("bot_token")
+
+
+def _set_token(token: str) -> bool:
+    if not _HAS_KEYRING:
+        return False
+    try:
+        keyring.set_password(_KEYRING_SERVICE, _TOKEN_KEY, token)
+    except KeyringError:
+        return False
+    data = _load_config()
+    if data.get("bot_token"):
+        data["bot_token"] = None
+        _save_config(data)
+    return True
 
 
 # ── pairing ──────────────────────────────────────────────────────────────
@@ -155,12 +197,20 @@ def _handle_incoming(engine, sender_id: int, text: str) -> str:
 def _cmd_discord_set_token(ctx) -> str:
     if not ctx.args:
         return "usage: discord_set_token <token>   (من Discord Developer Portal)"
-    data = _load_config()
-    data["bot_token"] = ctx.args[0]
-    _save_config(data)
+    token = ctx.args[0]
+    if _set_token(token):
+        secure_note = "✅ اتحفظ الـ token بأمان في مخزن أسرار نظام التشغيل (keyring)."
+    else:
+        data = _load_config()
+        data["bot_token"] = token
+        _save_config(data)
+        secure_note = (
+            "⚠️ اتحفظ الـ token كنص عادي في discord_config.json — تخزين keyring الآمن مش متاح دلوقتي.\n"
+            "   لتخزين أأمن: pip install keyring"
+        )
     _ensure_bot_started(ctx.engine)
     return (
-        "✅ اتسجل الـ token.\n"
+        f"{secure_note}\n"
         "لازم تفعّل 'Message Content Intent' من إعدادات البوت في Discord "
         "Developer Portal، وإلا محتوى الرسائل هيوصل فاضي.\n"
         "لو مفيش owner متظبط لسه، أول حد يكلم البوت هيحتاج يتوافق عليه "
@@ -197,15 +247,18 @@ def _cmd_discord_deauthorize(ctx) -> str:
 
 def _cmd_discord_status(ctx) -> str:
     data = _load_config()
+    token = _get_token()
     bot_thread = getattr(ctx.engine, "_discord_thread", None)
     lines = [
         "🎮 حالة قناة ديسكورد:",
-        f"  Token: {'✅ متظبط' if data['bot_token'] else '❌ مش متظبط — discord_set_token <token>'}",
+        f"  Token: {'✅ متظبط' if token else '❌ مش متظبط — discord_set_token <token>'}",
         f"  البوت: {'✅ شغال' if bot_thread is not None and bot_thread.is_alive() else '❌ مش شغال'}",
         f"  Owners معتمدين: {', '.join(str(i) for i in data['owner_ids']) or '(مفيش)'}",
     ]
     if data["pending_pairs"]:
         lines.append(f"  طلبات موافقة معلّقة: {len(data['pending_pairs'])}")
+    if not _HAS_KEYRING:
+        lines.append("  ⚠️ keyring مش متثبت — التوكن بيتخزن كنص عادي (pip install keyring لتخزين أأمن)")
     if not _HAS_DISCORD:
         lines.append("  ⚠️ discord.py مش متثبت — pip install discord.py")
     return "\n".join(lines)
@@ -249,8 +302,7 @@ def _ensure_bot_started(engine) -> None:
     existing = getattr(engine, "_discord_thread", None)
     if existing is not None and existing.is_alive():
         return
-    data = _load_config()
-    token = data.get("bot_token")
+    token = _get_token()
     if not token:
         return
     stop_event = threading.Event()

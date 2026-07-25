@@ -17,8 +17,19 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+try:
+    import keyring
+    from keyring.errors import KeyringError
+    _HAS_KEYRING = True
+except ImportError:
+    keyring = None
+    KeyringError = Exception
+    _HAS_KEYRING = False
+
 API_BASE = "https://www.googleapis.com/youtube/v3"
 TIMEOUT = 15
+_KEYRING_SERVICE = "nezuko-youtube"
+_API_KEY_NAME = "api_key"
 
 
 class YouTubeAPIError(Exception):
@@ -31,6 +42,16 @@ def _config_dir() -> pathlib.Path:
 
 
 def _api_key() -> str | None:
+    # نفس مفتاح youtube_strategy_plugin.py بالظبط — بيتحفظ في keyring
+    # هناك (youtube_set_key)، وهنا بس بنقراه بنفس الترتيب (keyring
+    # أولاً، نص عادي في youtube_config.json كـ fallback).
+    if _HAS_KEYRING:
+        try:
+            key = keyring.get_password(_KEYRING_SERVICE, _API_KEY_NAME)
+        except KeyringError:
+            key = None
+        if key:
+            return key
     path = _config_dir() / "youtube_config.json"
     if not path.is_file():
         return None

@@ -145,7 +145,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-746 اختبار حقيقي (مش placeholders) بتغطي كل plugin و Core Engine —
+759 اختبار حقيقي (مش placeholders) بتغطي كل plugin و Core Engine —
 تحليل ELF/PE حقيقي، معالجة فيديو حقيقية عبر FFmpeg، توليد أيقونات
 حقيقي، حلقة توليد/تصحيح plugin_forge كاملة، إلخ. الاختبارات اللي
 محتاجة أدوات اختيارية (FFmpeg, Pillow, capstone, mcp) بتتخطى تلقائياً
@@ -389,6 +389,11 @@ telegram_status                  # حالة القناة (البوت، الـ ow
 مخفّضة أو sandboxing إضافي للمستخدمين المعتمدين عن طريق تليجرام. ده
 قرار تصميم موثّق (زي `think` بالظبط)، مش قصور — التفاصيل الكاملة في
 [`SECURITY.md`](SECURITY.md).
+
+**تخزين التوكن بأمان:** لو `keyring` متثبت وعنده backend شغال (Windows
+Credential Locker / macOS Keychain / Linux Secret Service)، التوكن
+بيتحفظ هناك بدل نص عادي — `telegram_set_token` هيقولك في الرد أي
+طريقة استخدمت فعليًا.
 
 ## تحكم عن بُعد من ديسكورد — `discord_plugin.py`
 
@@ -723,7 +728,7 @@ core_engine بالظبط زي أي نص متكتوب يدويًا، فمفيش �
 محتاج حساب Google، مفيش أي اشتراك أو تكلفة):
 
 ```
-youtube_set_key <API_KEY>      # يتحفظ في smart_assistant/youtube_config.json (مش متتبع في git)
+youtube_set_key <API_KEY>      # يتحفظ بأمان في keyring (أو نص عادي في youtube_config.json لو keyring مش متاح)
 youtube_key_status             # هل فيه مفتاح متظبط؟
 ```
 
