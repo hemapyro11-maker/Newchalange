@@ -1,7 +1,15 @@
 import json
 import urllib.error
 
+import pytest
 import think_plugin as tp
+
+
+@pytest.fixture(autouse=True)
+def _isolate_memory(tmp_path, monkeypatch):
+    """كل اختبار بيشتغل بملف think_memory.json خاص بيه، عشان محدش يكتب
+    فوق smart_assistant/think_memory.json الحقيقي بتاع المستخدم."""
+    monkeypatch.setattr(tp, "_memory_path", lambda: tmp_path / "think_memory.json")
 
 
 def _fake_chat_response(content: str):
@@ -51,6 +59,22 @@ def test_strip_tool_line_removes_only_tool_line():
     assert tp._strip_tool_line(reply) == "الجزء ده مهم"
 
 
+# ── _extract_plan / _strip_plan_line ────────────────────────────────────
+
+def test_extract_plan_finds_plan_line():
+    reply = "PLAN: step one; step two; step three\nهبدأ دلوقتي"
+    assert tp._extract_plan(reply) == "step one; step two; step three"
+
+
+def test_extract_plan_none_when_absent():
+    assert tp._extract_plan("مفيش خطة هنا") is None
+
+
+def test_strip_plan_line_removes_only_plan_line():
+    reply = "PLAN: أ؛ ب\nباقي الرد المهم"
+    assert tp._strip_plan_line(reply) == "باقي الرد المهم"
+
+
 # ── think: no ollama running ────────────────────────────────────────────
 
 def test_think_no_args_shows_usage(make_ctx):
@@ -78,16 +102,81 @@ def test_think_failed_call_does_not_pollute_history(make_ctx, monkeypatch, bare_
     assert state["history"] == []
 
 
-# ── think: plain answer (no tool call) ──────────────────────────────────
+# ── think: plain answer (no tool call), including self-critique pass ────
 
 def test_think_plain_reply_no_tool_call(make_ctx, monkeypatch, bare_engine):
-    _mock_ollama_sequence(monkeypatch, ["الإجابة البسيطة من غير أداة"])
+    _mock_ollama_sequence(monkeypatch, [
+        "الإجابة البسيطة من غير أداة",
+        "الإجابة البسيطة من غير أداة",  # المراجعة الذاتية بتأكد الإجابة زي ما هي
+    ])
     result = tp._cmd_think(make_ctx("think ايه رأيك", ["ايه", "رأيك"], engine=bare_engine))
     assert "🧠" in result
     assert "الإجابة البسيطة" in result
     state = tp._state(bare_engine)
-    assert len(state["history"]) == 2  # user + assistant
+    # user + assistant(draft) + assistant(critique)
+    assert len(state["history"]) == 3
     assert state["pending_tool"] is None
+    assert state["plan"] is None
+
+
+def test_think_critique_can_revise_the_draft(make_ctx, monkeypatch, bare_engine):
+    _mock_ollama_sequence(monkeypatch, [
+        "مسودة أولى فيها نقص",
+        "نسخة محسّنة وأدق بعد المراجعة",
+    ])
+    result = tp._cmd_think(make_ctx("think اشرحلي", ["اشرحلي"], engine=bare_engine))
+    assert "نسخة محسّنة" in result
+    assert "مسودة أولى" not in result  # النسخة النهائية بس اللي بتتعرض
+
+
+def test_think_critique_disabled_skips_second_call(make_ctx, monkeypatch, bare_engine):
+    tp._cmd_think_critique(make_ctx("think_critique off", ["off"], engine=bare_engine))
+    calls = _mock_ollama_sequence(monkeypatch, ["إجابة من غير مراجعة"])
+    result = tp._cmd_think(make_ctx("think سؤال", ["سؤال"], engine=bare_engine))
+    assert calls["i"] == 1
+    assert "إجابة من غير مراجعة" in result
+
+
+def test_think_critique_ollama_failure_falls_back_to_draft(make_ctx, monkeypatch, bare_engine):
+    calls = {"i": 0}
+
+    def fake_urlopen(req, timeout):
+        calls["i"] += 1
+        if calls["i"] == 1:
+            return _fake_chat_response("المسودة الأصلية")
+        raise urllib.error.URLError("ollama died mid-critique")
+    monkeypatch.setattr(tp.urllib.request, "urlopen", fake_urlopen)
+
+    result = tp._cmd_think(make_ctx("think سؤال", ["سؤال"], engine=bare_engine))
+    assert "المسودة الأصلية" in result  # fail-open: رجع للمسودة الأصلية
+
+
+# ── think: multi-step plan tracking ─────────────────────────────────────
+
+def test_think_plan_line_extracted_and_shown(make_ctx, monkeypatch, bare_engine):
+    _mock_ollama_sequence(monkeypatch, [
+        "PLAN: افحص النظام؛ اجمع البيانات؛ لخّص\nهبدأ بالخطوة الأولى\nTOOL: help",
+    ])
+    result = tp._cmd_think(make_ctx("think حل المشكلة دي", ["حل"], engine=bare_engine))
+    assert "🗺" in result
+    assert "افحص النظام" in result
+    state = tp._state(bare_engine)
+    assert state["plan"] == "افحص النظام؛ اجمع البيانات؛ لخّص"
+
+
+def test_think_plan_persists_across_tool_confirmation_and_clears_on_final_answer(make_ctx, monkeypatch, bare_engine):
+    _mock_ollama_sequence(monkeypatch, [
+        "PLAN: خطوة واحدة بس\nهفحص\nTOOL: help",
+        "خلصت المهمة، دي الإجابة النهائية",
+        "خلصت المهمة، دي الإجابة النهائية",
+    ])
+    tp._cmd_think(make_ctx("think مهمة", ["مهمة"], engine=bare_engine))
+    state = tp._state(bare_engine)
+    assert state["plan"] == "خطوة واحدة بس"
+
+    tp._cmd_think(make_ctx("think y", ["y"], engine=bare_engine))
+    state = tp._state(bare_engine)
+    assert state["plan"] is None  # اتمسحت لما وصل لإجابة نهائية
 
 
 # ── think: proposes a real tool, requires confirmation ──────────────────
@@ -106,11 +195,12 @@ def test_think_confirm_yes_actually_runs_tool_and_continues(make_ctx, monkeypatc
     calls = _mock_ollama_sequence(monkeypatch, [
         "هفحص الأوامر المتاحة\nTOOL: help",
         "شفت الأوامر، مفيش حاجة تانية محتاجها",
+        "شفت الأوامر، مفيش حاجة تانية محتاجها",  # مراجعة ذاتية
     ])
     tp._cmd_think(make_ctx("think ايه الأوامر المتاحة", ["ايه"], engine=bare_engine))
     result = tp._cmd_think(make_ctx("think y", ["y"], engine=bare_engine))
 
-    assert calls["i"] == 2  # اتنادى Ollama مرتين: مرة للاقتراح ومرة بعد نتيجة الأداة
+    assert calls["i"] == 3  # اقتراح + استكمال + مراجعة ذاتية
     assert "شفت الأوامر" in result
     state = tp._state(bare_engine)
     assert state["pending_tool"] is None
@@ -124,11 +214,12 @@ def test_think_confirm_no_skips_tool_and_continues(make_ctx, monkeypatch, bare_e
     calls = _mock_ollama_sequence(monkeypatch, [
         "هفحص الأوامر المتاحة\nTOOL: help",
         "تمام، هجاوب من غير ما أستخدم الأداة",
+        "تمام، هجاوب من غير ما أستخدم الأداة",  # مراجعة ذاتية
     ])
     tp._cmd_think(make_ctx("think ايه الأوامر المتاحة", ["ايه"], engine=bare_engine))
     result = tp._cmd_think(make_ctx("think n", ["n"], engine=bare_engine))
 
-    assert calls["i"] == 2
+    assert calls["i"] == 3
     assert "هجاوب من غير" in result
     state = tp._state(bare_engine)
     assert state["pending_tool"] is None
@@ -140,6 +231,7 @@ def test_think_unrelated_reply_discards_pending_and_processes_fresh(make_ctx, mo
     _mock_ollama_sequence(monkeypatch, [
         "هفحص الأوامر المتاحة\nTOOL: help",
         "إجابة على السؤال الجديد",
+        "إجابة على السؤال الجديد",  # مراجعة ذاتية
     ])
     tp._cmd_think(make_ctx("think ايه الأوامر المتاحة", ["ايه"], engine=bare_engine))
     state = tp._state(bare_engine)
@@ -154,7 +246,10 @@ def test_think_unrelated_reply_discards_pending_and_processes_fresh(make_ctx, mo
 def test_think_hallucinated_tool_name_rejected(make_ctx, monkeypatch, bare_engine):
     """النموذج ممكن "يهلوس" اسم أداة مش موجودة فعليًا — لازم يتجاهلها
     ويوريها كإجابة عادية بدل ما يصدّقها أعمى."""
-    _mock_ollama_sequence(monkeypatch, ["هستخدم أداة سحرية\nTOOL: this_tool_does_not_exist_anywhere"])
+    _mock_ollama_sequence(monkeypatch, [
+        "هستخدم أداة سحرية\nTOOL: this_tool_does_not_exist_anywhere",
+        "هستخدم أداة سحرية",  # مراجعة ذاتية (بعد ما اتشالت سطر TOOL الوهمي)
+    ])
     result = tp._cmd_think(make_ctx("think جرب حاجة", ["جرب"], engine=bare_engine))
     assert "🧠" in result
     assert "هستخدم أداة سحرية" in result
@@ -162,30 +257,158 @@ def test_think_hallucinated_tool_name_rejected(make_ctx, monkeypatch, bare_engin
     assert state["pending_tool"] is None  # مفيش pending — الأداة الوهمية اتجاهلت
 
 
-# ── multi-turn memory ────────────────────────────────────────────────
+# ── tool failure recovery ───────────────────────────────────────────────
+
+def test_think_tool_failure_streak_suppresses_further_tool_proposals(make_ctx, monkeypatch, bare_engine):
+    bare_engine.registry.register("boom", lambda ctx: 1 / 0, "explodes")
+    replies = [
+        "محاولة 1\nTOOL: boom",
+        "محاولة 2\nTOOL: boom",
+        "محاولة 3\nTOOL: boom",
+        # بعد 3 فشلات متتالية، طلب الأداة الرابع لازم يتجاهل ويتحول لإجابة نهائية
+        "هجرب تاني\nTOOL: boom",
+        "هجرب تاني",  # مراجعة ذاتية
+    ]
+    _mock_ollama_sequence(monkeypatch, replies)
+
+    tp._cmd_think(make_ctx("think جرب", ["جرب"], engine=bare_engine))
+    tp._cmd_think(make_ctx("think y", ["y"], engine=bare_engine))  # فشل 1، هيقترح تاني
+    state = tp._state(bare_engine)
+    assert state["pending_tool"] == ("boom", [])
+
+    tp._cmd_think(make_ctx("think y", ["y"], engine=bare_engine))  # فشل 2
+    state = tp._state(bare_engine)
+    assert state["pending_tool"] == ("boom", [])
+
+    result = tp._cmd_think(make_ctx("think y", ["y"], engine=bare_engine))  # فشل 3 → suppress
+    state = tp._state(bare_engine)
+    assert state["pending_tool"] is None  # اتجاهل الاقتراح الرابع بسبب الفشل المتكرر
+    assert "فشل متكرر" in result
+    assert state["tool_fail_streak"] == 0  # اتصفّر بعد التنبيه
+
+
+def test_think_tool_success_resets_failure_streak(make_ctx, monkeypatch, bare_engine):
+    bare_engine.registry.register("boom", lambda ctx: 1 / 0, "explodes")
+    _mock_ollama_sequence(monkeypatch, [
+        "محاولة\nTOOL: boom",
+        "بعد الفشل هستخدم help\nTOOL: help",
+    ])
+    tp._cmd_think(make_ctx("think جرب", ["جرب"], engine=bare_engine))
+    tp._cmd_think(make_ctx("think y", ["y"], engine=bare_engine))
+    state = tp._state(bare_engine)
+    assert state["tool_fail_streak"] == 1
+
+    _mock_ollama_sequence(monkeypatch, ["تمام كده", "تمام كده"])
+    tp._cmd_think(make_ctx("think y", ["y"], engine=bare_engine))  # help تنجح
+    state = tp._state(bare_engine)
+    assert state["tool_fail_streak"] == 0
+
+
+# ── smart tool selection (relevance filtering) ──────────────────────────
+
+def test_relevant_tools_returns_all_when_under_limit(bare_engine):
+    tools = tp._relevant_tools(bare_engine, "أي سؤال عادي")
+    assert len(tools) == len(bare_engine.registry.list_commands())
+
+
+def test_relevant_tools_filters_and_always_keeps_help():
+    class FakeCmd:
+        def __init__(self, name, description):
+            self.name = name
+            self.description = description
+
+    class FakeRegistry:
+        def __init__(self, commands):
+            self._commands = {c.name: c for c in commands}
+
+        def list_commands(self):
+            return list(self._commands.values())
+
+        def get(self, name):
+            return self._commands.get(name)
+
+    class FakeEngine:
+        pass
+
+    commands = [FakeCmd("help", "عرض كل الأوامر")]
+    commands += [FakeCmd(f"unrelated_{i}", "شيء عشوائي مالوش علاقة") for i in range(30)]
+    commands.append(FakeCmd("youtube_seo", "تحسين ظهور فيديو يوتيوب في نتائج البحث"))
+
+    engine = FakeEngine()
+    engine.registry = FakeRegistry(commands)
+
+    result = tp._relevant_tools(engine, "عايز أحسن ظهور فيديو يوتيوب بتاعي")
+    names = [c.name for c in result]
+    assert "youtube_seo" in names
+    assert "help" in names
+    assert len(result) <= tp.RELEVANT_TOOLS_LIMIT + 1
+
+
+# ── persistent memory (think_remember / think_forget) ───────────────────
+
+def test_think_remember_saves_note(make_ctx, bare_engine):
+    result = tp._cmd_think_remember(make_ctx("think_remember المستخدم بيفضل الشرح المختصر", ["المستخدم"], engine=bare_engine))
+    assert "💾" in result
+    assert tp._load_memory() == ["المستخدم بيفضل الشرح المختصر"]
+
+
+def test_think_remember_no_text_shows_usage(make_ctx, bare_engine):
+    result = tp._cmd_think_remember(make_ctx("think_remember", [], engine=bare_engine))
+    assert result.startswith("usage")
+
+
+def test_think_forget_clears_all_notes(make_ctx, bare_engine):
+    tp._cmd_think_remember(make_ctx("think_remember ملاحظة 1", ["ملاحظة", "1"], engine=bare_engine))
+    tp._cmd_think_remember(make_ctx("think_remember ملاحظة 2", ["ملاحظة", "2"], engine=bare_engine))
+    assert len(tp._load_memory()) == 2
+
+    result = tp._cmd_think_forget(make_ctx("think_forget", [], engine=bare_engine))
+    assert "🗑" in result
+    assert tp._load_memory() == []
+
+
+def test_think_memory_injected_into_system_prompt(bare_engine):
+    tp._save_memory(["حقيقة دائمة محفوظة من قبل"])
+    prompt = tp._system_prompt(bare_engine, "سؤال عادي", tp._state(bare_engine))
+    assert "حقيقة دائمة محفوظة من قبل" in prompt
+
+
+def test_think_memory_survives_think_reset(make_ctx, monkeypatch, bare_engine):
+    tp._cmd_think_remember(make_ctx("think_remember ثابتة", ["ثابتة"], engine=bare_engine))
+    _mock_ollama_sequence(monkeypatch, ["رد", "رد"])
+    tp._cmd_think(make_ctx("think سؤال", ["سؤال"], engine=bare_engine))
+    tp._cmd_think_reset(make_ctx("think_reset", [], engine=bare_engine))
+    assert tp._load_memory() == ["ثابتة"]
+
+
+# ── multi-turn memory (conversation history, not persistent notes) ──────
 
 def test_think_maintains_conversation_history_across_turns(make_ctx, monkeypatch, bare_engine):
-    _mock_ollama_sequence(monkeypatch, ["الرد الأول", "الرد الثاني"])
+    _mock_ollama_sequence(monkeypatch, [
+        "الرد الأول", "الرد الأول",  # draft + critique
+        "الرد الثاني", "الرد الثاني",  # draft + critique
+    ])
     tp._cmd_think(make_ctx("think السؤال الأول", ["السؤال"], engine=bare_engine))
     tp._cmd_think(make_ctx("think السؤال الثاني", ["السؤال"], engine=bare_engine))
     state = tp._state(bare_engine)
-    # 2 رسائل مستخدم + 2 رد مساعد = 4
-    assert len(state["history"]) == 4
+    # (user + assistant + critique) × 2 = 6
+    assert len(state["history"]) == 6
     assert state["history"][0]["content"] == "السؤال الأول"
-    assert state["history"][2]["content"] == "السؤال الثاني"
+    assert state["history"][3]["content"] == "السؤال الثاني"
 
 
 def test_think_reset_clears_history(make_ctx, monkeypatch, bare_engine):
-    _mock_ollama_sequence(monkeypatch, ["رد"])
+    _mock_ollama_sequence(monkeypatch, ["رد", "رد"])
     tp._cmd_think(make_ctx("think سؤال", ["سؤال"], engine=bare_engine))
     state = tp._state(bare_engine)
-    assert len(state["history"]) == 2
+    assert len(state["history"]) == 3
 
     result = tp._cmd_think_reset(make_ctx("think_reset", [], engine=bare_engine))
     assert "اتمسحت" in result
     state = tp._state(bare_engine)
     assert state["history"] == []
     assert state["pending_tool"] is None
+    assert state["plan"] is None
 
 
 # ── think_status ─────────────────────────────────────────────────────
@@ -201,6 +424,13 @@ def test_think_status_shows_pending_tool(make_ctx, monkeypatch, bare_engine):
     tp._cmd_think(make_ctx("think جرب", ["جرب"], engine=bare_engine))
     result = tp._cmd_think_status(make_ctx("think_status", [], engine=bare_engine))
     assert "help" in result
+
+
+def test_think_status_shows_critique_and_memory_state(make_ctx, bare_engine):
+    tp._cmd_think_remember(make_ctx("think_remember ملحوظة", ["ملحوظة"], engine=bare_engine))
+    result = tp._cmd_think_status(make_ctx("think_status", [], engine=bare_engine))
+    assert "شغالة" in result
+    assert "1" in result
 
 
 # ── think_model ──────────────────────────────────────────────────────
@@ -228,6 +458,30 @@ def test_think_uses_configured_model(make_ctx, monkeypatch, bare_engine):
 
     tp._cmd_think(make_ctx("think سؤال", ["سؤال"], engine=bare_engine))
     assert captured["payload"]["model"] == "custom-model"
+
+
+# ── think_critique ───────────────────────────────────────────────────
+
+def test_think_critique_no_args_shows_status(make_ctx, bare_engine):
+    result = tp._cmd_think_critique(make_ctx("think_critique", [], engine=bare_engine))
+    assert "شغالة" in result
+
+
+def test_think_critique_off_then_on(make_ctx, bare_engine):
+    result = tp._cmd_think_critique(make_ctx("think_critique off", ["off"], engine=bare_engine))
+    assert "متوقفة" in result
+    state = tp._state(bare_engine)
+    assert state["critique_enabled"] is False
+
+    result = tp._cmd_think_critique(make_ctx("think_critique on", ["on"], engine=bare_engine))
+    assert "شغالة" in result
+    state = tp._state(bare_engine)
+    assert state["critique_enabled"] is True
+
+
+def test_think_critique_invalid_arg_shows_usage(make_ctx, bare_engine):
+    result = tp._cmd_think_critique(make_ctx("think_critique maybe", ["maybe"], engine=bare_engine))
+    assert result.startswith("usage")
 
 
 # ── _invoke_tool ─────────────────────────────────────────────────────
@@ -262,5 +516,8 @@ def test_register_adds_all_commands():
         registry = FakeRegistry()
 
     tp.register(FakeEngine)
-    for cmd in ("think", "think_reset", "think_status", "think_model"):
+    for cmd in (
+        "think", "think_reset", "think_status", "think_model",
+        "think_critique", "think_remember", "think_forget",
+    ):
         assert cmd in FakeEngine.registry.names

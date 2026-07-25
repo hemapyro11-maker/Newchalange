@@ -21,3 +21,4 @@ smart_assistant/youtube_config.json
 smart_assistant/loadtest_results.json
 smart_assistant/.loadtest_tmp/
 smart_assistant/external_tools.json
+smart_assistant/think_memory.json
