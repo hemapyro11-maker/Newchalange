@@ -4,8 +4,10 @@ import time
 
 import brain
 import core_engine
+import hooks
 import intents
 import pytest
+import sessions
 from core_engine import AssistantEngine, CommandRegistry
 
 
@@ -16,6 +18,8 @@ def _isolate_brain_and_intents(tmp_path, monkeypatch):
     monkeypatch.setattr(brain, "_base_dir", lambda: tmp_path)
     monkeypatch.setattr(brain, "_HAS_KEYRING", False)
     monkeypatch.setattr(intents, "_cache_path", lambda: tmp_path / "intent_cache.json")
+    monkeypatch.setattr(sessions, "_base_dir", lambda: tmp_path)
+    monkeypatch.setattr(hooks, "_base_dir", lambda: tmp_path)
     brain.reset_brain()
     brain.save_config({**brain._default_config(), "enabled": []})
     yield
@@ -559,3 +563,113 @@ def test_brain_call_runs_off_the_worker_thread(bare_engine, monkeypatch):
     time.sleep(0.4)
     assert worker_thread.get("name", "").startswith("nezuko-brain")
 
+
+
+# ── الصلاحيات: بوابة التأكيد ─────────────────────────────────────────
+
+def test_allowed_command_runs_without_asking(bare_engine, monkeypatch):
+    """الأمر اللي في قايمة المسموح بيعدي على طول — من غير سؤال."""
+    import permissions
+    _fake_brain(monkeypatch, "تمام.\nTOOL: echo ran")
+    permissions.allow("echo")
+    logs = []
+    bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
+    bare_engine._converse("اعمل الحاجة دي")
+    assert bare_engine._pending_intent is None
+    assert any("ran" in msg for _, msg in logs)
+
+
+def test_unlisted_command_still_asks(bare_engine, monkeypatch):
+    _fake_brain(monkeypatch, "تمام.\nTOOL: echo ran")
+    bare_engine._converse("اعمل الحاجة دي")
+    assert bare_engine._pending_intent is not None
+
+
+def test_reply_a_grants_permission_and_runs(bare_engine, monkeypatch):
+    import permissions
+    _fake_brain(monkeypatch, "تمام.\nTOOL: echo done")
+    logs = []
+    bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
+    bare_engine._converse("اعمل كده")
+    bare_engine._dispatch("a")
+    assert permissions.is_allowed("echo") is True
+    assert any("done" in msg for _, msg in logs)
+
+
+def test_reply_a_is_refused_for_a_never_allowed_command(bare_engine, monkeypatch):
+    """`run` مينفعش يتسمح أبدًا — حتى لو المستخدم طلب كده صراحةً."""
+    import permissions
+    _fake_brain(monkeypatch, "تمام.\nTOOL: run ls")
+    bare_engine.registry.register("run", lambda ctx: "ران")
+    logs = []
+    bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
+    bare_engine._converse("شغّل حاجة")
+    bare_engine._dispatch("a")
+    assert permissions.is_allowed("run") is False
+    assert any("مينفعش" in msg for _, msg in logs)
+
+
+def test_confirm_prompt_mentions_the_always_option(bare_engine, monkeypatch):
+    _fake_brain(monkeypatch, "تمام.\nTOOL: echo x")
+    logs = []
+    bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
+    bare_engine._converse("حاجة")
+    assert any("تسمح بالأمر ده دايمًا" in msg for _, msg in logs)
+
+
+# ── الجلسات: الحفظ التلقائي ──────────────────────────────────────────
+
+def test_conversation_is_saved_after_each_exchange(bare_engine, monkeypatch, tmp_path):
+    import sessions
+    monkeypatch.setattr(sessions, "_base_dir", lambda: tmp_path)
+    _fake_brain(monkeypatch, "رد")
+    bare_engine._converse("سؤال محفوظ")
+    saved = sessions.load(bare_engine.session_id)
+    assert saved is not None
+    assert any("سؤال محفوظ" in m["content"] for m in saved)
+
+
+def test_each_engine_starts_with_its_own_session_id(tmp_path):
+    other = AssistantEngine(plugins_dirs=[tmp_path / "none"])
+    assert other.session_id
+
+
+# ── الأحداث: منع التكرار اللانهائي ───────────────────────────────────
+
+def test_hook_command_does_not_retrigger_its_own_event(bare_engine, monkeypatch, tmp_path):
+    """راجع: hook مربوط بـ after_command بيشغّل أمر، والأمر ده كان
+    بيطلّع after_command تاني — تكرار بلا نهاية بيملا الطابور."""
+    import hooks
+    monkeypatch.setattr(hooks, "_base_dir", lambda: tmp_path)
+    hooks.add("after_command", "echo من الهوك")
+
+    fired = []
+    real_fire = hooks.fire
+
+    def counting_fire(engine, event, **ctx):
+        fired.append(event)
+        return real_fire(engine, event, **ctx)
+
+    monkeypatch.setattr(hooks, "fire", counting_fire)
+    bare_engine.start()
+    try:
+        bare_engine.submit("echo أصلي")
+        time.sleep(0.8)
+    finally:
+        bare_engine.stop()
+        time.sleep(0.3)
+    # الأمر الأصلي طلّع الحدث؛ أمر الهوك نفسه مطلّعش حاجة
+    assert fired.count("after_command") == 1
+
+
+def test_startup_hook_fires_on_start(bare_engine, monkeypatch, tmp_path):
+    import hooks
+    monkeypatch.setattr(hooks, "_base_dir", lambda: tmp_path)
+    hooks.add("startup", "echo بدأنا")
+    logs = []
+    bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
+    bare_engine.start()
+    time.sleep(0.6)
+    bare_engine.stop()
+    time.sleep(0.3)
+    assert any("بدأنا" in msg for _, msg in logs)

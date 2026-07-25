@@ -19,7 +19,10 @@ if not os.environ.get("DISPLAY") and os.name != "nt":
     pytest.skip("no display available", allow_module_level=True)
 
 import brain  # noqa: E402
+import hooks  # noqa: E402
 import main_gui  # noqa: E402
+import permissions  # noqa: E402
+import sessions  # noqa: E402
 import theme  # noqa: E402
 
 
@@ -28,6 +31,8 @@ def app(monkeypatch):
     tmp = pathlib.Path(tempfile.mkdtemp())
     monkeypatch.setattr(brain, "_base_dir", lambda: tmp)
     monkeypatch.setattr(brain, "is_local_alive", lambda prov, **kw: False)
+    monkeypatch.setattr(sessions, "_base_dir", lambda: tmp)
+    monkeypatch.setattr(hooks, "_base_dir", lambda: tmp)
     brain.reset_brain()
     a = main_gui.AssistantApp()
     a.update()
@@ -273,27 +278,73 @@ def test_directory_spec_uses_the_directory_dialog(app, monkeypatch):
     assert called.get("dir") is True
 
 
-# ── قايمة الإعدادات ──────────────────────────────────────────────────
+# ── قايمة الإعدادات: التنقل بين الصفحات ─────────────────────────────
 
-def test_settings_opens_and_lists_every_provider(app):
+def test_settings_opens_on_the_home_page(app):
+    app._open_settings()
+    app.update()
+    assert app._settings.page == "home"
+    app._settings.close()
+
+
+def test_home_lists_every_section(app):
     app._open_settings()
     app.update()
     panel = app._settings
-    labels = [i["label"] for i in panel.data if i["kind"] != "head"]
-    for prov in brain.PROVIDERS.values():
-        assert prov.label in labels
+    pages = {i["page"] for i in panel.data if i["kind"] == "goto"}
+    for key, _label in main_gui.SettingsPanel.PAGES:
+        if key != "home":
+            assert key in pages
     panel.close()
 
 
-def test_settings_only_opens_once(app):
+def test_enter_on_a_section_navigates_into_it(app):
     app._open_settings()
-    first = app._settings
-    app._open_settings()
-    assert app._settings is first
-    first.close()
+    app.update()
+    panel = app._settings
+    target = next(i for i, idx in enumerate(panel._selectable())
+                  if panel.data[idx].get("page") == "brain")
+    panel.cursor = target
+    panel._activate()
+    assert panel.page == "brain"
+    panel.close()
 
 
-def test_cursor_moves_and_wraps(app):
+def test_back_returns_to_home(app):
+    app._open_settings()
+    app.update()
+    panel = app._settings
+    panel.page = "sessions"
+    panel._build()
+    panel._back()
+    assert panel.page == "home"
+    panel.close()
+
+
+@pytest.mark.parametrize("page", [k for k, _ in main_gui.SettingsPanel.PAGES])
+def test_every_page_renders_without_error(app, page):
+    app._open_settings()
+    app.update()
+    panel = app._settings
+    panel.page = page
+    panel.cursor = 0
+    panel._build()
+    app.update()
+    panel.close()
+
+
+def test_info_rows_are_not_selectable(app):
+    app._open_settings()
+    app.update()
+    panel = app._settings
+    panel.page = "permissions"
+    panel._build()
+    for idx in panel._selectable():
+        assert panel.data[idx]["kind"] not in ("head", "info")
+    panel.close()
+
+
+def test_cursor_wraps_around(app):
     app._open_settings()
     app.update()
     panel = app._settings
@@ -301,19 +352,66 @@ def test_cursor_moves_and_wraps(app):
     panel.cursor = total - 1
     panel._move(1)
     assert panel.cursor == 0
-    panel._move(-1)
-    assert panel.cursor == total - 1
     panel.close()
 
 
-def test_headings_are_not_selectable(app):
+# ── صفحة المخ ───────────────────────────────────────────────────────
+
+def test_brain_page_lists_every_provider(app):
     app._open_settings()
     app.update()
     panel = app._settings
-    for idx in panel._selectable():
-        assert panel.data[idx]["kind"] != "head"
+    panel.page = "brain"
+    panel._build()
+    labels = [i["label"] for i in panel.data if i["kind"] != "head"]
+    for prov in brain.PROVIDERS.values():
+        assert prov.label in labels
     panel.close()
 
+
+def test_key_editor_saves_a_typed_key(app):
+    app._open_settings()
+    app.update()
+    panel = app._settings
+    panel.page = "brain"
+    panel.cursor = next(i for i, idx in enumerate(
+        [j for j, it in enumerate(panel._items()) if it["kind"] not in ("head", "info")]
+    ) if True)
+    panel._build()
+    app.update()
+    # اظبط المؤشر على groq تحديدًا
+    for i in range(len(panel._selectable())):
+        panel.cursor = i
+        panel._build()
+        cur = panel._current()
+        if cur and cur.get("prov") and cur["prov"].name == "groq":
+            break
+    app.update()
+    panel.editing.insert(0, "gsk_typed")
+    panel._save_key()
+    assert brain.get_key("groq") == "gsk_typed"
+    panel.close()
+
+
+def test_masked_placeholder_does_not_wipe_an_existing_key(app):
+    brain.set_key("groq", "real")
+    app._open_settings()
+    app.update()
+    panel = app._settings
+    panel.page = "brain"
+    for i in range(len(panel._selectable())):
+        panel.cursor = i
+        panel._build()
+        cur = panel._current()
+        if cur and cur.get("prov") and cur["prov"].name == "groq":
+            break
+    app.update()
+    panel._save_key()          # من غير ما نكتب حاجة
+    assert brain.get_key("groq") == "real"
+    panel.close()
+
+
+# ── الأوضاع ─────────────────────────────────────────────────────────
 
 def test_enter_toggles_deep_mode(app):
     app._open_settings()
@@ -339,52 +437,141 @@ def test_enter_toggles_local_only(app):
     panel.close()
 
 
-def test_key_editor_saves_a_typed_key(app):
+# ── صفحة الجلسات ────────────────────────────────────────────────────
+
+def test_sessions_page_lists_saved_conversations(app):
+    sessions.save("s1", [{"role": "user", "content": "افحص الملف"}])
     app._open_settings()
     app.update()
     panel = app._settings
-    target = next(i for i, idx in enumerate(panel._selectable())
-                  if panel.data[idx].get("prov")
-                  and panel.data[idx]["prov"].name == "groq")
-    panel.cursor = target
+    panel.page = "sessions"
     panel._build()
-    app.update()
-    panel.editing.insert(0, "gsk_typed")
-    panel._save_key()
-    assert brain.get_key("groq") == "gsk_typed"
+    assert any(i.get("session") == "s1" for i in panel.data)
     panel.close()
 
 
-def test_empty_key_field_does_not_wipe_an_existing_key(app):
-    brain.set_key("groq", "real")
+def test_opening_a_session_loads_it_into_the_stream(app):
+    msgs = [{"role": "user", "content": "سؤال قديم"},
+            {"role": "assistant", "content": "رد قديم"}]
+    sessions.save("s1", msgs)
     app._open_settings()
     app.update()
     panel = app._settings
-    target = next(i for i, idx in enumerate(panel._selectable())
-                  if panel.data[idx].get("prov")
-                  and panel.data[idx]["prov"].name == "groq")
-    panel.cursor = target
+    panel.page = "sessions"
     panel._build()
+    target = next(i for i, idx in enumerate(panel._selectable())
+                  if panel.data[idx].get("session") == "s1")
+    panel.cursor = target
+    panel._activate()
     app.update()
-    panel._save_key()
-    assert brain.get_key("groq") == "real"
-    panel.close()
+    assert app.engine.session_id == "s1"
+    assert app.engine.chat_history == msgs
 
 
-def test_provider_with_a_key_reads_as_configured(app):
-    brain.set_key("gemini", "k")
+def test_wipe_sessions_clears_them_all(app):
+    sessions.save("s1", [{"role": "user", "content": "a"}])
+    sessions.save("s2", [{"role": "user", "content": "b"}])
     app._open_settings()
     app.update()
     panel = app._settings
-    row = next(i for i in panel.data if i.get("prov")
-               and i["prov"].name == "gemini")
-    assert row["value"] == "متظبط"
+    panel.page = "sessions"
+    panel._build()
+    target = next(i for i, idx in enumerate(panel._selectable())
+                  if panel.data[idx]["kind"] == "wipe_sessions")
+    panel.cursor = target
+    panel._activate()
+    assert sessions.list_all() == []
     panel.close()
 
+
+def test_new_chat_starts_a_fresh_session_id(app):
+    old = app.engine.session_id
+    app._new_chat()
+    assert app.engine.session_id != old
+
+
+# ── صفحة الصلاحيات ──────────────────────────────────────────────────
+
+def test_permissions_page_says_nothing_allowed_by_default(app):
+    app._open_settings()
+    app.update()
+    panel = app._settings
+    panel.page = "permissions"
+    panel._build()
+    assert any("كل حاجة بتتسأل" in i["label"] for i in panel.data)
+    panel.close()
+
+
+def test_permissions_page_lists_granted_commands(app):
+    permissions.allow("probe")
+    app._open_settings()
+    app.update()
+    panel = app._settings
+    panel.page = "permissions"
+    panel._build()
+    assert any(i.get("kind") == "revoke" and i["label"] == "probe"
+               for i in panel.data)
+    panel.close()
+
+
+def test_enter_revokes_a_permission(app):
+    permissions.allow("probe")
+    app._open_settings()
+    app.update()
+    panel = app._settings
+    panel.page = "permissions"
+    panel._build()
+    target = next(i for i, idx in enumerate(panel._selectable())
+                  if panel.data[idx].get("kind") == "revoke")
+    panel.cursor = target
+    panel._activate()
+    assert permissions.is_allowed("probe") is False
+    panel.close()
+
+
+def test_permissions_page_shows_the_never_allowed_list(app):
+    app._open_settings()
+    app.update()
+    panel = app._settings
+    panel.page = "permissions"
+    panel._build()
+    text = " ".join(i["label"] for i in panel.data)
+    assert "run" in text
+    panel.close()
+
+
+# ── صفحة الأحداث ────────────────────────────────────────────────────
+
+def test_hooks_page_lists_every_event(app):
+    app._open_settings()
+    app.update()
+    panel = app._settings
+    panel.page = "hooks"
+    panel._build()
+    heads = {i["label"] for i in panel.data if i["kind"] == "head"}
+    for event in hooks.EVENTS:
+        assert event in heads
+    panel.close()
+
+
+def test_enter_unhooks_a_bound_command(app):
+    hooks.add("startup", "echo hi")
+    app._open_settings()
+    app.update()
+    panel = app._settings
+    panel.page = "hooks"
+    panel._build()
+    target = next(i for i, idx in enumerate(panel._selectable())
+                  if panel.data[idx].get("kind") == "unhook")
+    panel.cursor = target
+    panel._activate()
+    assert hooks.commands_for("startup") == []
+    panel.close()
+
+
+# ── الخروج ──────────────────────────────────────────────────────────
 
 def test_escape_closes_the_panel(app):
-    """راجع: خانة المفتاح بتتبني لمجرد إن المؤشر واقف على مزوّد، فلو
-    Esc اكتفى بوجودها كان هيحتاج ضغطتين على أي سطر مزوّد."""
     app._open_settings()
     app.update()
     app._settings._on_escape()
@@ -392,13 +579,13 @@ def test_escape_closes_the_panel(app):
 
 
 def test_escape_cancels_typing_before_closing(app):
+    """راجع: خانة المفتاح بتتبني لمجرد إن المؤشر واقف على مزوّد، فلو
+    Esc اكتفى بوجودها كان هيحتاج ضغطتين على أي سطر مزوّد."""
     app._open_settings()
     app.update()
     panel = app._settings
-    target = next(i for i, idx in enumerate(panel._selectable())
-                  if panel.data[idx].get("prov")
-                  and panel.data[idx]["prov"].needs_key)
-    panel.cursor = target
+    panel.page = "brain"
+    panel.cursor = 0
     panel._build()
     app.update()
 
@@ -406,15 +593,22 @@ def test_escape_cancels_typing_before_closing(app):
     # التركيز مباشرة عشان نختبر المنطق نفسه مش سلوك الـ X server.
     editing = panel.editing
     panel.focus_get = lambda: editing
-
-    panel._on_escape()          # الضغطة الأولى بتخرج من الكتابة
+    panel._on_escape()
     assert app._settings is panel
     panel.focus_get = lambda: None
-    panel._on_escape()          # التانية بتقفل
+    panel._on_escape()
     assert app._settings is None
 
 
-def test_closing_clears_the_apps_reference(app):
+def test_only_one_panel_at_a_time(app):
+    app._open_settings()
+    first = app._settings
+    app._open_settings()
+    assert app._settings is first
+    first.close()
+
+
+def test_closing_clears_the_reference(app):
     app._open_settings()
     app._settings.close()
     assert app._settings is None

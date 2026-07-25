@@ -84,6 +84,9 @@ py -m PyInstaller ^
     --hidden-import brain ^
     --hidden-import intents ^
     --hidden-import theme ^
+    --hidden-import sessions ^
+    --hidden-import permissions ^
+    --hidden-import hooks ^
     --collect-all CTkToolTip ^
     --collect-all mcp ^
     --collect-all capstone ^
@@ -105,6 +108,9 @@ py -m PyInstaller ^
     --add-data "brain.py;." ^
     --add-data "intents.py;." ^
     --add-data "theme.py;." ^
+    --add-data "sessions.py;." ^
+    --add-data "permissions.py;." ^
+    --add-data "hooks.py;." ^
     --add-data "version.py;." ^
     --add-data "version.json;." ^
     --add-data "connectors.example.json;." ^

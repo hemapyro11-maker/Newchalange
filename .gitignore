@@ -31,3 +31,5 @@ smart_assistant/discord_config.json
 smart_assistant/brain_config.json
 smart_assistant/brain_state.json
 smart_assistant/intent_cache.json
+smart_assistant/sessions/
+smart_assistant/hooks.json

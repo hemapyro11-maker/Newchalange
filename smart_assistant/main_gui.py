@@ -32,12 +32,18 @@ except ImportError:
 
 try:
     import brain
+    import hooks
+    import permissions
+    import sessions
     import theme
     from core_engine import AssistantEngine
     from i18n import Translator
 except ImportError:
     sys.path.insert(0, os.path.dirname(sys.executable))
     import brain
+    import hooks
+    import permissions
+    import sessions
     import theme
     from core_engine import AssistantEngine
     from i18n import Translator
@@ -312,14 +318,37 @@ class AssistantApp(ctk.CTk):
             self._toggle_theme()
         elif cmd == "voice":
             self._toggle_voice()
+        elif cmd in ("resume", "sessions"):
+            self._open_settings()
+            if self._settings is not None:
+                self._settings.page = "sessions"
+                self._settings.cursor = 0
+                self._settings._build()
         elif cmd in ("lang", "language"):
             self._toggle_lang()
         elif cmd in ("quit", "exit"):
             self._on_close()
         else:
             self._add_assistant(
-                "/settings  /clear  /theme  /voice  /lang  /quit", "warn"
+                "/settings  /resume  /clear  /theme  /voice  /lang  /quit", "warn"
             )
+
+    def _resume_session(self, session_id: str, messages: list[dict]):
+        """بيفتح محادثة محفوظة: بيرسمها من الأول وبيكمّل عليها."""
+        for row in self._rows:
+            row.destroy()
+        self._rows.clear()
+        self._thinking = None
+        self.engine.session_id = session_id
+        self.engine.chat_history = list(messages)
+        self.stream._parent_canvas.yview_moveto(0.0)
+        self._line("✻", "محادثة مستكملة", self.c["accent"], size=13, bold=True)
+        self._blank(8)
+        for msg in messages:
+            if msg.get("role") == "user":
+                self._add_user(msg.get("content", ""))
+            else:
+                self._add_assistant(msg.get("content", ""))
 
     def _new_chat(self):
         for row in self._rows:
@@ -327,6 +356,7 @@ class AssistantApp(ctk.CTk):
         self._rows.clear()
         self._thinking = None
         self.engine.chat_history.clear()
+        self.engine.session_id = sessions.new_id()
         self.stream._parent_canvas.yview_moveto(0.0)
         self._banner()
 
@@ -460,18 +490,38 @@ class AssistantApp(ctk.CTk):
 
 
 class SettingsPanel(ctk.CTkToplevel):
-    """قايمة إعدادات بتتنقل فيها بالكيبورد، زي قوايم الطرفية:
-    ↑ ↓ للتنقل، Enter للتغيير، Esc للخروج."""
+    """قايمة إعدادات بصفحات، بتتنقل فيها بالكيبورد زي قوايم الطرفية.
+
+    ↑ ↓ تنقل · Enter تغيير · ← رجوع · Esc خروج
+
+    الصفحات بتغطي كل أنظمة نيزوكو الفرعية في مكان واحد بدل ما تكون
+    متفرقة على أوامر مختلفة: المخ، الموصلات (MCP)، الإضافات، المهارات،
+    الماكروهات، الجلسات، الصلاحيات، الأحداث (hooks)، والواجهة.
+    """
+
+    PAGES = (
+        ("home", "الرئيسية"),
+        ("brain", "المخ"),
+        ("connectors", "الموصلات (MCP)"),
+        ("plugins", "الإضافات"),
+        ("skills", "المهارات"),
+        ("macros", "الماكروهات"),
+        ("sessions", "الجلسات"),
+        ("permissions", "الصلاحيات"),
+        ("hooks", "الأحداث"),
+        ("interface", "الواجهة"),
+    )
 
     def __init__(self, app: AssistantApp):
         super().__init__(app)
         self.app = app
         self.c = app.c
+        self.page = "home"
         self.cursor = 0
         self.editing = None
 
         self.title("settings")
-        self.geometry("620x560")
+        self.geometry("700x620")
         self.configure(fg_color=self.c["bg"])
         self.transient(app)
         self.protocol("WM_DELETE_WINDOW", self.close)
@@ -480,6 +530,8 @@ class SettingsPanel(ctk.CTkToplevel):
         self.bind("<Up>", lambda e: self._move(-1))
         self.bind("<Down>", lambda e: self._move(1))
         self.bind("<Return>", lambda e: self._activate())
+        self.bind("<Left>", lambda e: self._back())
+        self.bind("<BackSpace>", lambda e: self._back())
         self.bind("<Escape>", lambda e: self._on_escape())
         self.after(80, self._focus)
 
@@ -487,21 +539,38 @@ class SettingsPanel(ctk.CTkToplevel):
         self.lift()
         self.focus_force()
 
-    # ── بنود القايمة ───────────────────────────────────────────────────
+    # ── بنود كل صفحة ───────────────────────────────────────────────────
     def _items(self) -> list[dict]:
+        return getattr(self, f"_page_{self.page}")()
+
+    def _page_home(self) -> list[dict]:
+        rows = self.app._brain_rows()
+        ready = sum(1 for r in rows if r["has_key"] and r["enabled"])
         cfg = brain.load_config()
-        items = [{"kind": "head", "label": "المخ"}]
-        for prov in sorted(brain.PROVIDERS.values(), key=lambda p: -p.quality):
-            if prov.needs_key:
-                has = bool(brain.get_key(prov.name))
-                value = "متظبط" if has else "—"
-            else:
-                value = "شغال" if brain.is_local_alive(prov) else "مش شغال"
-            items.append({
-                "kind": "key" if prov.needs_key else "info",
-                "label": prov.label, "value": value, "prov": prov,
-            })
-        items += [
+        mgr = getattr(self.app.engine, "connector_manager", None)
+        connected = sum(
+            1 for v in getattr(mgr, "servers", {}).values()
+            if v.get("status") == "connected"
+        ) if mgr else 0
+        return [
+            {"kind": "head", "label": "الأقسام"},
+            {"kind": "goto", "label": "المخ", "page": "brain",
+             "value": f"{ready} جاهز" if ready else "مفيش"},
+            {"kind": "goto", "label": "الموصلات (MCP)", "page": "connectors",
+             "value": f"{connected} متصل" if connected else "—"},
+            {"kind": "goto", "label": "الإضافات", "page": "plugins",
+             "value": str(len(self.app.engine._loaded_plugins))},
+            {"kind": "goto", "label": "المهارات", "page": "skills",
+             "value": str(len(self.app.engine.skills.get("commands", {})))},
+            {"kind": "goto", "label": "الماكروهات", "page": "macros", "value": ""},
+            {"kind": "goto", "label": "الجلسات", "page": "sessions",
+             "value": str(len(sessions.list_all()))},
+            {"kind": "goto", "label": "الصلاحيات", "page": "permissions",
+             "value": str(len(permissions.allowed()))},
+            {"kind": "goto", "label": "الأحداث (hooks)", "page": "hooks",
+             "value": str(sum(len(v) for v in hooks.load().values()))},
+            {"kind": "goto", "label": "الواجهة", "page": "interface",
+             "value": self.app.mode},
             {"kind": "head", "label": "الأوضاع"},
             {"kind": "toggle", "label": "الوضع العميق", "cfg": "deep_mode",
              "value": "شغال" if cfg.get("deep_mode") else "مقفول",
@@ -509,27 +578,205 @@ class SettingsPanel(ctk.CTkToplevel):
             {"kind": "toggle", "label": "محلي بس", "cfg": "local_only",
              "value": "شغال" if cfg.get("local_only") else "مقفول",
              "note": "بيقفل كل السحابي · محتاج Ollama"},
-            {"kind": "head", "label": "الواجهة"},
-            {"kind": "theme", "label": "الثيم", "value": self.app.mode},
-            {"kind": "voice", "label": "الصوت",
-             "value": "شغال" if self.app.voice_enabled else "مقفول"},
-            {"kind": "lang", "label": "اللغة",
-             "value": "العربية" if self.app._rtl else "English"},
         ]
+
+    def _page_brain(self) -> list[dict]:
+        items = [{"kind": "head", "label": "المزوّدين المجانيين"}]
+        for prov in sorted(brain.PROVIDERS.values(), key=lambda p: -p.quality):
+            if prov.needs_key:
+                value = "متظبط" if brain.get_key(prov.name) else "—"
+                kind = "key"
+            else:
+                value = "شغال" if brain.is_local_alive(prov) else "مش شغال"
+                kind = "info"
+            items.append({"kind": kind, "label": prov.label,
+                          "value": value, "prov": prov})
         return items
 
+    def _page_connectors(self) -> list[dict]:
+        mgr = getattr(self.app.engine, "connector_manager", None)
+        items = [{"kind": "head", "label": "خوادم MCP"}]
+        if mgr is None:
+            items.append({"kind": "info", "label": "الإضافة مش محمّلة",
+                          "value": "pip install mcp"})
+            return items
+        try:
+            configured = mgr.load_config()
+        except Exception:  # noqa: BLE001
+            configured = {}
+        if not configured:
+            items.append({"kind": "info", "label": "مفيش موصلات متظبطة",
+                          "value": "connectors.json"})
+            items.append({"kind": "info",
+                          "label": "انسخ connectors.example.json وعدّله",
+                          "value": ""})
+            return items
+        for name in sorted(configured):
+            state = mgr.servers.get(name, {})
+            status = state.get("status", "disconnected")
+            tools = len(state.get("tools", []))
+            items.append({
+                "kind": "connector", "label": name, "connector": name,
+                "value": f"{tools} أداة" if status == "connected" else status,
+            })
+        return items
+
+    def _page_plugins(self) -> list[dict]:
+        eng = self.app.engine
+        items = [{"kind": "head", "label": f"محمّلة ({len(eng._loaded_plugins)})"}]
+        for name in eng._loaded_plugins:
+            items.append({"kind": "info", "label": name, "value": "✓"})
+        pending = []
+        try:
+            base = sessions._base_dir() / "plugins_pending"
+            pending = sorted(p.stem for p in base.glob("*.py")) if base.is_dir() else []
+        except Exception:  # noqa: BLE001
+            pending = []
+        if pending:
+            items.append({"kind": "head", "label": "مستنية موافقتك"})
+            for name in pending:
+                items.append({"kind": "info", "label": name,
+                              "value": f"approve_plugin {name}"})
+        items.append({"kind": "head", "label": "أفعال"})
+        items.append({"kind": "cmd", "label": "إعادة تحميل الإضافات",
+                      "cmd": "reload_plugins", "value": ""})
+        return items
+
+    def _page_skills(self) -> list[dict]:
+        skills = self.app.engine.skills
+        commands = skills.get("commands", {})
+        top = sorted(commands.items(), key=lambda kv: -kv[1].get("count", 0))[:15]
+        items = [
+            {"kind": "head",
+             "label": f"أكتر الأوامر استخدامًا (من {len(commands)})"},
+        ]
+        for name, info in top:
+            items.append({"kind": "info", "label": name,
+                          "value": f"{info.get('count', 0)}×"})
+        items.append({"kind": "head", "label": "القاموس المحلي"})
+        items.append({"kind": "cmd", "label": "تغطية القاموس والصيغ المتعلّمة",
+                      "cmd": "brain_dict", "value": ""})
+        items.append({"kind": "cmd", "label": "playbooks بتاعة think",
+                      "cmd": "think_playbooks list", "value": ""})
+        return items
+
+    def _page_macros(self) -> list[dict]:
+        items = [{"kind": "head", "label": "أوامر مخصصة (commands/*.txt)"}]
+        try:
+            d = sessions._base_dir() / "commands"
+            names = sorted(p.stem for p in d.glob("*.txt")) if d.is_dir() else []
+        except Exception:  # noqa: BLE001
+            names = []
+        if names:
+            for name in names:
+                items.append({"kind": "info", "label": name, "value": "✓"})
+        else:
+            items.append({"kind": "info",
+                          "label": "مفيش ماكروهات — حط ملف .txt في commands/",
+                          "value": ""})
+        items.append({"kind": "cmd", "label": "إعادة تحميل الماكروهات",
+                      "cmd": "reload_macros", "value": ""})
+        return items
+
+    def _page_sessions(self) -> list[dict]:
+        items = [{"kind": "head", "label": "محادثات محفوظة"}]
+        rows = sessions.list_all()
+        if not rows:
+            items.append({"kind": "info", "label": "مفيش محادثات محفوظة لسه",
+                          "value": ""})
+        for s in rows[:25]:
+            items.append({
+                "kind": "session", "label": s["title"], "session": s["id"],
+                "value": f"{s['turns']}× · {sessions.relative_time(s['updated'])}",
+                "note": "Enter يفتحها · Delete يمسحها",
+            })
+        if rows:
+            items.append({"kind": "head", "label": "أفعال"})
+            items.append({"kind": "wipe_sessions", "label": "امسح كل المحادثات",
+                          "value": f"{len(rows)}"})
+        return items
+
+    def _page_permissions(self) -> list[dict]:
+        allowed = sorted(permissions.allowed())
+        items = [
+            {"kind": "head", "label": "أوامر بتعدي من غير سؤال"},
+        ]
+        if not allowed:
+            items.append({
+                "kind": "info", "label": "مفيش — كل حاجة بتتسأل", "value": "✓",
+                "note": "الافتراضي الآمن. لما تأكّد أمر اكتب a بدل y عشان يتضاف هنا.",
+            })
+        for name in allowed:
+            items.append({"kind": "revoke", "label": name, "value": "مسموح",
+                          "note": "Enter يشيل السماح"})
+        if allowed:
+            items.append({"kind": "head", "label": "أفعال"})
+            items.append({"kind": "wipe_perms", "label": "اسحب كل الصلاحيات",
+                          "value": str(len(allowed))})
+        items.append({"kind": "head", "label": "ممنوعة نهائيًا"})
+        items.append({
+            "kind": "info", "label": "، ".join(sorted(permissions.never_allowed())),
+            "value": "",
+            "note": "بتنفذ كود أو بتوصل لحاجة بمدخلات حرة — محتاجة موافقتك كل مرة.",
+        })
+        return items
+
+    def _page_hooks(self) -> list[dict]:
+        data = hooks.load()
+        items = []
+        for event in hooks.EVENTS:
+            items.append({"kind": "head", "label": event})
+            for cmd in data[event]:
+                items.append({"kind": "unhook", "label": cmd, "value": "مربوط",
+                              "event": event, "note": "Enter يفكّه"})
+            if not data[event]:
+                items.append({"kind": "info", "label": "—", "value": ""})
+        items.append({"kind": "head", "label": "أفعال"})
+        items.append({"kind": "info", "label": "الربط من الأمر: hook add <event> <command>",
+                      "value": ""})
+        return items
+
+    def _page_interface(self) -> list[dict]:
+        return [
+            {"kind": "head", "label": "الشكل"},
+            {"kind": "theme", "label": "الثيم", "value": self.app.mode},
+            {"kind": "lang", "label": "اللغة",
+             "value": "العربية" if self.app._rtl else "English"},
+            {"kind": "voice", "label": "الصوت",
+             "value": "شغال" if self.app.voice_enabled else "مقفول"},
+            {"kind": "head", "label": "أوامر الواجهة"},
+            {"kind": "info", "label": "/settings /clear /theme /voice /lang /quit",
+             "value": ""},
+        ]
+
+    # ── الرسم ──────────────────────────────────────────────────────────
     def _selectable(self) -> list[int]:
-        return [i for i, it in enumerate(self.data) if it["kind"] != "head"]
+        return [i for i, it in enumerate(self.data)
+                if it["kind"] not in ("head", "info")]
 
     def _build(self):
         c = self.c
         for w in self.winfo_children():
             w.destroy()
         self.data = self._items()
+        self.editing = None
+
+        title = dict(self.PAGES)[self.page]
+        header = ctk.CTkFrame(self, fg_color="transparent")
+        header.pack(fill="x", padx=22, pady=(16, 2))
+        ctk.CTkLabel(
+            header, text=f"⚙ {title}", text_color=c["accent"],
+            font=self.app._font(14, True), anchor=self.app._anchor,
+        ).pack(fill="x")
+        if self.page != "home":
+            ctk.CTkLabel(
+                header, text="← رجوع للرئيسية", text_color=c["faint"],
+                font=self.app._font(10), anchor=self.app._anchor,
+            ).pack(fill="x")
 
         wrap = ctk.CTkScrollableFrame(self, fg_color=c["bg"], corner_radius=0,
                                       scrollbar_button_color=c["border"])
-        wrap.pack(fill="both", expand=True, padx=22, pady=(18, 4))
+        wrap.pack(fill="both", expand=True, padx=22, pady=(6, 4))
 
         sel = self._selectable()
         if self.cursor >= len(sel):
@@ -540,8 +787,8 @@ class SettingsPanel(ctk.CTkToplevel):
             if item["kind"] == "head":
                 ctk.CTkLabel(
                     wrap, text=item["label"], text_color=c["faint"],
-                    font=self.app._font(11, True), anchor=self.app._anchor,
-                ).pack(fill="x", pady=(14, 4))
+                    font=self.app._font(10, True), anchor=self.app._anchor,
+                ).pack(fill="x", pady=(12, 3))
                 continue
 
             is_active = idx == active
@@ -551,47 +798,55 @@ class SettingsPanel(ctk.CTkToplevel):
             )
             row.pack(fill="x", pady=1)
 
+            mark = "❯" if is_active else (" " if item["kind"] != "goto" else "·")
             ctk.CTkLabel(
-                row, text="❯" if is_active else " ", width=14,
-                text_color=c["accent"], font=self.app._font(12, True),
-            ).pack(side=self.app._side, padx=(6, 2), pady=5)
+                row, text=mark, width=14, text_color=c["accent"],
+                font=self.app._font(11, True),
+            ).pack(side=self.app._side, padx=(6, 2), pady=4)
 
+            label_color = c["text"] if item["kind"] != "info" else c["dim"]
             ctk.CTkLabel(
-                row, text=item["label"], text_color=c["text"],
-                font=self.app._font(12), anchor=self.app._anchor,
+                row, text=item["label"], text_color=label_color,
+                font=self.app._font(11), anchor=self.app._anchor,
+                wraplength=420,
             ).pack(side=self.app._side, fill="x", expand=True)
 
-            vcolor = c["green"] if item["value"] in ("متظبط", "شغال") else c["dim"]
-            ctk.CTkLabel(
-                row, text=item["value"], text_color=vcolor,
-                font=self.app._font(12),
-            ).pack(side="left" if self.app._rtl else "right", padx=10)
+            if item.get("value"):
+                good = item["value"] in ("متظبط", "شغال", "مسموح", "✓")
+                ctk.CTkLabel(
+                    row, text=item["value"],
+                    text_color=c["green"] if good else c["dim"],
+                    font=self.app._font(10),
+                ).pack(side="left" if self.app._rtl else "right", padx=10)
 
             if is_active and item.get("note"):
                 ctk.CTkLabel(
                     wrap, text=item["note"], text_color=c["faint"],
-                    font=self.app._font(10), anchor=self.app._anchor,
-                ).pack(fill="x", padx=22, pady=(0, 2))
+                    font=self.app._font(9), anchor=self.app._anchor,
+                    wraplength=560,
+                ).pack(fill="x", padx=20, pady=(0, 2))
 
             if is_active and item["kind"] == "key":
                 self._key_editor(wrap, item["prov"])
 
+        hint = "↑ ↓ تنقل  ·  Enter تغيير  ·  Esc خروج"
+        if self.page != "home":
+            hint = "↑ ↓ تنقل  ·  Enter تغيير  ·  ← رجوع  ·  Esc خروج"
         ctk.CTkLabel(
-            self, text="↑ ↓ تنقل   ·   Enter تغيير   ·   Esc خروج",
-            text_color=c["faint"], font=self.app._font(10),
-        ).pack(pady=(2, 12))
+            self, text=hint, text_color=c["faint"], font=self.app._font(9),
+        ).pack(pady=(2, 10))
 
     def _key_editor(self, parent, prov):
         c = self.c
         box = ctk.CTkFrame(parent, fg_color="transparent")
-        box.pack(fill="x", padx=22, pady=(2, 6))
+        box.pack(fill="x", padx=20, pady=(2, 6))
 
         self.editing = ctk.CTkEntry(
-            box, height=30, corner_radius=4, show="•",
+            box, height=28, corner_radius=4, show="•",
             placeholder_text="الصق المفتاح واضغط Enter",
             fg_color=c["panel"], border_color=c["border"], border_width=1,
             text_color=c["text"], placeholder_text_color=c["faint"],
-            font=self.app._font(11), justify="left",
+            font=self.app._font(10), justify="left",
         )
         self.editing.pack(fill="x")
         self.editing._prov = prov
@@ -599,34 +854,46 @@ class SettingsPanel(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             box, text=prov.signup, text_color=c["accent"],
-            font=self.app._font(10), anchor=self.app._anchor,
-        ).pack(fill="x", pady=(3, 0))
+            font=self.app._font(9), anchor=self.app._anchor,
+        ).pack(fill="x", pady=(2, 0))
         if prov.trains_on_input:
             ctk.CTkLabel(
                 box, text="🔓 الخطة المجانية بتستخدم كلامك للتدريب",
-                text_color=c["yellow"], font=self.app._font(10),
+                text_color=c["yellow"], font=self.app._font(9),
                 anchor=self.app._anchor,
             ).pack(fill="x")
 
-    # ── التنقل والتفعيل ────────────────────────────────────────────────
+    # ── التنقل ─────────────────────────────────────────────────────────
     def _move(self, delta: int):
         sel = self._selectable()
         if sel:
             self.cursor = (self.cursor + delta) % len(sel)
         self._build()
 
+    def _back(self):
+        if self.page != "home":
+            self.page = "home"
+            self.cursor = 0
+            self._build()
+
+    def _current(self) -> dict | None:
+        sel = self._selectable()
+        return self.data[sel[self.cursor]] if sel else None
+
     def _activate(self):
         if self.editing is not None and self.editing.winfo_exists() and \
                 self.editing.get().strip():
             self._save_key()
             return
-        sel = self._selectable()
-        if not sel:
+        item = self._current()
+        if item is None:
             return
-        item = self.data[sel[self.cursor]]
         kind = item["kind"]
 
-        if kind == "toggle":
+        if kind == "goto":
+            self.page = item["page"]
+            self.cursor = 0
+        elif kind == "toggle":
             cfg = brain.load_config()
             cfg[item["cfg"]] = not cfg.get(item["cfg"])
             brain.save_config(cfg)
@@ -643,8 +910,46 @@ class SettingsPanel(ctk.CTkToplevel):
             if self.editing is not None and self.editing.winfo_exists():
                 self.editing.focus_set()
                 return
+        elif kind == "cmd":
+            self.app.engine.submit(item["cmd"])
+            self.close()
+            return
+        elif kind == "connector":
+            self._toggle_connector(item["connector"])
+        elif kind == "session":
+            self._resume(item["session"])
+            return
+        elif kind == "wipe_sessions":
+            n = sessions.delete_all()
+            self.app._add_assistant(f"اتمسحت {n} محادثة", "ok")
+        elif kind == "revoke":
+            permissions.revoke(item["label"])
+        elif kind == "wipe_perms":
+            n = permissions.revoke_all()
+            self.app._add_assistant(f"اتسحبت {n} صلاحية", "ok")
+        elif kind == "unhook":
+            hooks.remove(item["event"], item["label"])
         self._build()
         self.app._refresh_status()
+
+    def _toggle_connector(self, name: str):
+        mgr = getattr(self.app.engine, "connector_manager", None)
+        if mgr is None:
+            return
+        state = mgr.servers.get(name, {}).get("status")
+        if state == "connected":
+            mgr.disconnect(name)
+        else:
+            mgr.connect(name)
+
+    def _resume(self, session_id: str):
+        messages = sessions.load(session_id)
+        if messages is None:
+            self.app._add_assistant("المحادثة دي مش موجودة", "error")
+            self.close()
+            return
+        self.app._resume_session(session_id, messages)
+        self.close()
 
     def _save_key(self):
         if self.editing is None or not self.editing.winfo_exists():
@@ -660,12 +965,10 @@ class SettingsPanel(ctk.CTkToplevel):
         self.app._refresh_status()
 
     def _on_escape(self):
-        """Esc بيقفل القايمة — إلا لو إنت فعلاً بتكتب في خانة مفتاح،
-        ساعتها بيلغي الكتابة الأول.
+        """Esc بيقفل — إلا لو بتكتب فعلاً في خانة مفتاح.
 
-        الشرط على التركيز مهم: خانة المفتاح بتتبني لمجرد إن المؤشر
-        واقف على مزوّد، فلو اكتفينا بوجودها كان Esc هيحتاج ضغطتين
-        على أي سطر مزوّد حتى لو مكتبتش فيه حاجة.
+        الشرط على التركيز مهم: الخانة بتتبني لمجرد إن المؤشر واقف على
+        مزوّد، فلو اكتفينا بوجودها كان Esc هيحتاج ضغطتين على أي مزوّد.
         """
         ed = self.editing
         if ed is not None and ed.winfo_exists() and self.focus_get() is ed:

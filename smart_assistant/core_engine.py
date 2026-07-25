@@ -27,7 +27,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import brain
+import hooks
 import intents
+import permissions
+import sessions
 
 log = logging.getLogger("assistant.core")
 
@@ -39,6 +42,11 @@ CommandHandler = Callable[["CommandContext"], str | None]
 # thread بصمت زي لو stop() اتنادت فعلاً، من غير أي رسالة أو تحذير.
 # عنصر object() فريد مينفعش أي نص مكتوب "يطابقه" أبداً.
 _STOP_SENTINEL = object()
+
+# الأوامر الجاية من hook بتتعلّم بالعلامة دي عشان تنفيذها ميولّدش
+# أحداث جديدة — من غير كده، hook مربوط بـ after_command بيشغّل أمر،
+# والأمر ده بيطلّع after_command تاني، وهكذا بلا نهاية.
+_HOOK_SENTINEL = object()
 
 # ── فهم النية: أربع مراحل، أرخصها الأول ──────────────────────────────
 #
@@ -56,6 +64,8 @@ _STOP_SENTINEL = object()
 FUZZY_CUTOFF = 0.6
 _CONFIRM_YES = {"y", "yes", "نعم", "أيوه", "ايوه", "اه", "آه", "تمام"}
 _CONFIRM_NO = {"n", "no", "لا", "لأ"}
+# "اسمح دايمًا" — بينفذ وبيضيف الأمر لقايمة المسموح (permissions.py)
+_CONFIRM_ALWAYS = {"a", "always", "دايما", "دايمًا", "اسمح"}
 
 # أقصى عدد رسائل بنحتفظ بيها في محادثة المخ (brain.py بيقصّها كمان حسب
 # سياق المزوّد النشط، ده حد أعلى إضافي عشان الذاكرة متكبرش بلا نهاية)
@@ -164,6 +174,10 @@ class AssistantEngine:
         self._pending_args: tuple[str, list[str], list, str] | None = None
         # محادثة المخ (مش متسجّلة على القرص — بتتصفّر مع كل تشغيل)
         self.chat_history: list[dict] = []
+        # معرّف الجلسة الحالية — المحادثة بتتحفظ على القرص بعد كل
+        # دور، فقفل البرنامج مبيضيّعش الكلام زي الأول
+        self.session_id = sessions.new_id()
+        self._in_hook = False
         # الواجهة بتحطه عشان تفتح نافذة اختيار ملف بدل ما تسأل بالنص
         self.on_need_file = None
         self._register_builtin_commands()
@@ -211,10 +225,12 @@ class AssistantEngine:
         self._worker = threading.Thread(target=self._run_loop, daemon=True)
         self._worker.start()
         self.on_status("running")
+        hooks.fire(self, "startup")
 
     def stop(self):
         if not self.is_running():
             return
+        hooks.fire(self, "session_end")
         self._stop_flag.set()
         self._queue.put(("", _STOP_SENTINEL))
 
@@ -225,6 +241,11 @@ class AssistantEngine:
     def submit(self, text: str):
         """يضيف أمر (نص من المستخدم) لطابور التنفيذ."""
         self._queue.put((text, None))
+
+    def submit_hook(self, text: str):
+        """إرسال من hook — بيمشي في نفس الطابور والفحوصات، بس
+        تنفيذه مبيطلّعش أحداث جديدة (منعًا للتكرار اللانهائي)."""
+        self._queue.put((text, _HOOK_SENTINEL))
 
     def run_task(self, name: str, fn: Callable[[CommandContext], None]):
         """يضيف مهمة أتمتة (callable) لنفس طابور التنفيذ."""
@@ -332,7 +353,13 @@ class AssistantEngine:
             if fn is _STOP_SENTINEL:
                 break
             try:
-                if fn is not None:
+                if fn is _HOOK_SENTINEL:
+                    self._in_hook = True
+                    try:
+                        self._dispatch(text)
+                    finally:
+                        self._in_hook = False
+                elif fn is not None:
                     fn(CommandContext(raw=text, args=[], engine=self))
                 else:
                     self._dispatch(text)
@@ -348,6 +375,14 @@ class AssistantEngine:
         if self._pending_intent is not None:
             pending, self._pending_intent = self._pending_intent, None
             reply = text.lower()
+            if reply in _CONFIRM_ALWAYS:
+                pending_name, pending_args, pending_raw = pending
+                ok, message = permissions.allow(pending_name)
+                self._log(message, "ok" if ok else "warn")
+                if ok:
+                    intents.remember(pending_raw, pending_name)
+                    self._execute(pending_name, pending_args, pending_raw)
+                return
             if reply in _CONFIRM_YES:
                 pending_name, pending_args, pending_raw = pending
                 # المستخدم أكّد إن الصيغة دي معناها الأمر ده — نحفظها
@@ -470,15 +505,21 @@ class AssistantEngine:
             return
         ctx = CommandContext(raw=raw, args=args, engine=self)
         start = time.time()
+        if not self._in_hook:
+            hooks.fire(self, "before_command", command=name)
         try:
             result = cmd.handler(ctx)
         except Exception:
             self._log(traceback.format_exc(), "error")
+            if not self._in_hook:
+                hooks.fire(self, "on_error", command=name)
             return
         self._record_command_used(name)
         log.debug("command %s finished in %.3fs", name, time.time() - start)
         if result:
             self._log(str(result), "info")
+        if not self._in_hook:
+            hooks.fire(self, "after_command", command=name)
 
     # ── محادثة مع المخ (المرحلة الوحيدة اللي بتستهلك حصة) ─────────────
     def _tool_catalog(self) -> str:
@@ -528,6 +569,7 @@ class AssistantEngine:
         self.chat_history.append({"role": "user", "content": text})
         self.chat_history.append({"role": "assistant", "content": reply.text})
         del self.chat_history[:-_MAX_CHAT_TURNS]
+        sessions.save(self.session_id, self.chat_history)
 
         if tool is None:
             self._log(f"{body}\n\n— {badge}", "info")
@@ -540,9 +582,21 @@ class AssistantEngine:
             return
 
         shown = f"{tool_name} {' '.join(tool_args)}".strip()
+
+        # الأمر ده في قايمة المسموح؟ ينفذ على طول من غير سؤال.
+        # القايمة بتبدأ فاضية دايمًا — إنت اللي بتضيف فيها بنفسك.
+        if permissions.is_allowed(tool_name):
+            intents.remember(text, tool_name)
+            self._log(f"{body}\n\n↪ {shown}\n— {badge}", "info")
+            self._execute(tool_name, tool_args, text)
+            return
+
         self._pending_intent = (tool_name, tool_args, text)
         self._log(
-            f"{body}\n\n🔧 محتاجة أشغّل: {shown}\nاكتب y للتنفيذ أو أي حاجة تانية للإلغاء.\n— {badge}",
+            f"{body}\n\n🔧 محتاجة أشغّل: {shown}\n"
+            "اكتب y للتنفيذ، أو a عشان تسمح بالأمر ده دايمًا، "
+            "أو أي حاجة تانية للإلغاء.\n"
+            f"— {badge}",
             "info",
         )
 
