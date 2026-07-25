@@ -7,6 +7,10 @@ security_scan_plugin.py — فحص أمان شامل: أخطاء/ثغرات في
 مش حاجة أي أداة أمان جادة بتقدر تضمنها فعليًا. للأنماط غير الآمنة في
 كودك (مش فيروسات — زي yaml.load بدل safe_load)، code_scan بيصلح
 تلقائيًا الحالات الآمنة والواضحة بس، والباقي بيتبلّغ بيه للمراجعة اليدوية.
+code_scan كمان بيشغّل bandit (لو متثبت) كفحص إضافي اختياري فوق فحصنا
+الأساسي بـ AST — تغطية أوسع (assert بكود إنتاجي، tarfile.extractall
+غير آمن، XML/SSL ضعيف، إلخ) من غير ما يبقى معتمد عليه، لأنه مش متضمّن
+في requirements.txt الأساسي (اختياري: pip install bandit).
 
 الأوامر: code_scan, vuln_scan, virus_scan, quarantine_file,
 quarantine_list, quarantine_restore, security_report
@@ -291,6 +295,44 @@ def _apply_yaml_safe_load_fix(source: str) -> tuple[str, int]:
     return new_source, len(edits)
 
 
+def _run_bandit(root: pathlib.Path) -> str | None:
+    """فحص إضافي اختياري بـ bandit (مكتبة فحص أمان بايثون معروفة ومفتوحة
+    المصدر) — بيغطي أنماط أوسع بكتير من الفحص الأساسي فوق (assert في كود
+    إنتاجي، tarfile.extractall غير آمن، XML عبر مكتبات ضعيفة، SSL/TLS
+    ضعيف، إلخ). بيرجع None لو bandit مش متثبت، عشان code_scan يفضل يشتغل
+    بالفحص الأساسي (AST) بس زي ما هو من غيره — مكمّل مش بديل."""
+    if not shutil.which("bandit"):
+        return None
+    cmd = ["bandit"]
+    if root.is_dir():
+        cmd.append("-r")
+    cmd += [str(root), "-f", "json", "-q"]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        return "  ⚠️ bandit استغرق وقت أطول من المتوقع (timeout)"
+    if proc.returncode not in (0, 1):  # 1 = فيه ملاحظات (متوقع)، أي حاجة تانية خطأ حقيقي
+        return f"  ⚠️ bandit فشل: {proc.stderr.strip()[:300]}"
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return "  ⚠️ تعذر تفسير مخرجات bandit"
+    results = data.get("results", [])
+    if not results:
+        return "  ✅ bandit: مفيش ملاحظات إضافية"
+    sev_icon = {"HIGH": "🛑", "MEDIUM": "⚠️", "LOW": "ℹ️"}
+    out = [f"  🔍 bandit: {len(results)} ملاحظة إضافية:"]
+    for r in results[:30]:
+        icon = sev_icon.get(str(r.get("issue_severity", "")).upper(), "•")
+        out.append(
+            f"    {icon} {r.get('filename')}:{r.get('line_number')} "
+            f"[{r.get('test_id')}] {str(r.get('issue_text', '')).strip()}"
+        )
+    if len(results) > 30:
+        out.append(f"    ... و{len(results) - 30} أخرى")
+    return "\n".join(out)
+
+
 def _cmd_code_scan(ctx) -> str:
     if not ctx.args:
         return "usage: code_scan <path> [--fix]"
@@ -360,12 +402,20 @@ def _cmd_code_scan(ctx) -> str:
     # لوحده لأنه بيرجع 0 برضو لو الملف كان فيه مشكلة واحدة بس اتصلحت تلقائيًا
     # (يبقى مفيش findings متبقية، لكن فيه حاجة حصلت فعلاً لازم تتقال).
     if len(lines) == 1:
-        return f"✅ فحصت {len(files)} ملف .py — مفيش ملاحظات أمنية/جودة كود ظاهرة"
+        lines = [f"✅ فحصت {len(files)} ملف .py — مفيش ملاحظات أمنية/جودة كود ظاهرة من الفحص الأساسي"]
+    else:
+        summary = f"لقيت {total_findings} ملاحظة" if total_findings else "مفيش ملاحظات متبقية"
+        if total_fixed:
+            summary += f" — اتصلح {total_fixed} تلقائيًا (yaml.load→safe_load)"
+        lines.insert(1, summary)
 
-    summary = f"لقيت {total_findings} ملاحظة" if total_findings else "مفيش ملاحظات متبقية"
-    if total_fixed:
-        summary += f" — اتصلح {total_fixed} تلقائيًا (yaml.load→safe_load)"
-    lines.insert(1, summary)
+    lines.append(
+        "\n🔍 فحص إضافي بـ bandit (تغطية أوسع: assert بكود إنتاجي، "
+        "tarfile.extractall غير آمن، XML/SSL ضعيف، إلخ):"
+    )
+    bandit_result = _run_bandit(root)
+    lines.append(bandit_result if bandit_result else "  ℹ️ bandit مش متثبت — نزّله بـ: pip install bandit (مجاني ومفتوح المصدر)")
+
     return "\n".join(lines)
 
 
@@ -676,7 +726,7 @@ def _cmd_security_report(ctx) -> str:
 
 
 def register(engine):
-    engine.registry.register("code_scan", _cmd_code_scan, "code_scan <path> [--fix] — فحص أمان/جودة كود بايثون (AST)، مع إصلاح تلقائي للحالات الآمنة الواضحة")
+    engine.registry.register("code_scan", _cmd_code_scan, "code_scan <path> [--fix] — فحص أمان/جودة كود بايثون (AST + bandit اختياري)، مع إصلاح تلقائي للحالات الآمنة الواضحة")
     engine.registry.register("vuln_scan", _cmd_vuln_scan, "vuln_scan <path> — أسرار مكشوفة + ثغرات مكتبات معروفة (pip-audit/npm audit) + صلاحيات ملفات")
     engine.registry.register("virus_scan", _cmd_virus_scan, "virus_scan <path> [--no-quarantine] — فحص فيروسات/spyware حقيقي عبر ClamAV، مع حجر صحي تلقائي")
     engine.registry.register("quarantine_file", _cmd_quarantine_file, "quarantine_file <path> [سبب] — نقل ملف مشبوه للحجر الصحي يدويًا")

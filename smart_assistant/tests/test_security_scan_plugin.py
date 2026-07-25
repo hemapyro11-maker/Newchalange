@@ -12,6 +12,7 @@ requires_clamscan = pytest.mark.skipif(
 )
 requires_pip_audit = pytest.mark.skipif(not shutil.which("pip-audit"), reason="pip-audit not installed")
 requires_npm = pytest.mark.skipif(not shutil.which("npm"), reason="npm not installed")
+requires_bandit = pytest.mark.skipif(not shutil.which("bandit"), reason="bandit not installed")
 
 
 @pytest.fixture(autouse=True)
@@ -146,6 +147,45 @@ def test_code_scan_skips_oversized_single_file_instead_of_loading_it(make_ctx, t
     result = ssp._cmd_code_scan(make_ctx("code_scan", [str(f)]))
     assert result.startswith("⚠️")
     assert "virus_scan" in result
+
+
+# ── code_scan: bandit (فحص إضافي) ────────────────────────────────────
+
+def test_code_scan_reports_bandit_missing_when_unavailable(make_ctx, tmp_path, monkeypatch):
+    monkeypatch.setattr(ssp.shutil, "which", lambda name: None if name == "bandit" else shutil.which(name))
+    f = tmp_path / "clean.py"
+    f.write_text("def add(a, b):\n    return a + b\n")
+    result = ssp._cmd_code_scan(make_ctx("code_scan", [str(f)]))
+    assert "bandit مش متثبت" in result
+    assert "pip install bandit" in result
+
+
+@requires_bandit
+def test_code_scan_bandit_finds_real_issue(make_ctx, tmp_path):
+    f = tmp_path / "d.py"
+    f.write_text("import subprocess\nsubprocess.Popen('ls', shell=True)\n")
+    result = ssp._cmd_code_scan(make_ctx("code_scan", [str(f)]))
+    assert "bandit" in result
+    assert "B" in result  # test_id زي B602 لازم يظهر
+
+
+@requires_bandit
+def test_code_scan_bandit_clean_file_reports_ok(make_ctx, tmp_path):
+    f = tmp_path / "clean.py"
+    f.write_text("def add(a, b):\n    return a + b\n")
+    result = ssp._cmd_code_scan(make_ctx("code_scan", [str(f)]))
+    assert "bandit: مفيش ملاحظات إضافية" in result
+
+
+def test_code_scan_bandit_section_present_even_when_ast_scan_is_clean(make_ctx, tmp_path, monkeypatch):
+    """حتى لو الفحص الأساسي (AST) مبيلاقيش حاجة، قسم bandit المكمّل
+    لازم يفضل يظهر — code_scan متبقاش بترجع مباشرة قبل ما تشغّله."""
+    monkeypatch.setattr(ssp.shutil, "which", lambda name: None if name == "bandit" else shutil.which(name))
+    f = tmp_path / "clean.py"
+    f.write_text("def add(a, b):\n    return a + b\n")
+    result = ssp._cmd_code_scan(make_ctx("code_scan", [str(f)]))
+    assert result.startswith("✅")
+    assert "فحص إضافي بـ bandit" in result
 
 
 # ── code_scan --fix ───────────────────────────────────────────────────

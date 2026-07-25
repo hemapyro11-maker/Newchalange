@@ -94,6 +94,9 @@ echo     https://www.clamav.org/downloads — شغّل freshclam بعد التث
 echo   - vuln_scan بيستخدم pip-audit (اختياري: pip install pip-audit) و
 echo     npm audit (لو Node.js متثبت) لفحص ثغرات المكتبات المعروفة —
 echo     من غيرهم بيفحص الأسرار المكشوفة وصلاحيات الملفات بس.
+echo   - code_scan بيستخدم bandit (اختياري: pip install bandit) كفحص
+echo     إضافي فوق تحليل AST الأساسي بتاعنا — من غيره بيفضل يشتغل
+echo     بالفحص الأساسي بس.
 echo   - أمر speak (صوت نيزوكو) محتاج ffplay (جزء من FFmpeg، شوف فوق)
 echo     عشان يشغّل الصوت. أفضل جودة (صوت مصري أنثوي حقيقي) محتاجة
 echo     إنترنت وقت الاستخدام (edge-tts، مجاني بالكامل). من غير إنترنت،
