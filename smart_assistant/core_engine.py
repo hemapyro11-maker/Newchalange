@@ -9,6 +9,7 @@ core_engine.py — Core Engine للمساعد الذكي، بدون أي اعت�
 from __future__ import annotations
 
 import datetime
+import difflib
 import importlib.util
 import json
 import logging
@@ -20,6 +21,8 @@ import sys
 import threading
 import time
 import traceback
+import urllib.error
+import urllib.request
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -27,6 +30,20 @@ from dataclasses import dataclass
 log = logging.getLogger("assistant.core")
 
 CommandHandler = Callable[["CommandContext"], str | None]
+
+# ── فهم النية (intent understanding) — الأمر مش متطابق حرفيًا؟ ─────────
+# مرحلتين: (1) تصحيح إملائي زيرو-كوست دايمًا شغال (difflib، بدون أي
+# اعتماد خارجي)، وبعدين (2) لو مفيش تصحيح واضح، محاولة فهم نية حرة عبر
+# نموذج Ollama محلي مجاني (لو المستخدم مشغّله) — بنفس الـ endpoint اللي
+# self_improve_plugin/plugin_forge_plugin بيستخدموه بالظبط. الاقتراحين
+# مبيتنفذوش تلقائي أبدًا — لازم تأكيد صريح (y) زي أي حاجة تانية في
+# المشروع ده، اتساقاً مع مبدأ "مفيش تنفيذ من غير أمر واضح".
+OLLAMA_URL = "http://localhost:11434/api/generate"
+OLLAMA_INTENT_MODEL = "llama3.2"
+OLLAMA_INTENT_TIMEOUT = 10
+FUZZY_CUTOFF = 0.6
+_CONFIRM_YES = {"y", "yes", "نعم", "أيوه", "ايوه", "اه", "آه", "تمام"}
+_CONFIRM_NO = {"n", "no", "لا", "لأ"}
 
 
 @dataclass
@@ -113,6 +130,7 @@ class AssistantEngine:
         self._queue: queue.Queue[tuple[str, Callable | None]] = queue.Queue()
         self._stop_flag = threading.Event()
         self._worker: threading.Thread | None = None
+        self._pending_intent: tuple[str, list[str]] | None = None
         self._register_builtin_commands()
         self.load_plugins()
 
@@ -291,6 +309,20 @@ class AssistantEngine:
         text = text.strip()
         if not text:
             return
+
+        if self._pending_intent is not None:
+            pending, self._pending_intent = self._pending_intent, None
+            reply = text.lower()
+            if reply in _CONFIRM_YES:
+                pending_name, pending_args = pending
+                self._log(f"↪ بينفذ: {pending_name} {' '.join(pending_args)}".strip(), "info")
+                self._execute(pending_name, pending_args, text)
+                return
+            if reply in _CONFIRM_NO:
+                self._log("❌ اتلغى", "info")
+                return
+            # مش y ولا n — نسيب الاقتراح القديم ونعالج النص الجديد عادي
+
         try:
             parts = shlex.split(text)
         except ValueError as e:
@@ -301,9 +333,22 @@ class AssistantEngine:
         name, args = parts[0], parts[1:]
         cmd = self.registry.get(name)
         if cmd is None:
+            suggestion = self._suggest_command(name, args)
+            if suggestion:
+                sugg_name, sugg_args, message, level = suggestion
+                self._pending_intent = (sugg_name, sugg_args)
+                self._log(message, level)
+            else:
+                self._log(f"❓ unknown command: {name} (try 'help')", "warn")
+            return
+        self._execute(name, args, text)
+
+    def _execute(self, name: str, args: list[str], raw: str):
+        cmd = self.registry.get(name)
+        if cmd is None:
             self._log(f"❓ unknown command: {name} (try 'help')", "warn")
             return
-        ctx = CommandContext(raw=text, args=args, engine=self)
+        ctx = CommandContext(raw=raw, args=args, engine=self)
         start = time.time()
         try:
             result = cmd.handler(ctx)
@@ -314,3 +359,71 @@ class AssistantEngine:
         log.debug("command %s finished in %.3fs", name, time.time() - start)
         if result:
             self._log(str(result), "info")
+
+    # ── فهم النية (مش تطابق حرفي) ──────────────────────────────────────
+    def _suggest_command(self, name: str, args: list[str]) -> tuple[str, list[str], str, str] | None:
+        """بترجع (اسم الأمر المقترح، وسائطه، رسالة العرض، مستوى اللوج)
+        أو None لو مفيش اقتراح — مبتنفذش حاجة بنفسها أبدًا، بس بترشّح."""
+        known = [c.name for c in self.registry.list_commands()]
+        close = difflib.get_close_matches(name.lower(), known, n=1, cutoff=FUZZY_CUTOFF)
+        if close:
+            return (
+                close[0], args,
+                f"❓ أمر مش معروف: {name}\n🤔 قصدك \"{close[0]}\"؟ اكتب y للتنفيذ أو أي حاجة تانية للإلغاء.",
+                "warn",
+            )
+
+        raw_text = " ".join([name, *args])
+        intent = self._try_llm_intent(raw_text)
+        if intent is not None:
+            intent_name, intent_args = intent
+            shown = f"{intent_name} {' '.join(intent_args)}".strip()
+            return (
+                intent_name, intent_args,
+                f"🧠 Ollama فهم قصدك: {shown}\nنفّذها؟ اكتب y للتأكيد أو أي حاجة تانية للإلغاء.",
+                "info",
+            )
+        return None
+
+    def _try_llm_intent(self, text: str) -> tuple[str, list[str]] | None:
+        """بيحاول يفهم نص حر (عربي/إنجليزي) عبر نموذج Ollama محلي مجاني
+        (لو شغال) ويطابقه مع أقرب أمر حقيقي مسجّل فعلاً. بيرجع None
+        بهدوء تام لو Ollama مش شغال، أو لو ردّ باسم أمر مش موجود أصلاً —
+        محدش بيصدّق النموذج أعمى، لازم يتحقق من الـ registry الحقيقي."""
+        commands = self.registry.list_commands()
+        if not commands:
+            return None
+        catalog = "\n".join(f"{c.name} — {c.description}" for c in commands)
+        prompt = (
+            "You are a command router for a desktop assistant app. Given the user's "
+            "free-text request (Arabic or English) and the list of available commands "
+            "below, reply with ONLY the exact command line to run — the command name "
+            "followed by any arguments you can extract from the request. No explanation, "
+            "no markdown, nothing else. If nothing genuinely matches, reply with exactly: NONE\n\n"
+            f"Available commands:\n{catalog}\n\n"
+            f"User request: {text}\n\n"
+            "Command line:"
+        )
+        payload = json.dumps({"model": OLLAMA_INTENT_MODEL, "prompt": prompt, "stream": False}).encode("utf-8")
+        req = urllib.request.Request(
+            OLLAMA_URL, data=payload, headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=OLLAMA_INTENT_TIMEOUT) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except (urllib.error.URLError, ConnectionError, TimeoutError, OSError, json.JSONDecodeError):
+            return None
+        reply = data.get("response", "").strip()
+        if not reply or reply.upper() == "NONE":
+            return None
+        try:
+            reply_parts = shlex.split(reply)
+        except ValueError:
+            return None
+        if not reply_parts:
+            return None
+        guessed_name, guessed_args = reply_parts[0], reply_parts[1:]
+        if self.registry.get(guessed_name) is None:
+            # النموذج هلوس اسم أمر مش موجود فعليًا — نتجاهله بدل ما نصدّقه
+            return None
+        return guessed_name, guessed_args
