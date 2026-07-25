@@ -1,9 +1,8 @@
 """
-اختبارات الواجهة — بتتخطى تلقائيًا لو tkinter/customtkinter مش متاحين
-أو مفيش شاشة (زي سيرفرات CI بدون X)، بنفس أسلوب باقي الاختبارات في
-المشروع مع الأدوات الاختيارية.
+اختبارات الواجهة (طراز الطرفية) — بتتخطى تلقائيًا لو tkinter/customtkinter
+مش متاحين أو مفيش شاشة، بنفس أسلوب باقي الاختبارات مع الأدوات الاختيارية.
 
-لتشغيلها فعليًا على جهاز بدون شاشة:
+لتشغيلها على جهاز بدون شاشة:
     Xvfb :99 -screen 0 1400x900x24 &
     DISPLAY=:99 pytest tests/test_main_gui.py
 """
@@ -21,6 +20,7 @@ if not os.environ.get("DISPLAY") and os.name != "nt":
 
 import brain  # noqa: E402
 import main_gui  # noqa: E402
+import theme  # noqa: E402
 
 
 @pytest.fixture
@@ -37,57 +37,94 @@ def app(monkeypatch):
     brain.reset_brain()
 
 
-# ── اتجاه الواجهة (RTL) ──────────────────────────────────────────────
+# ── الثيم والخط ──────────────────────────────────────────────────────
 
-def test_arabic_is_rtl_by_default(app):
+def test_dark_is_the_default_mode(app):
+    assert app.mode == "dark"
+    assert app.c is theme.DARK
+
+
+def test_theme_toggle_switches_palette_and_persists(app):
+    app._toggle_theme()
+    assert app.mode == "light"
+    assert app.c is theme.LIGHT
+    assert brain.load_config()["ui_theme"] == "light"
+
+
+def test_theme_choice_survives_restart(app, monkeypatch):
+    app._toggle_theme()
+    tmp = brain._base_dir()
+    monkeypatch.setattr(brain, "_base_dir", lambda: tmp)
+    fresh = main_gui.AssistantApp()
+    try:
+        assert fresh.mode == "light"
+    finally:
+        fresh.engine.stop()
+        fresh.destroy()
+
+
+def test_a_real_monospace_font_is_picked(app):
+    """راجع: تحديد خط مش موجود بيخلي Tk يرجع للخط الافتراضي بصمت،
+    فالشكل بيتكسر من غير أي رسالة خطأ."""
+    from tkinter import font as tkfont
+    assert app.mono.lower() in {f.lower() for f in tkfont.families(app)}
+
+
+def test_palette_has_every_colour_key_in_both_modes():
+    assert set(theme.DARK) == set(theme.LIGHT)
+
+
+# ── الاتجاه ──────────────────────────────────────────────────────────
+
+def test_arabic_flows_right_to_left(app):
     assert app._rtl is True
+    assert app._side == "right"
+    assert app._anchor == "e"
+    assert app._justify == "right"
 
 
-def test_icon_goes_after_text_in_arabic(app):
-    """راجع: النسخة القديمة كانت بتحط الأيقونة بادئة دايمًا مع
-    anchor='w' — تخطيط إنجليزي مركّب على نص عربي."""
-    assert app._icon_text(app.attach_btn, "إرفاق ملف") == "إرفاق ملف  📎"
-
-
-def test_icon_goes_before_text_in_english(app):
+def test_english_flows_left_to_right(app):
     app.t.set_lang("en")
-    assert app._icon_text(app.attach_btn, "Attach") == "📎  Attach"
+    assert app._side == "left"
+    assert app._anchor == "w"
 
 
-def test_sidebar_buttons_anchor_east_in_arabic(app):
-    assert app.attach_btn.cget("anchor") == "e"
-
-
-def test_entry_justifies_right_in_arabic(app):
+def test_entry_justifies_with_the_language(app):
     assert app.entry.cget("justify") == "right"
 
 
-# ── الفقاعات ─────────────────────────────────────────────────────────
+# ── أسطر المحادثة ────────────────────────────────────────────────────
 
-def test_user_message_creates_a_row(app):
+def test_user_line_is_added(app):
     before = len(app._rows)
-    app._add_user("رسالة تجريبية")
+    app._add_user("سطر تجريبي")
+    assert len(app._rows) > before
+
+
+def test_assistant_line_is_added(app):
+    before = len(app._rows)
+    app._add_assistant("رد")
+    assert len(app._rows) > before
+
+
+def test_tool_result_line_is_added(app):
+    before = len(app._rows)
+    app._add_result("0 تهديد", "ok")
     assert len(app._rows) == before + 1
 
 
-def test_assistant_message_creates_a_row(app):
-    before = len(app._rows)
-    app._add_assistant("رد تجريبي")
-    assert len(app._rows) == before + 1
-
-
-def test_rows_are_capped_to_avoid_unbounded_growth(app):
-    for i in range(main_gui.MAX_ROWS + 25):
-        app._add_user(f"م {i}")
+def test_rows_are_capped(app):
+    for i in range(main_gui.MAX_ROWS + 40):
+        app._add_result(f"سطر {i}")
     assert len(app._rows) <= main_gui.MAX_ROWS
 
 
-def test_very_long_reply_is_truncated(app):
+def test_very_long_text_is_truncated_without_crashing(app):
     app._add_assistant("ط" * (main_gui.MAX_CHARS + 5000))
-    app.update()  # لازم مايرميش استثناء ولا يعلّق الواجهة
+    app.update()
 
 
-def test_new_chat_clears_rows_and_history(app):
+def test_clear_resets_stream_and_history(app):
     app._add_user("حاجة")
     app.engine.chat_history.append({"role": "user", "content": "x"})
     app._new_chat()
@@ -96,59 +133,101 @@ def test_new_chat_clears_rows_and_history(app):
 
 # ── تصفية رسايل تحميل الإضافات ──────────────────────────────────────
 
-def test_plugin_load_messages_do_not_flood_the_chat(app):
-    """راجع: كل تشغيل كان بيطبع ~34 رسالة "plugin loaded" كفقاعات في
-    المحادثة، فأول شاشة يشوفها المستخدم بتبقى مليانة ضوضاء بدل الترحيب."""
+def test_plugin_load_lines_go_to_the_status_line_not_the_stream(app):
     before_rows = len(app._rows)
     before_count = app._plugin_count
-    for i in range(10):
+    for i in range(8):
         app._render_log(f"🧩 plugin loaded: p{i}", "ok")
     assert len(app._rows) == before_rows
-    assert app._plugin_count == before_count + 10
+    assert app._plugin_count == before_count + 8
 
 
-def test_plugin_count_shows_in_subtitle(app):
+def test_plugin_count_appears_in_status_line(app):
     app._render_log("🧩 plugin loaded: x", "ok")
-    assert "إضافة" in app.subtitle_label.cget("text")
+    assert "إضافة" in app.status_label.cget("text")
 
 
-def test_normal_ok_message_is_still_shown(app):
+def test_a_normal_ok_message_is_still_shown(app):
     before = len(app._rows)
-    app._render_log("✅ الملف اتفحص وطلع نضيف", "ok")
-    assert len(app._rows) == before + 1
+    app._render_log("✅ خلص وطلع نضيف", "ok")
+    assert len(app._rows) > before
 
 
-# ── شارة المزوّد ─────────────────────────────────────────────────────
-
-def test_provider_badge_is_split_from_body(app):
+def test_executed_command_renders_as_a_tool_line(app):
+    """السطر اللي بيبدأ بـ ↪ معناه أمر اتنفذ فعلاً — بيتعرض بلون
+    مختلف عن كلام المخ عشان تفرق بينهم بالبصر."""
     before = len(app._rows)
-    app._render_log("ده رد المخ\n— ☁️ Google Gemini", "info")
-    assert len(app._rows) == before + 1
+    app._render_log("↪ security_report C:/x.exe", "info")
+    assert len(app._rows) > before
 
 
-def test_message_without_badge_renders_fine(app):
-    app._render_log("رد من غير شارة", "info")
-    app.update()
+# ── سطر الحالة ───────────────────────────────────────────────────────
+
+def test_status_line_warns_when_no_brain(app):
+    app._refresh_status()
+    assert "مفيش مخ" in app.status_label.cget("text")
 
 
-# ── حالة المخ في السايدبار ───────────────────────────────────────────
-
-def test_sidebar_warns_when_no_brain_configured(app):
-    app._refresh_brain_label()
-    assert "مفيش مخ متظبط" in app.brain_label.cget("text")
-
-
-def test_sidebar_shows_provider_and_remaining_quota(app):
+def test_status_line_shows_provider_and_quota(app):
     brain.set_key("groq", "k")
-    app._refresh_brain_label()
-    text = app.brain_label.cget("text")
-    assert "Groq" in text
+    app._refresh_status()
+    text = app.status_label.cget("text")
+    assert "groq" in text.lower()
     assert "متبقي" in text
 
 
-def test_greeting_tells_user_to_set_up_brain_when_missing(app):
-    app._new_chat()
-    assert app._rows  # فيه رسالة ترحيب
+def test_status_line_shows_active_modes(app):
+    cfg = brain.load_config()
+    cfg["deep_mode"] = True
+    cfg["local_only"] = True
+    brain.save_config(cfg)
+    app._refresh_status()
+    text = app.status_label.cget("text")
+    assert "عميق" in text and "محلي" in text
+
+
+# ── أوامر الشرطة المائلة ─────────────────────────────────────────────
+
+def test_slash_clear_empties_the_stream(app):
+    app._add_user("حاجة")
+    app.entry.insert(0, "/clear")
+    app._send()
+    assert app.engine.chat_history == []
+
+
+def test_slash_theme_toggles_mode(app):
+    app.entry.insert(0, "/theme")
+    app._send()
+    assert app.mode == "light"
+
+
+def test_slash_voice_toggles_voice(app):
+    app.entry.insert(0, "/voice")
+    app._send()
+    assert app.voice_enabled is True
+
+
+def test_unknown_slash_lists_available_ones(app):
+    before = len(app._rows)
+    app.entry.insert(0, "/nonsense")
+    app._send()
+    assert len(app._rows) > before
+
+
+def test_slash_command_is_not_sent_to_the_engine(app, monkeypatch):
+    sent = []
+    monkeypatch.setattr(app.engine, "submit", sent.append)
+    app.entry.insert(0, "/theme")
+    app._send()
+    assert sent == []
+
+
+def test_plain_text_is_sent_to_the_engine(app, monkeypatch):
+    sent = []
+    monkeypatch.setattr(app.engine, "submit", sent.append)
+    app.entry.insert(0, "إزيك")
+    app._send()
+    assert sent == ["إزيك"]
 
 
 # ── الصوت ────────────────────────────────────────────────────────────
@@ -157,19 +236,11 @@ def test_voice_starts_off(app):
     assert app.voice_enabled is False
 
 
-def test_voice_toggle_flips_state_and_icon(app):
-    app._toggle_voice()
-    assert app.voice_enabled is True
-    assert app.voice_btn._icon == "🔊"
-    app._toggle_voice()
-    assert app.voice_btn._icon == "🔇"
-
-
-def test_voice_reply_is_not_spoken_for_speak_itself(app, monkeypatch):
-    """من غير الاستثناء ده، نتيجة أمر speak كانت هتتبعت لـ speak تاني
+def test_speak_is_skipped_for_speak_itself(app, monkeypatch):
+    """من غير الاستثناء ده، نتيجة speak كانت هتترجع لـ speak تاني
     وتدخل في حلقة نطق بلا نهاية."""
     spoken = []
-    monkeypatch.setattr(app, "_speak", lambda text: spoken.append(text))
+    monkeypatch.setattr(app, "_speak", spoken.append)
     app.voice_enabled = True
     app._last_command_name = "speak"
     app._on_log("اتقالت", "info")
@@ -177,13 +248,13 @@ def test_voice_reply_is_not_spoken_for_speak_itself(app, monkeypatch):
     assert spoken == []
 
 
-# ── ربط اختيار الملف ─────────────────────────────────────────────────
+# ── اختيار الملف ─────────────────────────────────────────────────────
 
-def test_need_file_hook_is_wired_to_the_engine(app):
+def test_need_file_hook_is_wired(app):
     assert callable(app.engine.on_need_file)
 
 
-def test_pick_file_passes_empty_string_when_cancelled(app, monkeypatch):
+def test_cancelled_file_dialog_passes_empty_string(app, monkeypatch):
     monkeypatch.setattr(main_gui.filedialog, "askopenfilename", lambda **kw: "")
     got = []
     spec = type("S", (), {"kind": "file", "prompt": "اختار"})()
@@ -191,52 +262,159 @@ def test_pick_file_passes_empty_string_when_cancelled(app, monkeypatch):
     assert got == [""]
 
 
-def test_pick_file_uses_directory_dialog_for_dir_specs(app, monkeypatch):
-    called = {"dir": False}
+def test_directory_spec_uses_the_directory_dialog(app, monkeypatch):
+    called = {}
     monkeypatch.setattr(
         main_gui.filedialog, "askdirectory",
-        lambda **kw: called.__setitem__("dir", True) or "/tmp",
+        lambda **kw: called.setdefault("dir", True) or "/tmp",
     )
     spec = type("S", (), {"kind": "dir", "prompt": "مجلد"})()
     app._pick_file(spec, lambda v: None)
-    assert called["dir"] is True
+    assert called.get("dir") is True
 
 
-# ── نافذة الإعدادات ──────────────────────────────────────────────────
+# ── قايمة الإعدادات ──────────────────────────────────────────────────
 
-def test_settings_window_opens_with_a_card_per_provider(app):
-    win = main_gui.SettingsWindow(app)
+def test_settings_opens_and_lists_every_provider(app):
+    app._open_settings()
     app.update()
-    assert len(win._entries) == sum(1 for p in brain.PROVIDERS.values() if p.needs_key)
-    win.destroy()
+    panel = app._settings
+    labels = [i["label"] for i in panel.data if i["kind"] != "head"]
+    for prov in brain.PROVIDERS.values():
+        assert prov.label in labels
+    panel.close()
 
 
-def test_settings_saves_a_typed_key(app):
-    win = main_gui.SettingsWindow(app)
+def test_settings_only_opens_once(app):
+    app._open_settings()
+    first = app._settings
+    app._open_settings()
+    assert app._settings is first
+    first.close()
+
+
+def test_cursor_moves_and_wraps(app):
+    app._open_settings()
     app.update()
-    win._entries["groq"].delete(0, "end")
-    win._entries["groq"].insert(0, "gsk_typed")
-    win._save()
+    panel = app._settings
+    total = len(panel._selectable())
+    panel.cursor = total - 1
+    panel._move(1)
+    assert panel.cursor == 0
+    panel._move(-1)
+    assert panel.cursor == total - 1
+    panel.close()
+
+
+def test_headings_are_not_selectable(app):
+    app._open_settings()
+    app.update()
+    panel = app._settings
+    for idx in panel._selectable():
+        assert panel.data[idx]["kind"] != "head"
+    panel.close()
+
+
+def test_enter_toggles_deep_mode(app):
+    app._open_settings()
+    app.update()
+    panel = app._settings
+    target = next(i for i, idx in enumerate(panel._selectable())
+                  if panel.data[idx].get("cfg") == "deep_mode")
+    panel.cursor = target
+    panel._activate()
+    assert brain.load_config()["deep_mode"] is True
+    panel.close()
+
+
+def test_enter_toggles_local_only(app):
+    app._open_settings()
+    app.update()
+    panel = app._settings
+    target = next(i for i, idx in enumerate(panel._selectable())
+                  if panel.data[idx].get("cfg") == "local_only")
+    panel.cursor = target
+    panel._activate()
+    assert brain.load_config()["local_only"] is True
+    panel.close()
+
+
+def test_key_editor_saves_a_typed_key(app):
+    app._open_settings()
+    app.update()
+    panel = app._settings
+    target = next(i for i, idx in enumerate(panel._selectable())
+                  if panel.data[idx].get("prov")
+                  and panel.data[idx]["prov"].name == "groq")
+    panel.cursor = target
+    panel._build()
+    app.update()
+    panel.editing.insert(0, "gsk_typed")
+    panel._save_key()
     assert brain.get_key("groq") == "gsk_typed"
+    panel.close()
 
 
-def test_settings_does_not_overwrite_key_with_the_masked_placeholder(app):
-    """الحقل بيتملي بـ •••• لما يكون فيه مفتاح محفوظ — لو حفظنا القيمة
-    دي كما هي كنا هنستبدل المفتاح الحقيقي بنجوم."""
-    brain.set_key("groq", "real_key")
-    win = main_gui.SettingsWindow(app)
+def test_empty_key_field_does_not_wipe_an_existing_key(app):
+    brain.set_key("groq", "real")
+    app._open_settings()
     app.update()
-    win._save()
-    assert brain.get_key("groq") == "real_key"
-    win.destroy()
-
-
-def test_settings_persists_mode_switches(app):
-    win = main_gui.SettingsWindow(app)
+    panel = app._settings
+    target = next(i for i, idx in enumerate(panel._selectable())
+                  if panel.data[idx].get("prov")
+                  and panel.data[idx]["prov"].name == "groq")
+    panel.cursor = target
+    panel._build()
     app.update()
-    win.deep_var.set(True)
-    win.local_var.set(True)
-    win._save()
-    cfg = brain.load_config()
-    assert cfg["deep_mode"] is True
-    assert cfg["local_only"] is True
+    panel._save_key()
+    assert brain.get_key("groq") == "real"
+    panel.close()
+
+
+def test_provider_with_a_key_reads_as_configured(app):
+    brain.set_key("gemini", "k")
+    app._open_settings()
+    app.update()
+    panel = app._settings
+    row = next(i for i in panel.data if i.get("prov")
+               and i["prov"].name == "gemini")
+    assert row["value"] == "متظبط"
+    panel.close()
+
+
+def test_escape_closes_the_panel(app):
+    """راجع: خانة المفتاح بتتبني لمجرد إن المؤشر واقف على مزوّد، فلو
+    Esc اكتفى بوجودها كان هيحتاج ضغطتين على أي سطر مزوّد."""
+    app._open_settings()
+    app.update()
+    app._settings._on_escape()
+    assert app._settings is None
+
+
+def test_escape_cancels_typing_before_closing(app):
+    app._open_settings()
+    app.update()
+    panel = app._settings
+    target = next(i for i, idx in enumerate(panel._selectable())
+                  if panel.data[idx].get("prov")
+                  and panel.data[idx]["prov"].needs_key)
+    panel.cursor = target
+    panel._build()
+    app.update()
+
+    # تحت Xvfb من غير مدير نوافذ، focus_get() بترجع None دايمًا — فبنحاكي
+    # التركيز مباشرة عشان نختبر المنطق نفسه مش سلوك الـ X server.
+    editing = panel.editing
+    panel.focus_get = lambda: editing
+
+    panel._on_escape()          # الضغطة الأولى بتخرج من الكتابة
+    assert app._settings is panel
+    panel.focus_get = lambda: None
+    panel._on_escape()          # التانية بتقفل
+    assert app._settings is None
+
+
+def test_closing_clears_the_apps_reference(app):
+    app._open_settings()
+    app._settings.close()
+    assert app._settings is None

@@ -1,19 +1,22 @@
 """
-main_gui.py — واجهة نيزوكو (Nezuko)
+main_gui.py — واجهة نيزوكو على طراز الطرفية (terminal-style)
 
-واجهة محادثة نظيفة بـ CustomTkinter، مبنية على مبدأين اتعلمناهم من
-الواجهات الحديثة:
+الشكل مستوحى من واجهات الوكلاء في الطرفية: عمود واحد بيمشي من فوق
+لتحت، خط مونوسبيس في كل حتة، خلفية داكنة، وحدود رفيعة. مفيش سايدبار
+ولا كروت مدوّرة — المحادثة نفسها هي الواجهة.
 
-1. **رد المساعدة مالوش فقاعة** — نص عادي على الخلفية مباشرة، وفقاعة
-   لرسايل المستخدم بس. ده مش بس أنضف بصريًا، ده كمان بيحل باج حقيقي
-   كان في النسخة القديمة: الفقاعات كانت بياخدوا مقاس صريح محسوب من
-   `winfo_reqheight()` وبيطلعوا فاضيين وكبار أوي حوالين سطر واحد.
-   من غير فقاعة أصلاً، مفيش مقاس نحسبه غلط.
+اصطلاحات العرض:
+    ›  سطر كتبته إنت
+    ⏺  رد نيزوكو
+    ⎿  نتيجة أداة اتنفذت (مزاحة تحت الأمر بتاعها)
+    ⏵  سطر الحالة تحت (المخ النشط + الحصة المتبقية)
 
-2. **RTL حقيقي** — العربي مش بس نص متظبط يمين. الأيقونة بتيجي على
-   يمين النص (مش شماله)، والمحاذاة `e` مش `w`، ورسايل المستخدم على
-   اليمين. النسخة القديمة كانت بتحط الأيقونة بادئة مع `anchor="w"`،
-   وده تخطيط إنجليزي مركّب على نص عربي.
+الإعدادات قايمة بتتنقل فيها بالكيبورد (↑ ↓ Enter Esc) زي قوايم
+الطرفية، مش نافذة كروت.
+
+RTL: العربي بيقلب اتجاه الأسطر — العلامة (› ⏺ ⎿) بتيجي على اليمين
+والنص بيتظبط يمين. التبديل للإنجليزي بيعيد بناء الواجهة بالاتجاه
+المعكوس بدل ما يحاول يعكس كل ودجت لوحده.
 """
 import os
 import shlex
@@ -28,46 +31,26 @@ except ImportError:
     import customtkinter as ctk
 
 try:
-    from CTkToolTip import CTkToolTip
-except ImportError:
-    CTkToolTip = None
-
-try:
     import brain
+    import theme
     from core_engine import AssistantEngine
     from i18n import Translator
 except ImportError:
     sys.path.insert(0, os.path.dirname(sys.executable))
     import brain
+    import theme
     from core_engine import AssistantEngine
     from i18n import Translator
 
-# ── الثيم ───────────────────────────────────────────────────────────────
-ctk.set_appearance_mode("light")
-ctk.set_default_color_theme("blue")
+ctk.set_appearance_mode("dark")
 
-BG             = "#faf9f5"   # خلفية دافئة هادية
-SIDEBAR        = "#f0eee6"
-SIDEBAR_HOVER  = "#e6e2d6"
-CARD           = "#ffffff"
-BORDER         = "#e3ded0"
-ACCENT         = "#c1633f"   # هوية نيزوكو
-ACCENT_HOVER   = "#a8532f"
-ACCENT_SOFT    = "#f6e6dc"
-TEXT           = "#1f1e1d"
-TEXT_DIM       = "#7d7566"
-TEXT_FAINT     = "#a49d8c"
-TEXT_ON_ACCENT = "#fdfbf7"
-USER_BUBBLE    = "#eae6da"
-GREEN          = "#4b8b6b"
-RED            = "#c1483d"
-ORANGE         = "#c98a3e"
+MAX_ROWS = 300
+MAX_CHARS = 6000
 
-LEVEL_COLOR = {"info": TEXT, "ok": GREEN, "warn": ORANGE, "error": RED}
-LEVEL_ICON = {"info": "", "ok": "✓", "warn": "!", "error": "✕"}
-
-MAX_ROWS = 200
-MAX_CHARS = 4000
+GLYPH_USER = "›"
+GLYPH_REPLY = "⏺"
+GLYPH_RESULT = "⎿"
+GLYPH_STATUS = "⏵"
 
 
 class AssistantApp(ctk.CTk):
@@ -75,376 +58,280 @@ class AssistantApp(ctk.CTk):
         super().__init__()
 
         self.t = Translator("ar")
+        self.mode = brain.load_config().get("ui_theme", "dark")
+        self.c = theme.palette(self.mode)
+        self.mono = theme.pick_mono(self)
+
         self.engine = AssistantEngine(on_log=self._on_log, on_status=self._on_status)
         self.engine.on_need_file = self._on_need_file
         self.voice_enabled = False
         self._last_command_name = ""
-        self._rows: list[ctk.CTkFrame] = []
-        self._tooltips: dict = {}
-        self._thinking_row = None
+        self._rows: list = []
         self._plugin_count = 0
+        self._thinking = None
+        self._settings = None
 
-        self.title("نيزوكو")
-        self.geometry("1120x760")
-        self.minsize(900, 600)
-        self.configure(fg_color=BG)
+        self.title("nezuko")
+        self.geometry("1000x700")
+        self.minsize(720, 480)
 
-        self._build_ui()
+        self._build()
         self.engine.start()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
-        self.after(400, self._greet)
+        self.bind("<Escape>", lambda e: self._close_settings())
+        self.after(350, self._banner)
 
+    # ── مساعدات ────────────────────────────────────────────────────────
     @property
     def _rtl(self) -> bool:
         return self.t.lang == "ar"
 
-    # ── بناء الواجهة ────────────────────────────────────────────────────
-    def _build_ui(self):
-        root = ctk.CTkFrame(self, fg_color=BG, corner_radius=0)
-        root.pack(fill="both", expand=True)
-        # السايدبار على اليمين في العربي — مش على الشمال
-        self._build_sidebar(root)
-        self._build_chat(root)
-        self._apply_lang()
+    @property
+    def _side(self) -> str:
+        return "right" if self._rtl else "left"
 
-    def _build_sidebar(self, root):
-        self.sidebar = ctk.CTkFrame(root, fg_color=SIDEBAR, corner_radius=0, width=252)
-        self.sidebar.pack(side="right" if self._rtl else "left", fill="y")
-        self.sidebar.pack_propagate(False)
+    @property
+    def _anchor(self) -> str:
+        return "e" if self._rtl else "w"
 
-        brand = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        brand.pack(fill="x", padx=18, pady=(22, 18))
-        side = "right" if self._rtl else "left"
+    @property
+    def _justify(self) -> str:
+        return "right" if self._rtl else "left"
 
-        ctk.CTkLabel(
-            brand, text="🌸", width=36, height=36, corner_radius=10,
-            fg_color=ACCENT, text_color=TEXT_ON_ACCENT,
-            font=ctk.CTkFont(size=16),
-        ).pack(side=side)
+    def _font(self, size: int = 13, bold: bool = False) -> ctk.CTkFont:
+        return ctk.CTkFont(family=self.mono, size=size,
+                           weight="bold" if bold else "normal")
 
-        titles = ctk.CTkFrame(brand, fg_color="transparent")
-        titles.pack(side=side, padx=(0, 10) if self._rtl else (10, 0), fill="x", expand=True)
-        anchor = "e" if self._rtl else "w"
-        self.title_label = ctk.CTkLabel(
-            titles, text="نيزوكو", anchor=anchor, text_color=TEXT,
-            font=ctk.CTkFont(size=16, weight="bold"),
+    # ── البناء ─────────────────────────────────────────────────────────
+    def _build(self):
+        c = self.c
+        self.configure(fg_color=c["bg"])
+
+        self.root = ctk.CTkFrame(self, fg_color=c["bg"], corner_radius=0)
+        self.root.pack(fill="both", expand=True)
+
+        self.stream = ctk.CTkScrollableFrame(
+            self.root, fg_color=c["bg"], corner_radius=0,
+            scrollbar_button_color=c["border"],
+            scrollbar_button_hover_color=c["dim"],
         )
-        self.title_label.pack(fill="x")
-        self.subtitle_label = ctk.CTkLabel(
-            titles, anchor=anchor, text_color=TEXT_DIM, font=ctk.CTkFont(size=11),
+        self.stream.pack(fill="both", expand=True, padx=26, pady=(18, 6))
+
+        bottom = ctk.CTkFrame(self.root, fg_color=c["bg"], corner_radius=0)
+        bottom.pack(fill="x", padx=26, pady=(0, 14))
+
+        # صندوق الإدخال — حد رفيع وزوايا شبه مربعة، زي إطار الطرفية
+        box = ctk.CTkFrame(
+            bottom, fg_color=c["panel"], corner_radius=6,
+            border_width=1, border_color=c["border"],
         )
-        self.subtitle_label.pack(fill="x")
+        box.pack(fill="x")
 
-        self.new_chat_btn = ctk.CTkButton(
-            self.sidebar, height=38, corner_radius=10,
-            fg_color=CARD, hover_color=SIDEBAR_HOVER, text_color=TEXT,
-            border_width=1, border_color=BORDER,
-            font=ctk.CTkFont(size=13), command=self._new_chat,
+        self.prompt_mark = ctk.CTkLabel(
+            box, text=GLYPH_USER, width=16, text_color=c["accent"], font=self._font(14, True),
         )
-        self.new_chat_btn.pack(fill="x", padx=14, pady=(0, 16))
-
-        self.tools_label = self._section_label()
-        self.attach_btn = self._nav_button("📎", self._attach_file)
-        self.scan_btn = self._nav_button("🛡️", self._scan_file)
-        self.mic_btn = self._nav_button("🎤", self._listen)
-
-        ctk.CTkFrame(self.sidebar, fg_color=BORDER, height=1).pack(fill="x", padx=18, pady=14)
-
-        self.settings_label = self._section_label()
-        self.brain_btn = self._nav_button("🧠", self._open_settings)
-        self.voice_btn = self._nav_button("🔇", self._toggle_voice)
-        self.lang_btn = self._nav_button("🌐", self._toggle_lang)
-
-        ctk.CTkFrame(self.sidebar, fg_color="transparent").pack(fill="both", expand=True)
-
-        status_row = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        status_row.pack(fill="x", padx=18, pady=(0, 8))
-        self.status_dot = ctk.CTkLabel(
-            status_row, text="●", font=ctk.CTkFont(size=12), text_color=TEXT_FAINT, width=12,
-        )
-        self.status_dot.pack(side=side)
-        self.status_label = ctk.CTkLabel(
-            status_row, text_color=TEXT_DIM, font=ctk.CTkFont(size=11),
-        )
-        self.status_label.pack(side=side, padx=(0, 6) if self._rtl else (6, 0))
-
-        self.brain_label = ctk.CTkLabel(
-            self.sidebar, text_color=TEXT_FAINT, font=ctk.CTkFont(size=10),
-            anchor=anchor, wraplength=210, justify="right" if self._rtl else "left",
-        )
-        self.brain_label.pack(fill="x", padx=18, pady=(0, 16))
-
-    def _section_label(self) -> ctk.CTkLabel:
-        lbl = ctk.CTkLabel(
-            self.sidebar, anchor="e" if self._rtl else "w",
-            text_color=TEXT_FAINT, font=ctk.CTkFont(size=10, weight="bold"),
-        )
-        lbl.pack(fill="x", padx=20, pady=(0, 4))
-        return lbl
-
-    def _nav_button(self, icon: str, command) -> ctk.CTkButton:
-        """زرار سايدبار. الأيقونة بتتحط في _apply_lang على الجنب الصح
-        حسب اللغة — يمين النص في العربي، شماله في الإنجليزي."""
-        btn = ctk.CTkButton(
-            self.sidebar, height=34, corner_radius=8,
-            fg_color="transparent", hover_color=SIDEBAR_HOVER, text_color=TEXT,
-            anchor="e" if self._rtl else "w", font=ctk.CTkFont(size=13),
-            command=command,
-        )
-        btn._icon = icon
-        btn.pack(fill="x", padx=12, pady=1)
-        return btn
-
-    def _build_chat(self, root):
-        main = ctk.CTkFrame(root, fg_color=BG, corner_radius=0)
-        main.pack(side="right" if self._rtl else "left", fill="both", expand=True)
-
-        self.chat = ctk.CTkScrollableFrame(main, fg_color=BG, corner_radius=0)
-        self.chat.pack(fill="both", expand=True, padx=40, pady=(24, 0))
-
-        wrap = ctk.CTkFrame(main, fg_color="transparent")
-        wrap.pack(fill="x", padx=40, pady=(8, 24))
-
-        self.input_bar = ctk.CTkFrame(
-            wrap, fg_color=CARD, corner_radius=22, border_width=1, border_color=BORDER,
-        )
-        self.input_bar.pack(fill="x")
-
-        self.send_btn = ctk.CTkButton(
-            self.input_bar, width=36, height=36, corner_radius=18,
-            fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color=TEXT_ON_ACCENT,
-            font=ctk.CTkFont(size=14, weight="bold"),
-            text="↑", command=self._send,
-        )
-        self.send_btn.pack(side="left" if self._rtl else "right", padx=(8, 8), pady=6)
-
-        self.mic_inline = ctk.CTkButton(
-            self.input_bar, width=32, height=32, corner_radius=16,
-            fg_color="transparent", hover_color=ACCENT_SOFT, text_color=TEXT_DIM,
-            font=ctk.CTkFont(size=14), text="🎤", command=self._listen,
-        )
-        self.mic_inline.pack(side="left" if self._rtl else "right", pady=6)
+        self.prompt_mark.pack(side=self._side, padx=(12, 2), pady=8)
 
         self.entry = ctk.CTkEntry(
-            self.input_bar, fg_color="transparent", border_width=0, height=44,
-            font=ctk.CTkFont(size=14), text_color=TEXT,
+            box, fg_color="transparent", border_width=0, height=34,
+            font=self._font(13), text_color=c["text"],
+            placeholder_text_color=c["faint"], justify=self._justify,
         )
-        self.entry.pack(side="right" if self._rtl else "left", fill="x", expand=True,
-                        padx=(14, 6), pady=4)
+        self.entry.pack(side=self._side, fill="x", expand=True, padx=(2, 10), pady=4)
         self.entry.bind("<Return>", lambda e: self._send())
         self.entry.focus_set()
 
-        self.hint = ctk.CTkLabel(
-            wrap, text_color=TEXT_FAINT, font=ctk.CTkFont(size=10),
-            anchor="e" if self._rtl else "w",
+        # شريط أدوات نصي مختصر — أفعال بحرف واحد، مفيش أزرار ضخمة
+        tools = ctk.CTkFrame(bottom, fg_color="transparent")
+        tools.pack(fill="x", pady=(6, 0))
+
+        self.status_label = ctk.CTkLabel(
+            tools, text="", text_color=c["faint"], font=self._font(11),
+            anchor=self._anchor,
         )
-        self.hint.pack(fill="x", padx=8, pady=(6, 0))
+        self.status_label.pack(side=self._side, fill="x", expand=True)
 
-    # ── الرسايل ─────────────────────────────────────────────────────────
-    def _add_user(self, text: str):
-        row = ctk.CTkFrame(self.chat, fg_color="transparent")
-        row.pack(fill="x", pady=(10, 2))
-        bubble = ctk.CTkFrame(row, fg_color=USER_BUBBLE, corner_radius=16)
-        # رسالة المستخدم على اليمين في العربي
-        bubble.pack(side="right" if self._rtl else "left", padx=2)
-        ctk.CTkLabel(
-            bubble, text=text[:MAX_CHARS], text_color=TEXT,
-            font=ctk.CTkFont(size=13), wraplength=520,
-            justify="right" if self._rtl else "left",
-            anchor="e" if self._rtl else "w",
-        ).pack(padx=16, pady=10)
-        self._track(row)
+        opposite = "left" if self._rtl else "right"
+        self.tool_btns = []
+        for glyph, cb, key in (
+            ("⚙", self._open_settings, "settings"),
+            ("🎤", self._listen, "mic"),
+            ("🛡", self._scan_file, "scan"),
+            ("📎", self._attach_file, "attach"),
+        ):
+            b = ctk.CTkButton(
+                tools, text=glyph, width=26, height=22, corner_radius=4,
+                fg_color="transparent", hover_color=c["panel_hi"],
+                text_color=c["dim"], font=self._font(12), command=cb,
+            )
+            b.pack(side=opposite, padx=2)
+            b._key = key
+            self.tool_btns.append(b)
 
-    def _add_assistant(self, text: str, level: str = "info", badge: str = ""):
-        """رد المساعدة: نص على الخلفية من غير فقاعة.
+        self._refresh_status()
 
-        ده اللي بيحل باج الفقاعات الفاضية الكبيرة — مفيش إطار بمقاس
-        محسوب بالإيد، فمفيش مقاس يطلع غلط.
-        """
-        row = ctk.CTkFrame(self.chat, fg_color="transparent")
-        row.pack(fill="x", pady=(10, 2))
-        inner = ctk.CTkFrame(row, fg_color="transparent")
-        inner.pack(side="right" if self._rtl else "left", fill="x", expand=True)
+    # ── أسطر المحادثة ──────────────────────────────────────────────────
+    def _line(self, glyph: str, text: str, color: str, *,
+              indent: int = 0, size: int = 13, bold: bool = False):
+        """سطر واحد في الشريط: علامة + نص، بالاتجاه الصح."""
+        row = ctk.CTkFrame(self.stream, fg_color="transparent")
+        row.pack(fill="x", pady=1)
 
-        icon = LEVEL_ICON.get(level, "")
-        body = f"{icon} {text}".strip() if icon else text
-        if len(body) > MAX_CHARS:
-            body = body[:MAX_CHARS] + "\n… (النص اتقطع — شوف السجل الكامل)"
-
-        ctk.CTkLabel(
-            inner, text=body, text_color=LEVEL_COLOR.get(level, TEXT),
-            font=ctk.CTkFont(size=13), wraplength=640,
-            justify="right" if self._rtl else "left",
-            anchor="e" if self._rtl else "w",
-        ).pack(fill="x", padx=2)
-
-        if badge:
+        pad = (indent * 16)
+        if glyph:
             ctk.CTkLabel(
-                inner, text=badge, text_color=TEXT_FAINT,
-                font=ctk.CTkFont(size=10),
-                anchor="e" if self._rtl else "w",
-            ).pack(fill="x", padx=2, pady=(2, 0))
-        self._track(row)
+                row, text=glyph, width=18, text_color=color,
+                font=self._font(size, True), anchor="n",
+            ).pack(side=self._side, padx=(pad, 4) if self._rtl else (pad, 4), anchor="n")
 
-    def _track(self, row):
+        body = text if len(text) <= MAX_CHARS else text[:MAX_CHARS] + "\n…"
+        ctk.CTkLabel(
+            row, text=body, text_color=color, font=self._font(size, bold),
+            justify=self._justify, anchor=self._anchor, wraplength=760 - pad,
+        ).pack(side=self._side, fill="x", expand=True,
+               padx=(0, pad) if not self._rtl else (pad, 0))
+
         self._rows.append(row)
         while len(self._rows) > MAX_ROWS:
             self._rows.pop(0).destroy()
-        self.after(30, self._scroll_bottom)
+        self.after(20, self._scroll_bottom)
+        return row
 
-    def _show_thinking(self):
-        if self._thinking_row is not None:
-            return
-        row = ctk.CTkFrame(self.chat, fg_color="transparent")
-        row.pack(fill="x", pady=(10, 2))
-        ctk.CTkLabel(
-            row, text="نيزوكو بتفكر…", text_color=TEXT_FAINT,
-            font=ctk.CTkFont(size=12), anchor="e" if self._rtl else "w",
-        ).pack(side="right" if self._rtl else "left", padx=2)
-        self._thinking_row = row
-        self.after(30, self._scroll_bottom)
+    def _blank(self, height: int = 6):
+        f = ctk.CTkFrame(self.stream, fg_color="transparent", height=height)
+        f.pack(fill="x")
+        self._rows.append(f)
 
-    def _hide_thinking(self):
-        if self._thinking_row is not None:
-            self._thinking_row.destroy()
-            self._thinking_row = None
+    def _add_user(self, text: str):
+        self._blank()
+        self._line(GLYPH_USER, text, self.c["accent"])
+
+    def _add_assistant(self, text: str, level: str = "info", badge: str = ""):
+        c = self.c
+        color = {
+            "info": c["text"], "ok": c["green"],
+            "warn": c["yellow"], "error": c["red"],
+        }.get(level, c["text"])
+        self._blank()
+        self._line(GLYPH_REPLY, text, color)
+        if badge:
+            self._line("", badge, c["faint"], indent=1, size=10)
+
+    def _add_result(self, text: str, level: str = "info"):
+        """نتيجة أداة — مزاحة تحت السطر اللي فوقها بعلامة ⎿."""
+        c = self.c
+        color = {"ok": c["green"], "warn": c["yellow"], "error": c["red"]}.get(
+            level, c["dim"]
+        )
+        self._line(GLYPH_RESULT, text, color, indent=1, size=12)
+
+    def _banner(self):
+        c = self.c
+        self._line("✻", "nezuko", c["accent"], size=15, bold=True)
+        self._line("", self.t.t("app_subtitle"), c["faint"], indent=1, size=11)
+        self._blank(10)
+
+        ready = [r for r in self._brain_rows() if r["has_key"] and r["enabled"]]
+        if ready:
+            self._line("", "اكتب أي حاجة بالعامية — مفيش أوامر تتحفظ.",
+                       c["dim"], indent=1, size=12)
+        else:
+            self._line("", "الأوامر المباشرة شغالة (help / env_check).",
+                       c["dim"], indent=1, size=12)
+            self._line("", "عشان أفهم كلامك العادي، دوس ⚙ وظبّط مخ مجاني.",
+                       c["yellow"], indent=1, size=12)
+        self._blank(10)
 
     def _scroll_bottom(self):
-        canvas = self.chat._parent_canvas
+        canvas = self.stream._parent_canvas
         canvas.configure(scrollregion=canvas.bbox("all"))
         canvas.yview_moveto(1.0)
 
-    # ── الترجمة والحالة ─────────────────────────────────────────────────
-    def _icon_text(self, btn, label: str) -> str:
-        """الأيقونة بعد النص في العربي، وقبله في الإنجليزي."""
-        return f"{label}  {btn._icon}" if self._rtl else f"{btn._icon}  {label}"
+    def _show_thinking(self):
+        if self._thinking is None:
+            self._thinking = self._line("", "…", self.c["faint"], indent=1, size=12)
 
-    def _apply_lang(self):
-        t = self.t
-        self.title(t.t("app_title"))
-        self.title_label.configure(text=t.t("app_title"))
-        self.subtitle_label.configure(text=t.t("app_subtitle"))
-        self.tools_label.configure(text=t.t("quick_actions"))
-        self.settings_label.configure(text=t.t("settings"))
-        self.new_chat_btn.configure(text=t.t("new_chat"))
+    def _hide_thinking(self):
+        if self._thinking is not None:
+            if self._thinking in self._rows:
+                self._rows.remove(self._thinking)
+            self._thinking.destroy()
+            self._thinking = None
 
-        self.attach_btn.configure(text=self._icon_text(self.attach_btn, t.t("attach_file")))
-        self.scan_btn.configure(text=self._icon_text(self.scan_btn, t.t("scan_file")))
-        self.mic_btn.configure(text=self._icon_text(self.mic_btn, t.t("listen")))
-        self.brain_btn.configure(text=self._icon_text(self.brain_btn, t.t("brain_settings")))
-        self.lang_btn.configure(text=self._icon_text(self.lang_btn, t.t("lang_toggle")))
-
-        self.voice_btn._icon = "🔊" if self.voice_enabled else "🔇"
-        self.voice_btn.configure(
-            text=self._icon_text(
-                self.voice_btn,
-                t.t("voice_toggle_on") if self.voice_enabled else t.t("voice_toggle_off"),
-            ),
-            text_color=ACCENT if self.voice_enabled else TEXT,
-        )
-
-        running = self.engine.is_running()
-        self.status_label.configure(text=t.t("status_running") if running else t.t("status_stopped"))
-        self.status_dot.configure(text_color=GREEN if running else TEXT_FAINT)
-        self.entry.configure(
-            placeholder_text=t.t("input_placeholder"),
-            justify="right" if self._rtl else "left",
-        )
-        self.hint.configure(text=t.t("input_hint"))
-        self._refresh_brain_label()
-
-        self._tip(self.send_btn, "send", t.t("tooltip_send"))
-        self._tip(self.attach_btn, "attach", t.t("tooltip_attach"))
-        self._tip(self.scan_btn, "scan", t.t("tooltip_scan"))
-        self._tip(self.mic_btn, "mic", t.t("tooltip_mic"))
-        self._tip(self.mic_inline, "mic2", t.t("tooltip_mic"))
-        self._tip(self.brain_btn, "brain", t.t("tooltip_brain"))
-        self._tip(self.lang_btn, "lang", t.t("tooltip_lang"))
-        self._tip(
-            self.voice_btn, "voice",
-            t.t("tooltip_voice_on") if self.voice_enabled else t.t("tooltip_voice_off"),
-        )
-
-    def _refresh_brain_label(self):
+    # ── سطر الحالة ─────────────────────────────────────────────────────
+    def _brain_rows(self) -> list[dict]:
         try:
-            rows = brain.get_brain().status()
+            return brain.get_brain().status()
         except Exception:  # noqa: BLE001
-            self.brain_label.configure(text="")
-            return
-        ready = [r for r in rows if r["has_key"] and r["enabled"]]
-        if not ready:
-            self.brain_label.configure(
-                text="⚠️ مفيش مخ متظبط — دوس 🧠 عشان تظبط واحد مجاني",
-                text_color=ORANGE,
-            )
-            return
-        left = sum(max(0, r["rpd"] - r["used_today"]) for r in ready)
-        names = "، ".join(r["label"] for r in ready[:2])
-        self.brain_label.configure(
-            text=f"🧠 {names} — متبقي ~{left:,} طلب النهارده", text_color=TEXT_FAINT,
-        )
+            return []
 
-    def _tip(self, widget, key: str, message: str):
-        if CTkToolTip is None:
-            return
-        existing = self._tooltips.get(key)
-        if existing is not None:
-            existing.configure(message=message)
-            return
-        self._tooltips[key] = CTkToolTip(widget, message=message, delay=0.5)
-
-    # ── الأفعال ─────────────────────────────────────────────────────────
-    def _greet(self):
-        rows = []
-        try:
-            rows = brain.get_brain().status()
-        except Exception:  # noqa: BLE001
-            pass
+    def _refresh_status(self):
+        rows = self._brain_rows()
         ready = [r for r in rows if r["has_key"] and r["enabled"]]
+        parts = []
         if ready:
-            self._add_assistant(
-                "أهلاً! أنا نيزوكو. اكتبلي أي حاجة بالعامية عادي — "
-                "أفحصلك ملف، أظبطلك فيديو، أحللك قناة، أو نتكلم بس.\n"
-                "مش لازم تحفظ أوامر."
-            )
+            left = sum(max(0, r["rpd"] - r["used_today"]) for r in ready)
+            parts.append(f"{ready[0]['label'].lower()}")
+            if len(ready) > 1:
+                parts.append(f"+{len(ready) - 1}")
+            parts.append(f"{left:,} متبقي")
+        else:
+            parts.append("مفيش مخ · دوس ⚙")
+        cfg = brain.load_config()
+        if cfg.get("deep_mode"):
+            parts.append("عميق")
+        if cfg.get("local_only"):
+            parts.append("محلي بس")
+        if self.voice_enabled:
+            parts.append("صوت")
+        if self._plugin_count:
+            parts.append(f"{self._plugin_count} إضافة")
+        self.status_label.configure(text=f"{GLYPH_STATUS}  " + "  ·  ".join(parts))
+
+    # ── الأفعال ────────────────────────────────────────────────────────
+    def _send(self):
+        text = self.entry.get().strip()
+        if not text:
+            return
+        self.entry.delete(0, "end")
+        if text.startswith("/"):
+            self._slash(text[1:].strip().lower())
+            return
+        self._add_user(text)
+        self._last_command_name = text.split(maxsplit=1)[0].lower()
+        self._show_thinking()
+        self.engine.submit(text)
+
+    def _slash(self, cmd: str):
+        """أوامر الواجهة نفسها — بتبدأ بـ / زي الطرفية، ومبتلمسش المحرك."""
+        if cmd in ("settings", "config", ""):
+            self._open_settings()
+        elif cmd == "clear":
+            self._new_chat()
+        elif cmd == "theme":
+            self._toggle_theme()
+        elif cmd == "voice":
+            self._toggle_voice()
+        elif cmd in ("lang", "language"):
+            self._toggle_lang()
+        elif cmd in ("quit", "exit"):
+            self._on_close()
         else:
             self._add_assistant(
-                "أهلاً! أنا نيزوكو.\n\n"
-                "الأوامر المباشرة شغالة دلوقتي (زي env_check أو help)، بس عشان "
-                "أفهم كلامك العادي محتاجة مخ.\n"
-                "دوس 🧠 في الجنب — التظبيط مجاني بالكامل وبياخد دقيقتين.",
-                level="warn",
+                "/settings  /clear  /theme  /voice  /lang  /quit", "warn"
             )
 
     def _new_chat(self):
         for row in self._rows:
             row.destroy()
         self._rows.clear()
-        self._hide_thinking()
+        self._thinking = None
         self.engine.chat_history.clear()
-        canvas = self.chat._parent_canvas
-        canvas.configure(scrollregion=canvas.bbox("all"))
-        canvas.yview_moveto(0.0)
-        self._greet()
-
-    def _send(self):
-        text = self.entry.get().strip()
-        if not text:
-            return
-        self._add_user(text)
-        self._last_command_name = text.split(maxsplit=1)[0].lower()
-        self.entry.delete(0, "end")
-        self._show_thinking()
-        self.engine.submit(text)
+        self.stream._parent_canvas.yview_moveto(0.0)
+        self._banner()
 
     def _attach_file(self):
-        path = filedialog.askopenfilename(
-            title=self.t.t("attach_file"),
-            filetypes=[
-                ("Media", "*.mp4 *.mov *.mkv *.avi *.webm *.mp3 *.wav *.m4a *.flac *.jpg *.jpeg *.png"),
-                ("All files", "*.*"),
-            ],
-        )
+        path = filedialog.askopenfilename(title="إرفاق ملف")
         if not path:
             return
         self._add_user(f"📎 {path}")
@@ -453,12 +340,10 @@ class AssistantApp(ctk.CTk):
         self.engine.submit(f"probe {shlex.quote(path)}")
 
     def _scan_file(self):
-        path = filedialog.askopenfilename(
-            title=self.t.t("scan_file"), filetypes=[("All files", "*.*")],
-        )
+        path = filedialog.askopenfilename(title="فحص أمني")
         if not path:
             return
-        self._add_user(f"🛡️ {path}")
+        self._add_user(f"🛡 {path}")
         self._last_command_name = "security_report"
         self._show_thinking()
         self.engine.submit(f"security_report {shlex.quote(path)}")
@@ -469,10 +354,48 @@ class AssistantApp(ctk.CTk):
         self._show_thinking()
         self.engine.submit("listen_run")
 
+    def _toggle_voice(self):
+        self.voice_enabled = not self.voice_enabled
+        self._refresh_status()
+
+    def _toggle_theme(self):
+        self.mode = "light" if self.mode == "dark" else "dark"
+        cfg = brain.load_config()
+        cfg["ui_theme"] = self.mode
+        brain.save_config(cfg)
+        ctk.set_appearance_mode(self.mode)
+        self._rebuild()
+
+    def _toggle_lang(self):
+        self.t.toggle()
+        self._rebuild()
+
+    def _rebuild(self):
+        """اتجاه اللغة والثيم بيغيّروا التخطيط نفسه، فبنعيد البناء بدل
+        ما نحاول نعدّل كل ودجت لوحده."""
+        self._close_settings()
+        self.c = theme.palette(self.mode)
+        for child in self.winfo_children():
+            child.destroy()
+        self._rows.clear()
+        self._thinking = None
+        self._build()
+        self._banner()
+
+    def _speak(self, text: str):
+        snippet = " ".join(text.split()).replace('"', "").replace("'", "")
+        if len(snippet) > 300:
+            snippet = snippet[:300] + "..."
+        if snippet:
+            self._last_command_name = "speak"
+            self.engine.submit(f"speak {snippet}")
+
+    def _on_close(self):
+        self.engine.stop()
+        self.destroy()
+
+    # ── ربط اختيار الملف ───────────────────────────────────────────────
     def _on_need_file(self, spec, callback):
-        """المحرك عرف الأمر بس ناقصه ملف — بنفتح نافذة اختيار بدل ما
-        نسأل المستخدم يكتب المسار. ده بيتنادى من thread المحرك، فلازم
-        يترحّل للـ main thread قبل ما نلمس أي حاجة في Tk."""
         self._safe_after(self._pick_file, spec, callback)
 
     def _pick_file(self, spec, callback):
@@ -486,43 +409,10 @@ class AssistantApp(ctk.CTk):
             self._show_thinking()
         callback(path)
 
-    def _toggle_voice(self):
-        self.voice_enabled = not self.voice_enabled
-        self._apply_lang()
-
-    def _toggle_lang(self):
-        self.t.toggle()
-        # السايدبار وترتيب العناصر بيعتمدوا على اتجاه اللغة، فبنعيد بناء
-        # الواجهة كلها بدل ما نحاول نعكس كل ودجت لوحده
-        for child in self.winfo_children():
-            child.destroy()
-        self._tooltips.clear()
-        self._rows.clear()
-        self._thinking_row = None
-        self._build_ui()
-        self._greet()
-
-    def _speak(self, text: str):
-        snippet = " ".join(text.split()).replace('"', "").replace("'", "")
-        if len(snippet) > 300:
-            snippet = snippet[:300] + "..."
-        if not snippet:
-            return
-        self._last_command_name = "speak"
-        self.engine.submit(f"speak {snippet}")
-
-    def _on_close(self):
-        self.engine.stop()
-        self.destroy()
-
-    # ── ردود المحرك (بتيجي من thread تاني) ──────────────────────────────
+    # ── ردود المحرك (من thread تاني) ───────────────────────────────────
     def _safe_after(self, fn, *args):
-        """`after` بتترمي RuntimeError لو النافذة اتقفلت خلاص.
-
-        بيحصل فعليًا عند الخروج: `engine.stop()` بيخلي الـ worker يطلع
-        وينادي `on_status("stopped")`، وساعتها النافذة ممكن تكون
-        اتدمّرت — فبيطلع traceback في وش المستخدم وهو بيقفل البرنامج.
-        """
+        """`after` بترمي RuntimeError لو النافذة اتقفلت — بيحصل فعليًا
+        وقت الخروج لما الـ worker يطلع وينادي on_status بعد التدمير."""
         try:
             self.after(0, fn, *args)
         except RuntimeError:
@@ -535,172 +425,256 @@ class AssistantApp(ctk.CTk):
             self._safe_after(self._speak, msg)
 
     def _render_log(self, msg: str, level: str):
-        # رسايل تحميل الإضافات (٣٤ رسالة عند كل تشغيل) مالهاش لازمة في
-        # المحادثة — بتغرق أول شاشة يشوفها المستخدم. بنعدّها ونعرضها
-        # كسطر واحد في السايدبار؛ النص الكامل موجود في engine.log_history.
+        # تحميل الإضافات بيطبع عشرات الأسطر عند كل تشغيل — بيتعدّوا في
+        # سطر الحالة بدل ما يغرقوا أول شاشة. النص الكامل في log_history.
         if level == "ok" and "plugin loaded:" in msg:
             self._plugin_count += 1
-            self.subtitle_label.configure(
-                text=f"{self._plugin_count} إضافة جاهزة" if self._rtl
-                else f"{self._plugin_count} plugins ready"
-            )
+            self._refresh_status()
             return
 
         self._hide_thinking()
         badge = ""
-        # المحرك بيحط توقيع المزوّد في آخر سطر بالشكل "— <label>"
         if "\n— " in msg:
             msg, _, badge = msg.rpartition("\n— ")
+        # سطر بيبدأ بـ ↪ معناه أمر اتنفذ — بنعرضه كأداة مش كرد
+        if msg.startswith("↪"):
+            self._blank()
+            self._line(GLYPH_REPLY, msg.lstrip("↪ ").strip(), self.c["blue"])
+            return
         self._add_assistant(msg, level, badge)
-        self._refresh_brain_label()
+        self._refresh_status()
 
     def _on_status(self, status: str):
-        self._safe_after(self._render_status, status)
+        self._safe_after(lambda: self._refresh_status())
 
-    def _render_status(self, status: str):
-        running = status == "running"
-        self.status_dot.configure(text_color=GREEN if running else TEXT_FAINT)
-        self.status_label.configure(
-            text=self.t.t("status_running") if running else self.t.t("status_stopped")
-        )
-
-    # ── نافذة الإعدادات ─────────────────────────────────────────────────
+    # ── الإعدادات ──────────────────────────────────────────────────────
     def _open_settings(self):
-        SettingsWindow(self)
+        if self._settings is not None:
+            return
+        self._settings = SettingsPanel(self)
+
+    def _close_settings(self):
+        if self._settings is not None:
+            self._settings.close()
+            self._settings = None
 
 
-class SettingsWindow(ctk.CTkToplevel):
-    """نافذة إعدادات المخ: مفاتيح المزوّدين المجانيين، الوضع، والخصوصية."""
+class SettingsPanel(ctk.CTkToplevel):
+    """قايمة إعدادات بتتنقل فيها بالكيبورد، زي قوايم الطرفية:
+    ↑ ↓ للتنقل، Enter للتغيير، Esc للخروج."""
 
     def __init__(self, app: AssistantApp):
         super().__init__(app)
         self.app = app
-        self.title("إعدادات المخ")
-        self.geometry("620x640")
-        self.configure(fg_color=BG)
+        self.c = app.c
+        self.cursor = 0
+        self.editing = None
+
+        self.title("settings")
+        self.geometry("620x560")
+        self.configure(fg_color=self.c["bg"])
         self.transient(app)
-        self._entries: dict[str, ctk.CTkEntry] = {}
+        self.protocol("WM_DELETE_WINDOW", self.close)
+
         self._build()
-        self.after(120, self.lift)
+        self.bind("<Up>", lambda e: self._move(-1))
+        self.bind("<Down>", lambda e: self._move(1))
+        self.bind("<Return>", lambda e: self._activate())
+        self.bind("<Escape>", lambda e: self._on_escape())
+        self.after(80, self._focus)
+
+    def _focus(self):
+        self.lift()
+        self.focus_force()
+
+    # ── بنود القايمة ───────────────────────────────────────────────────
+    def _items(self) -> list[dict]:
+        cfg = brain.load_config()
+        items = [{"kind": "head", "label": "المخ"}]
+        for prov in sorted(brain.PROVIDERS.values(), key=lambda p: -p.quality):
+            if prov.needs_key:
+                has = bool(brain.get_key(prov.name))
+                value = "متظبط" if has else "—"
+            else:
+                value = "شغال" if brain.is_local_alive(prov) else "مش شغال"
+            items.append({
+                "kind": "key" if prov.needs_key else "info",
+                "label": prov.label, "value": value, "prov": prov,
+            })
+        items += [
+            {"kind": "head", "label": "الأوضاع"},
+            {"kind": "toggle", "label": "الوضع العميق", "cfg": "deep_mode",
+             "value": "شغال" if cfg.get("deep_mode") else "مقفول",
+             "note": "كذا نموذج يجاوبوا وأقواهم يدمجهم · ~4× الحصة"},
+            {"kind": "toggle", "label": "محلي بس", "cfg": "local_only",
+             "value": "شغال" if cfg.get("local_only") else "مقفول",
+             "note": "بيقفل كل السحابي · محتاج Ollama"},
+            {"kind": "head", "label": "الواجهة"},
+            {"kind": "theme", "label": "الثيم", "value": self.app.mode},
+            {"kind": "voice", "label": "الصوت",
+             "value": "شغال" if self.app.voice_enabled else "مقفول"},
+            {"kind": "lang", "label": "اللغة",
+             "value": "العربية" if self.app._rtl else "English"},
+        ]
+        return items
+
+    def _selectable(self) -> list[int]:
+        return [i for i, it in enumerate(self.data) if it["kind"] != "head"]
 
     def _build(self):
-        wrap = ctk.CTkScrollableFrame(self, fg_color=BG)
-        wrap.pack(fill="both", expand=True, padx=18, pady=18)
+        c = self.c
+        for w in self.winfo_children():
+            w.destroy()
+        self.data = self._items()
 
-        ctk.CTkLabel(
-            wrap, text="🧠 مخ نيزوكو", font=ctk.CTkFont(size=18, weight="bold"),
-            text_color=TEXT, anchor="e",
-        ).pack(fill="x", pady=(0, 4))
-        ctk.CTkLabel(
-            wrap, anchor="e", justify="right", text_color=TEXT_DIM,
-            font=ctk.CTkFont(size=12), wraplength=540,
-            text=("كل المزوّدين دول ليهم خطة مجانية دايمة من غير كارت ائتمان.\n"
-                  "ضيف واحد على الأقل — ولو ضيفت أكتر، بيتبدلوا تلقائي "
-                  "لما واحد يقف أو توصل لحده."),
-        ).pack(fill="x", pady=(0, 14))
+        wrap = ctk.CTkScrollableFrame(self, fg_color=c["bg"], corner_radius=0,
+                                      scrollbar_button_color=c["border"])
+        wrap.pack(fill="both", expand=True, padx=22, pady=(18, 4))
 
-        for prov in sorted(brain.PROVIDERS.values(), key=lambda p: -p.quality):
-            self._provider_card(wrap, prov)
+        sel = self._selectable()
+        if self.cursor >= len(sel):
+            self.cursor = max(0, len(sel) - 1)
+        active = sel[self.cursor] if sel else -1
 
-        ctk.CTkFrame(wrap, fg_color=BORDER, height=1).pack(fill="x", pady=14)
-        self._modes(wrap)
+        for idx, item in enumerate(self.data):
+            if item["kind"] == "head":
+                ctk.CTkLabel(
+                    wrap, text=item["label"], text_color=c["faint"],
+                    font=self.app._font(11, True), anchor=self.app._anchor,
+                ).pack(fill="x", pady=(14, 4))
+                continue
 
-        ctk.CTkButton(
-            wrap, text="حفظ وإغلاق", height=40, corner_radius=10,
-            fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color=TEXT_ON_ACCENT,
-            font=ctk.CTkFont(size=13, weight="bold"), command=self._save,
-        ).pack(fill="x", pady=(16, 4))
-
-    def _provider_card(self, parent, prov):
-        card = ctk.CTkFrame(parent, fg_color=CARD, corner_radius=12,
-                            border_width=1, border_color=BORDER)
-        card.pack(fill="x", pady=5)
-
-        head = ctk.CTkFrame(card, fg_color="transparent")
-        head.pack(fill="x", padx=14, pady=(12, 2))
-
-        has = (not prov.needs_key and brain.is_local_alive(prov)) or \
-            (prov.needs_key and bool(brain.get_key(prov.name)))
-        ctk.CTkLabel(
-            head, text="✅" if has else "⬜", font=ctk.CTkFont(size=13), width=24,
-        ).pack(side="right")
-        ctk.CTkLabel(
-            head, text=prov.label, anchor="e", text_color=TEXT,
-            font=ctk.CTkFont(size=13, weight="bold"),
-        ).pack(side="right", fill="x", expand=True)
-
-        meta = f"{prov.rpd} طلب/يوم · سياق {prov.context:,} توكن"
-        if prov.trains_on_input:
-            meta += " · 🔓 بيستخدم كلامك للتدريب"
-        if prov.name in brain.LOCAL_PROVIDERS:
-            meta = "محلي بالكامل · بياناتك متخرجش من الجهاز"
-        ctk.CTkLabel(
-            card, text=meta, anchor="e", text_color=TEXT_DIM,
-            font=ctk.CTkFont(size=10),
-        ).pack(fill="x", padx=14)
-
-        if prov.needs_key:
-            entry = ctk.CTkEntry(
-                card, height=34, corner_radius=8, show="•",
-                placeholder_text="الصق المفتاح هنا",
-                fg_color=BG, border_color=BORDER, text_color=TEXT,
+            is_active = idx == active
+            row = ctk.CTkFrame(
+                wrap, fg_color=c["panel_hi"] if is_active else "transparent",
+                corner_radius=4,
             )
-            entry.pack(fill="x", padx=14, pady=(8, 4))
-            if brain.get_key(prov.name):
-                entry.insert(0, "••••••••••••")
-            self._entries[prov.name] = entry
+            row.pack(fill="x", pady=1)
 
-        if prov.signup:
             ctk.CTkLabel(
-                card, text=f"↗ {prov.signup}", anchor="e",
-                text_color=ACCENT, font=ctk.CTkFont(size=10),
-            ).pack(fill="x", padx=14, pady=(0, 12))
+                row, text="❯" if is_active else " ", width=14,
+                text_color=c["accent"], font=self.app._font(12, True),
+            ).pack(side=self.app._side, padx=(6, 2), pady=5)
 
-    def _modes(self, parent):
-        cfg = brain.load_config()
+            ctk.CTkLabel(
+                row, text=item["label"], text_color=c["text"],
+                font=self.app._font(12), anchor=self.app._anchor,
+            ).pack(side=self.app._side, fill="x", expand=True)
+
+            vcolor = c["green"] if item["value"] in ("متظبط", "شغال") else c["dim"]
+            ctk.CTkLabel(
+                row, text=item["value"], text_color=vcolor,
+                font=self.app._font(12),
+            ).pack(side="left" if self.app._rtl else "right", padx=10)
+
+            if is_active and item.get("note"):
+                ctk.CTkLabel(
+                    wrap, text=item["note"], text_color=c["faint"],
+                    font=self.app._font(10), anchor=self.app._anchor,
+                ).pack(fill="x", padx=22, pady=(0, 2))
+
+            if is_active and item["kind"] == "key":
+                self._key_editor(wrap, item["prov"])
 
         ctk.CTkLabel(
-            parent, text="الأوضاع", anchor="e", text_color=TEXT,
-            font=ctk.CTkFont(size=14, weight="bold"),
-        ).pack(fill="x", pady=(0, 6))
+            self, text="↑ ↓ تنقل   ·   Enter تغيير   ·   Esc خروج",
+            text_color=c["faint"], font=self.app._font(10),
+        ).pack(pady=(2, 12))
 
-        self.deep_var = ctk.BooleanVar(value=bool(cfg.get("deep_mode")))
-        ctk.CTkSwitch(
-            parent, text="الوضع العميق — كذا نموذج يجاوبوا وأقواهم يدمجهم",
-            variable=self.deep_var, progress_color=ACCENT,
-            font=ctk.CTkFont(size=12), text_color=TEXT,
-        ).pack(fill="x", pady=4)
+    def _key_editor(self, parent, prov):
+        c = self.c
+        box = ctk.CTkFrame(parent, fg_color="transparent")
+        box.pack(fill="x", padx=22, pady=(2, 6))
+
+        self.editing = ctk.CTkEntry(
+            box, height=30, corner_radius=4, show="•",
+            placeholder_text="الصق المفتاح واضغط Enter",
+            fg_color=c["panel"], border_color=c["border"], border_width=1,
+            text_color=c["text"], placeholder_text_color=c["faint"],
+            font=self.app._font(11), justify="left",
+        )
+        self.editing.pack(fill="x")
+        self.editing._prov = prov
+        self.editing.bind("<Return>", lambda e: self._save_key())
+
         ctk.CTkLabel(
-            parent, text="أدق بس أبطأ، وبياخد ~4 أضعاف الحصة. للأسئلة المهمة بس.",
-            anchor="e", text_color=TEXT_DIM, font=ctk.CTkFont(size=10),
-        ).pack(fill="x", padx=8, pady=(0, 10))
+            box, text=prov.signup, text_color=c["accent"],
+            font=self.app._font(10), anchor=self.app._anchor,
+        ).pack(fill="x", pady=(3, 0))
+        if prov.trains_on_input:
+            ctk.CTkLabel(
+                box, text="🔓 الخطة المجانية بتستخدم كلامك للتدريب",
+                text_color=c["yellow"], font=self.app._font(10),
+                anchor=self.app._anchor,
+            ).pack(fill="x")
 
-        self.local_var = ctk.BooleanVar(value=bool(cfg.get("local_only")))
-        ctk.CTkSwitch(
-            parent, text="محلي بس — مفيش أي كلام يخرج من الجهاز",
-            variable=self.local_var, progress_color=GREEN,
-            font=ctk.CTkFont(size=12), text_color=TEXT,
-        ).pack(fill="x", pady=4)
-        ctk.CTkLabel(
-            parent, text="بيقفل كل المزوّدين السحابيين. محتاج Ollama متثبت ومشغّل.",
-            anchor="e", text_color=TEXT_DIM, font=ctk.CTkFont(size=10),
-        ).pack(fill="x", padx=8)
+    # ── التنقل والتفعيل ────────────────────────────────────────────────
+    def _move(self, delta: int):
+        sel = self._selectable()
+        if sel:
+            self.cursor = (self.cursor + delta) % len(sel)
+        self._build()
 
-    def _save(self):
-        saved = []
-        for name, entry in self._entries.items():
-            value = entry.get().strip()
-            if value and not value.startswith("••"):
-                brain.set_key(name, value)
-                saved.append(brain.PROVIDERS[name].label)
-        cfg = brain.load_config()
-        cfg["deep_mode"] = bool(self.deep_var.get())
-        cfg["local_only"] = bool(self.local_var.get())
-        brain.save_config(cfg)
+    def _activate(self):
+        if self.editing is not None and self.editing.winfo_exists() and \
+                self.editing.get().strip():
+            self._save_key()
+            return
+        sel = self._selectable()
+        if not sel:
+            return
+        item = self.data[sel[self.cursor]]
+        kind = item["kind"]
 
-        self.app._refresh_brain_label()
-        if saved:
-            self.app._add_assistant(f"✅ اتحفظ مفتاح: {'، '.join(saved)}", "ok")
+        if kind == "toggle":
+            cfg = brain.load_config()
+            cfg[item["cfg"]] = not cfg.get(item["cfg"])
+            brain.save_config(cfg)
+        elif kind == "theme":
+            self.app._toggle_theme()
+            self.c = self.app.c
+            self.configure(fg_color=self.c["bg"])
+        elif kind == "voice":
+            self.app._toggle_voice()
+        elif kind == "lang":
+            self.app._toggle_lang()
+            self.c = self.app.c
+        elif kind == "key":
+            if self.editing is not None and self.editing.winfo_exists():
+                self.editing.focus_set()
+                return
+        self._build()
+        self.app._refresh_status()
+
+    def _save_key(self):
+        if self.editing is None or not self.editing.winfo_exists():
+            return
+        value = self.editing.get().strip()
+        prov = self.editing._prov
+        if value:
+            how = brain.set_key(prov.name, value)
+            note = "مخزن أسرار النظام" if how == "keyring" else "ملف محلي"
+            self.app._add_assistant(f"مفتاح {prov.label} اتحفظ في {note}", "ok")
+        self.editing = None
+        self._build()
+        self.app._refresh_status()
+
+    def _on_escape(self):
+        """Esc بيقفل القايمة — إلا لو إنت فعلاً بتكتب في خانة مفتاح،
+        ساعتها بيلغي الكتابة الأول.
+
+        الشرط على التركيز مهم: خانة المفتاح بتتبني لمجرد إن المؤشر
+        واقف على مزوّد، فلو اكتفينا بوجودها كان Esc هيحتاج ضغطتين
+        على أي سطر مزوّد حتى لو مكتبتش فيه حاجة.
+        """
+        ed = self.editing
+        if ed is not None and ed.winfo_exists() and self.focus_get() is ed:
+            self.focus_set()
+            return
+        self.close()
+
+    def close(self):
+        self.app._settings = None
         self.destroy()
 
 

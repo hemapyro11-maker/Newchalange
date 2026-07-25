@@ -83,6 +83,7 @@ py -m PyInstaller ^
     --hidden-import version ^
     --hidden-import brain ^
     --hidden-import intents ^
+    --hidden-import theme ^
     --collect-all CTkToolTip ^
     --collect-all mcp ^
     --collect-all capstone ^
@@ -103,6 +104,7 @@ py -m PyInstaller ^
     --add-data "i18n.py;." ^
     --add-data "brain.py;." ^
     --add-data "intents.py;." ^
+    --add-data "theme.py;." ^
     --add-data "version.py;." ^
     --add-data "version.json;." ^
     --add-data "connectors.example.json;." ^
