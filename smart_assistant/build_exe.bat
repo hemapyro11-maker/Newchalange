@@ -42,7 +42,13 @@ echo ====================================
 :: (شوف الملاحظات تحت) لأنه مفيش نموذج قياسي واحد نقدر نحطه هنا.
 :: openai-whisper لسه عن قصد **مش** هنا زي ما هو موضح فوق — بيتنادى
 :: بس عن طريق subprocess (أمر whisper CLI)، مش import مباشر.
-py -m pip install customtkinter pyinstaller mcp typer capstone Pillow pandas matplotlib edge-tts piper-tts sounddevice faster-whisper vosk python-telegram-bot discord.py keyring --quiet
+:: CTkToolTip: تلميحات (tooltips) لأزرار main_gui.py — تحسين واجهة
+:: اختياري بمكتبة خفيفة جدًا (مفيش أي dependencies ليها) من غير أي
+:: مخاطرة حقيقية. مختلفة عن باقي الحزم فوق في حاجة واحدة: main_gui.py
+:: بيعمل لها import اختياري (try/except) مش إجباري زي customtkinter
+:: نفسها — لو مش موجودة، الواجهة تشتغل عادي من غير تلميحات بس. اتجرب
+:: فعليًا (onefile Linux بنفس الفلاج ده بنى واشتغل من غير أي crash).
+py -m pip install customtkinter CTkToolTip pyinstaller mcp typer capstone Pillow pandas matplotlib edge-tts piper-tts sounddevice faster-whisper vosk python-telegram-bot discord.py keyring --quiet
 
 :: بناء الـ EXE
 py -m PyInstaller ^
@@ -53,6 +59,7 @@ py -m PyInstaller ^
     --hidden-import core_engine ^
     --hidden-import i18n ^
     --hidden-import version ^
+    --collect-all CTkToolTip ^
     --collect-all mcp ^
     --collect-all capstone ^
     --collect-all PIL ^

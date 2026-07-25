@@ -16,6 +16,14 @@ except ImportError:
     import customtkinter as ctk
 
 try:
+    # تلميحات (tooltips) عند تمرير الماوس فوق الأزرار — تحسين واجهة اختياري
+    # بس، مش أساسي زي customtkinter نفسها: لو مش متثبت، الواجهة تشتغل
+    # عادي من غيره من غير أي تلميحات (شوف _set_tooltip تحت).
+    from CTkToolTip import CTkToolTip
+except ImportError:
+    CTkToolTip = None
+
+try:
     from core_engine import AssistantEngine
     from i18n import Translator
 except ImportError:
@@ -77,6 +85,7 @@ class AssistantApp(ctk.CTk):
         self.voice_enabled = False
         self._last_command_name = ""
         self._bubble_rows: list[ctk.CTkFrame] = []
+        self._tooltips: dict[str, CTkToolTip] = {}
 
         self.geometry("1040x700")
         self.minsize(840, 560)
@@ -256,6 +265,19 @@ class AssistantApp(ctk.CTk):
 
         self.after(30, self._scroll_chat_to_bottom)
 
+    def _set_tooltip(self, key: str, widget, message: str):
+        # بننشئ CTkToolTip واحد لكل ودجت ونحدّث نصه بعدين (configure)
+        # بدل ما نعمل واحد جديد كل مرة — إعادة الإنشاء بتسرّب نوافذ
+        # tooltip قديمة معلّقة. من غير مكتبة CTkToolTip (اختيارية)،
+        # الدالة دي مبتعملش حاجة والواجهة تشتغل عادي من غيرها.
+        if CTkToolTip is None:
+            return
+        existing = self._tooltips.get(key)
+        if existing is not None:
+            existing.configure(message=message)
+            return
+        self._tooltips[key] = CTkToolTip(widget, message=message, delay=0.4)
+
     # ── i18n ────────────────────────────────────────────────────────────
     def _apply_lang(self):
         t = self.t
@@ -275,14 +297,23 @@ class AssistantApp(ctk.CTk):
         self.lang_btn.configure(text=f"{self.lang_btn._nezuko_icon}  {t.t('lang_toggle')}")
         self.clear_btn.configure(text=f"{self.clear_btn._nezuko_icon}  {t.t('clear_log')}")
 
+        is_running = self.engine.is_running()
         self.status_label.configure(
-            text=t.t("status_running") if self.engine.is_running() else t.t("status_stopped")
+            text=t.t("status_running") if is_running else t.t("status_stopped")
         )
-        self.start_btn.configure(text=t.t("stop") if self.engine.is_running() else t.t("start"))
+        self.start_btn.configure(text=t.t("stop") if is_running else t.t("start"))
         self.cmd_entry.configure(
             placeholder_text=t.t("input_placeholder"),
             justify="right" if t.lang == "ar" else "left",
         )
+
+        self._set_tooltip("send", self.send_btn, t.t("tooltip_send"))
+        self._set_tooltip("attach", self.attach_btn, t.t("tooltip_attach"))
+        self._set_tooltip("scan", self.scan_btn, t.t("tooltip_scan"))
+        self._set_tooltip("voice", self.voice_btn, t.t("tooltip_voice_on") if self.voice_enabled else t.t("tooltip_voice_off"))
+        self._set_tooltip("lang", self.lang_btn, t.t("tooltip_lang"))
+        self._set_tooltip("clear", self.clear_btn, t.t("tooltip_clear"))
+        self._set_tooltip("start", self.start_btn, t.t("tooltip_stop") if is_running else t.t("tooltip_start"))
 
     def _toggle_lang(self):
         self.t.toggle()
