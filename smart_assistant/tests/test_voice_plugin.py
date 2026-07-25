@@ -9,6 +9,8 @@ import voice_plugin as vp
 
 requires_espeak = pytest.mark.skipif(not shutil.which("espeak-ng"), reason="espeak-ng not installed")
 requires_ffplay = pytest.mark.skipif(not shutil.which("ffplay"), reason="ffplay not installed")
+requires_demucs = pytest.mark.skipif(not shutil.which("demucs"), reason="demucs not installed")
+requires_ffmpeg = pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
 
 
 @pytest.fixture(autouse=True)
@@ -640,5 +642,101 @@ def test_register_adds_stt_commands():
         registry = FakeRegistry()
 
     vp.register(FakeEngine)
-    for cmd in ("speak", "voice_status", "listen", "listen_run", "stt_status"):
+    for cmd in ("speak", "voice_status", "listen", "listen_run", "stt_status", "separate_vocals"):
         assert cmd in FakeEngine.registry.names
+
+
+# ── separate_vocals ───────────────────────────────────────────────────
+
+def test_separate_vocals_no_args(make_ctx):
+    result = vp._cmd_separate_vocals(make_ctx("separate_vocals", []))
+    assert result.startswith("usage")
+
+
+def test_separate_vocals_reports_missing_tool(make_ctx, tmp_path, monkeypatch):
+    monkeypatch.setattr(vp.shutil, "which", lambda name: None)
+    f = tmp_path / "in.wav"
+    f.write_bytes(b"x")
+    result = vp._cmd_separate_vocals(make_ctx("separate_vocals", [str(f), str(tmp_path / "out")]))
+    assert "demucs مش متثبت" in result
+    assert "pip install demucs" in result
+
+
+def test_separate_vocals_missing_input(make_ctx, tmp_path, monkeypatch):
+    monkeypatch.setattr(vp.shutil, "which", lambda name: "/usr/bin/demucs" if name == "demucs" else None)
+    result = vp._cmd_separate_vocals(make_ctx("separate_vocals", [str(tmp_path / "nope.wav"), str(tmp_path / "out")]))
+    assert result.startswith("❌")
+    assert "مش موجود" in result
+
+
+def test_separate_vocals_rejects_bad_mode(make_ctx, tmp_path, monkeypatch):
+    monkeypatch.setattr(vp.shutil, "which", lambda name: "/usr/bin/demucs" if name == "demucs" else None)
+    f = tmp_path / "in.wav"
+    f.write_bytes(b"x")
+    result = vp._cmd_separate_vocals(make_ctx("separate_vocals", [str(f), str(tmp_path / "out"), "bogus"]))
+    assert result.startswith("❌")
+    assert "mode" in result
+
+
+def test_separate_vocals_uses_two_stems_flag_for_vocals_mode(make_ctx, tmp_path, monkeypatch):
+    monkeypatch.setattr(vp.shutil, "which", lambda name: "/usr/bin/demucs" if name == "demucs" else None)
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(vp.subprocess, "run", fake_run)
+    f = tmp_path / "in.wav"
+    f.write_bytes(b"x")
+    result = vp._cmd_separate_vocals(make_ctx("separate_vocals", [str(f), str(tmp_path / "out"), "vocals"]))
+    assert result.startswith("✅")
+    assert "--two-stems" in captured["cmd"]
+    assert "vocals" in captured["cmd"]
+
+
+def test_separate_vocals_timeout_reported(make_ctx, tmp_path, monkeypatch):
+    monkeypatch.setattr(vp.shutil, "which", lambda name: "/usr/bin/demucs" if name == "demucs" else None)
+
+    def fake_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 1))
+
+    monkeypatch.setattr(vp.subprocess, "run", fake_run)
+    f = tmp_path / "in.wav"
+    f.write_bytes(b"x")
+    result = vp._cmd_separate_vocals(make_ctx("separate_vocals", [str(f), str(tmp_path / "out")]))
+    assert result.startswith("⏱")
+
+
+def test_separate_vocals_nonzero_exit_reports_stderr(make_ctx, tmp_path, monkeypatch):
+    monkeypatch.setattr(vp.shutil, "which", lambda name: "/usr/bin/demucs" if name == "demucs" else None)
+    monkeypatch.setattr(
+        vp.subprocess, "run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom"),
+    )
+    f = tmp_path / "in.wav"
+    f.write_bytes(b"x")
+    result = vp._cmd_separate_vocals(make_ctx("separate_vocals", [str(f), str(tmp_path / "out")]))
+    assert result.startswith("❌")
+    assert "boom" in result
+
+
+@requires_demucs
+@requires_ffmpeg
+def test_separate_vocals_real_run_produces_stems(make_ctx, tmp_path):
+    src = tmp_path / "tone.wav"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=2", str(src), "-loglevel", "error"],
+        check=True, capture_output=True,
+    )
+    out_dir = tmp_path / "separated"
+    result = vp._cmd_separate_vocals(make_ctx("separate_vocals", [str(src), str(out_dir), "vocals"]))
+    # demucs بيحمّل نموذجه (~80MB) من dl.fbaipublicfiles.com عند أول
+    # استخدام — لو الشبكة في بيئة التشغيل دي بتمنع الدومين ده تحديدًا
+    # (زي بعض بيئات CI/sandbox المقيّدة)، ده قيد شبكة مش باگ في الكود
+    # نفسه، فبنعدي الاختبار بدل ما نفشله.
+    if result.startswith("❌") and any(s in result for s in ("URLError", "Forbidden", "Tunnel connection")):
+        pytest.skip("demucs model download blocked by network policy in this environment")
+    assert result.startswith("✅")
+    vocals_files = list(out_dir.rglob("vocals.wav"))
+    assert vocals_files, f"no vocals.wav found under {out_dir}"

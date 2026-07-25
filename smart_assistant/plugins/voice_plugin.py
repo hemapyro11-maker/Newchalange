@@ -53,7 +53,13 @@ voice_plugin.py — نطق نصوص بصوت أنثوي مصري (نيزوكو) 
 التجميع — بس حد حقيقي يستاهل التوثيق لمين بيشغّل نيزوكو من السورس
 على لينكس مباشرة.
 
-الأوامر: speak, voice_status, listen, listen_run, stt_status
+**معالجة صوت متقدمة:** `separate_vocals` بيفصل مسار صوتي لعناصره
+(صوت/طبول/باص/باقي) عبر Demucs (Meta، أداة خارجية اختيارية، `pip
+install demucs`) — مفيد لعزل الصوت من موسيقى خلفية قبل STT، أو
+لاستخراج instrumental. زي auto-editor، بيتنادى عن طريق subprocess،
+ونموذجه بيتحمّل تلقائيًا مرة واحدة (~80MB) عند أول استخدام.
+
+الأوامر: speak, voice_status, listen, listen_run, stt_status, separate_vocals
 """
 from __future__ import annotations
 
@@ -86,6 +92,7 @@ _SAMPLE_RATE = 16000
 _LISTEN_DEFAULT_SECONDS = 5
 _LISTEN_MAX_SECONDS = 30
 _TRANSCRIBE_TIMEOUT = 180
+_SEPARATE_TIMEOUT = 1800  # فصل صوتي (Demucs) تقيل، ممكن ياخد دقايق كتير على CPU
 
 
 def _voice_cache_dir() -> pathlib.Path:
@@ -379,6 +386,39 @@ def _transcribe(wav_path: pathlib.Path, model: str = WHISPER_MODEL) -> tuple[str
     return None, "🔇 مسمعتش أي كلام واضح"
 
 
+# ═══════════════════════════════════════════════════════════════════
+# فصل مسارات صوتية (Demucs) — أداة خارجية اختيارية
+# ═══════════════════════════════════════════════════════════════════
+
+def _cmd_separate_vocals(ctx) -> str:
+    if len(ctx.args) < 2:
+        return (
+            "usage: separate_vocals <audio> <output_dir> [mode=all|vocals] — "
+            "فصل المسارات الصوتية (Demucs): all=4 مسارات، vocals=صوت/بدون صوت بس (أسرع)"
+        )
+    if not shutil.which("demucs"):
+        return "❌ demucs مش متثبت — نزّله بـ: pip install demucs (مجاني ومفتوح المصدر، أول استخدام بيحمّل نموذجه ~80MB)"
+    src, out_dir = ctx.args[0], ctx.args[1]
+    if not pathlib.Path(src).is_file():
+        return f"❌ الملف مش موجود: {src}"
+    mode = ctx.args[2] if len(ctx.args) > 2 else "all"
+    if mode not in ("all", "vocals"):
+        return "❌ mode لازم يكون all أو vocals"
+
+    cmd = ["demucs", "-o", out_dir]
+    if mode == "vocals":
+        cmd += ["--two-stems", "vocals"]
+    cmd.append(src)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_SEPARATE_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return f"⏱ انتهت المهلة ({_SEPARATE_TIMEOUT}s) — الفصل الصوتي بطيء على CPU، جرب ملف أقصر أو جهاز فيه GPU"
+    if proc.returncode != 0:
+        return f"❌ فشل: {proc.stderr.strip()[-600:]}"
+    stems = "vocals + no_vocals" if mode == "vocals" else "vocals + drums + bass + other"
+    return f"✅ اتفصل الصوت ({stems}) في {out_dir}"
+
+
 def _parse_listen_seconds(ctx) -> tuple[int, str | None]:
     if not ctx.args:
         return _LISTEN_DEFAULT_SECONDS, None
@@ -469,3 +509,4 @@ def register(engine):
     engine.registry.register("listen", _cmd_listen, "listen [seconds] — سجل من المايك وفرّغ الكلام لنص (بدون تنفيذ)")
     engine.registry.register("listen_run", _cmd_listen_run, "listen_run [seconds] — زي listen لكن ينفذ النص المسموع كأمر فورًا")
     engine.registry.register("stt_status", _cmd_stt_status, "stt_status — حالة أدوات الاستماع الصوتي المتاحة (sounddevice + whisper)")
+    engine.registry.register("separate_vocals", _cmd_separate_vocals, "separate_vocals <audio> <out_dir> [mode=all|vocals] — فصل المسارات الصوتية (Demucs)")
