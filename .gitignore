@@ -18,3 +18,5 @@ smart_assistant/plugins_pending/
 smart_assistant/quarantine/
 smart_assistant/voice_cache/
 smart_assistant/youtube_config.json
+smart_assistant/loadtest_results.json
+smart_assistant/.loadtest_tmp/
