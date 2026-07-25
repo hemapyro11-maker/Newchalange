@@ -1,3 +1,4 @@
+import json
 import pathlib
 import shutil
 import subprocess
@@ -11,6 +12,32 @@ requires_espeak = pytest.mark.skipif(not shutil.which("espeak-ng"), reason="espe
 requires_ffplay = pytest.mark.skipif(not shutil.which("ffplay"), reason="ffplay not installed")
 requires_demucs = pytest.mark.skipif(not shutil.which("demucs"), reason="demucs not installed")
 requires_ffmpeg = pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_keyring(monkeypatch):
+    """افتراضيًا نخلي keyring "مش متاح" وقت الاختبار — عشان diarize_set_token
+    يتحفظ في diarize_config.json بشكل ثابت، ومحدش يلمس مخزن أسرار نظام
+    التشغيل الحقيقي بتاع اللي بيشغل الاختبارات."""
+    monkeypatch.setattr(vp, "_HAS_KEYRING", False)
+
+
+@pytest.fixture
+def isolated_diarize_config(tmp_path, monkeypatch):
+    path = tmp_path / "diarize_config.json"
+    monkeypatch.setattr(vp, "_diarize_config_path", lambda: path)
+    return path
+
+
+class _FakeKeyring:
+    def __init__(self):
+        self._store: dict[tuple[str, str], str] = {}
+
+    def get_password(self, service, key):
+        return self._store.get((service, key))
+
+    def set_password(self, service, key, value):
+        self._store[(service, key)] = value
 
 
 @pytest.fixture(autouse=True)
@@ -642,8 +669,216 @@ def test_register_adds_stt_commands():
         registry = FakeRegistry()
 
     vp.register(FakeEngine)
-    for cmd in ("speak", "voice_status", "listen", "listen_run", "stt_status", "separate_vocals"):
+    for cmd in (
+        "speak", "voice_status", "listen", "listen_run", "stt_status", "separate_vocals",
+        "diarize_set_token", "diarize_key_status", "diarize",
+    ):
         assert cmd in FakeEngine.registry.names
+
+
+# ── diarize_set_token / diarize_key_status ──────────────────────────────
+
+def test_diarize_set_token_no_args(make_ctx):
+    result = vp._cmd_diarize_set_token(make_ctx("diarize_set_token", []))
+    assert result.startswith("usage")
+
+
+def test_diarize_set_token_empty(make_ctx):
+    result = vp._cmd_diarize_set_token(make_ctx("diarize_set_token", [" "]))
+    assert result.startswith("❌")
+
+
+def test_diarize_set_token_saves_and_reports_without_keyring(make_ctx, isolated_diarize_config):
+    result = vp._cmd_diarize_set_token(make_ctx("diarize_set_token", ["hf_tok_123"]))
+    assert "⚠️" in result
+    assert vp._hf_token() == "hf_tok_123"
+
+
+def test_diarize_set_token_uses_keyring_when_available(make_ctx, monkeypatch, isolated_diarize_config):
+    fake = _FakeKeyring()
+    monkeypatch.setattr(vp, "_HAS_KEYRING", True)
+    monkeypatch.setattr(vp, "keyring", fake)
+
+    result = vp._cmd_diarize_set_token(make_ctx("diarize_set_token", ["seckey123"]))
+    assert "✅" in result
+    assert "keyring" in result
+    assert fake.get_password(vp._DIARIZE_KEYRING_SERVICE, vp._DIARIZE_TOKEN_NAME) == "seckey123"
+    assert vp._hf_token() == "seckey123"
+
+
+def test_diarize_set_token_clears_old_plaintext_after_keyring_success(make_ctx, monkeypatch, isolated_diarize_config):
+    isolated_diarize_config.write_text(json.dumps({"hf_token": "oldplaintext"}), encoding="utf-8")
+    fake = _FakeKeyring()
+    monkeypatch.setattr(vp, "_HAS_KEYRING", True)
+    monkeypatch.setattr(vp, "keyring", fake)
+
+    vp._cmd_diarize_set_token(make_ctx("diarize_set_token", ["newsecure"]))
+    data = json.loads(isolated_diarize_config.read_text())
+    assert not data.get("hf_token")
+    assert vp._hf_token() == "newsecure"
+
+
+def test_diarize_set_token_keyring_error_falls_back_to_plaintext(make_ctx, monkeypatch, isolated_diarize_config):
+    import keyring.errors as kerrors
+
+    class _BrokenKeyring:
+        def get_password(self, *a):
+            raise kerrors.NoKeyringError("no backend")
+
+        def set_password(self, *a):
+            raise kerrors.NoKeyringError("no backend")
+
+    monkeypatch.setattr(vp, "_HAS_KEYRING", True)
+    monkeypatch.setattr(vp, "keyring", _BrokenKeyring())
+
+    result = vp._cmd_diarize_set_token(make_ctx("diarize_set_token", ["fallbacktoken"]))
+    assert "⚠️" in result
+    assert vp._hf_token() == "fallbacktoken"
+
+
+def test_diarize_key_status_no_token(make_ctx, isolated_diarize_config):
+    result = vp._cmd_diarize_key_status(make_ctx("diarize_key_status", []))
+    assert result.startswith("❌")
+    assert "huggingface.co/settings/tokens" in result
+
+
+def test_diarize_key_status_masks_token(make_ctx, isolated_diarize_config):
+    vp._cmd_diarize_set_token(make_ctx("diarize_set_token", ["abcdefgh12345678"]))
+    result = vp._cmd_diarize_key_status(make_ctx("diarize_key_status", []))
+    assert result.startswith("✅")
+    assert "abcdefgh12345678" not in result
+    assert "abcd" in result
+
+
+def test_diarize_key_status_reports_pyannote_missing(make_ctx, monkeypatch, isolated_diarize_config):
+    vp._cmd_diarize_set_token(make_ctx("diarize_set_token", ["tok"]))
+    monkeypatch.setitem(sys.modules, "pyannote.audio", None)
+    result = vp._cmd_diarize_key_status(make_ctx("diarize_key_status", []))
+    assert "pyannote.audio مش متثبت" in result
+
+
+# ── diarize ──────────────────────────────────────────────────────────────
+
+def test_diarize_no_args(make_ctx):
+    result = vp._cmd_diarize(make_ctx("diarize", []))
+    assert result.startswith("usage")
+
+
+def test_diarize_reports_missing_tool(make_ctx, tmp_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "pyannote.audio", None)
+    f = tmp_path / "in.wav"
+    f.write_bytes(b"x")
+    result = vp._cmd_diarize(make_ctx("diarize", [str(f)]))
+    assert "pyannote.audio مش متثبت" in result
+
+
+def test_diarize_missing_input_file(make_ctx, tmp_path, monkeypatch):
+    fake_module = types.ModuleType("pyannote.audio")
+    fake_module.Pipeline = object
+    monkeypatch.setitem(sys.modules, "pyannote.audio", fake_module)
+    result = vp._cmd_diarize(make_ctx("diarize", [str(tmp_path / "nope.wav")]))
+    assert result.startswith("❌")
+    assert "مش موجود" in result
+
+
+def test_diarize_no_token(make_ctx, tmp_path, monkeypatch, isolated_diarize_config):
+    fake_module = types.ModuleType("pyannote.audio")
+    fake_module.Pipeline = object
+    monkeypatch.setitem(sys.modules, "pyannote.audio", fake_module)
+    f = tmp_path / "in.wav"
+    f.write_bytes(b"x")
+    result = vp._cmd_diarize(make_ctx("diarize", [str(f)]))
+    assert result.startswith("❌")
+    assert "diarize_set_token" in result
+
+
+def test_diarize_model_not_agreed_reports_manual_step(make_ctx, tmp_path, monkeypatch, isolated_diarize_config):
+    vp._cmd_diarize_set_token(make_ctx("diarize_set_token", ["tok"]))
+
+    class _FakePipelineClass:
+        @staticmethod
+        def from_pretrained(model, token=None):
+            return None  # pyannote نفسها بترجع None لو الموافقة اليدوية مش متعملة
+
+    fake_module = types.ModuleType("pyannote.audio")
+    fake_module.Pipeline = _FakePipelineClass
+    monkeypatch.setitem(sys.modules, "pyannote.audio", fake_module)
+    monkeypatch.setattr(vp, "_diarize_pipeline_cache", {})
+
+    f = tmp_path / "in.wav"
+    f.write_bytes(b"x")
+    result = vp._cmd_diarize(make_ctx("diarize", [str(f)]))
+    assert result.startswith("❌")
+    assert "huggingface.co" in result
+
+
+def test_diarize_success_reports_speakers(make_ctx, tmp_path, monkeypatch, isolated_diarize_config):
+    vp._cmd_diarize_set_token(make_ctx("diarize_set_token", ["tok"]))
+
+    class _FakeTurn:
+        def __init__(self, start, end):
+            self.start = start
+            self.end = end
+
+    class _FakeDiarization:
+        def itertracks(self, yield_label=True):
+            return iter([
+                (_FakeTurn(0.0, 1.5), "track_0", "SPEAKER_00"),
+                (_FakeTurn(1.5, 3.2), "track_1", "SPEAKER_01"),
+                (_FakeTurn(3.2, 4.0), "track_2", "SPEAKER_00"),
+            ])
+
+    class _FakePipeline:
+        def __call__(self, path):
+            return _FakeDiarization()
+
+    class _FakePipelineClass:
+        @staticmethod
+        def from_pretrained(model, token=None):
+            return _FakePipeline()
+
+    fake_module = types.ModuleType("pyannote.audio")
+    fake_module.Pipeline = _FakePipelineClass
+    monkeypatch.setitem(sys.modules, "pyannote.audio", fake_module)
+    monkeypatch.setattr(vp, "_diarize_pipeline_cache", {})
+
+    f = tmp_path / "in.wav"
+    f.write_bytes(b"x")
+    result = vp._cmd_diarize(make_ctx("diarize", [str(f)]))
+    assert result.startswith("🗣️")
+    assert "2 متكلم" in result
+    assert "SPEAKER_00" in result
+    assert "SPEAKER_01" in result
+
+
+def test_diarize_caches_pipeline_across_calls(make_ctx, tmp_path, monkeypatch, isolated_diarize_config):
+    vp._cmd_diarize_set_token(make_ctx("diarize_set_token", ["tok"]))
+    load_calls = []
+
+    class _FakeDiarization:
+        def itertracks(self, yield_label=True):
+            return iter([])
+
+    class _FakePipeline:
+        def __call__(self, path):
+            return _FakeDiarization()
+
+    class _FakePipelineClass:
+        @staticmethod
+        def from_pretrained(model, token=None):
+            load_calls.append(model)
+            return _FakePipeline()
+
+    fake_module = types.ModuleType("pyannote.audio")
+    fake_module.Pipeline = _FakePipelineClass
+    monkeypatch.setitem(sys.modules, "pyannote.audio", fake_module)
+    monkeypatch.setattr(vp, "_diarize_pipeline_cache", {})
+
+    f = tmp_path / "in.wav"
+    f.write_bytes(b"x")
+    vp._cmd_diarize(make_ctx("diarize", [str(f)]))
+    vp._cmd_diarize(make_ctx("diarize", [str(f)]))
+    assert load_calls == [vp._DIARIZE_MODEL]
 
 
 # ── separate_vocals ───────────────────────────────────────────────────

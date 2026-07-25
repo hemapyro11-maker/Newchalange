@@ -59,10 +59,21 @@ install demucs`) — مفيد لعزل الصوت من موسيقى خلفية �
 لاستخراج instrumental. زي auto-editor، بيتنادى عن طريق subprocess،
 ونموذجه بيتحمّل تلقائيًا مرة واحدة (~80MB) عند أول استخدام.
 
-الأوامر: speak, voice_status, listen, listen_run, stt_status, separate_vocals
+**تحديد المتكلمين (speaker diarization):** `diarize` بيحدد "مين اتكلم
+وإمتى" في تسجيل فيه أكتر من متكلم، عبر pyannote.audio (اختيارية، `pip
+install pyannote.audio`). النموذج الافتراضي (pyannote/speaker-diarization-3.1)
+"gated" على Hugging Face — يعني محتاج توكن حساب مجاني
+(huggingface.co/settings/tokens) **وموافقة يدوية لمرة واحدة بس** على
+شروط الاستخدام (ماينفعش تتعمل أوتوماتيك، قرار Hugging Face مش نيزوكو)
+قبل أول استخدام. التوكن بيتحفظ بنفس نموذج keyring-مع-fallback بتاع
+telegram_plugin.py/youtube_strategy_plugin.py عبر `diarize_set_token`.
+
+الأوامر: speak, voice_status, listen, listen_run, stt_status,
+separate_vocals, diarize_set_token, diarize_key_status, diarize
 """
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import shutil
@@ -77,6 +88,15 @@ try:
     import sounddevice as sd
 except (ImportError, OSError):
     sd = None
+
+try:
+    import keyring
+    from keyring.errors import KeyringError
+    _HAS_KEYRING = True
+except ImportError:
+    keyring = None
+    KeyringError = Exception
+    _HAS_KEYRING = False
 
 EDGE_VOICE = "ar-EG-SalmaNeural"
 PIPER_VOICE_NAME = "ar_JO-kareem-medium"
@@ -94,6 +114,10 @@ _LISTEN_MAX_SECONDS = 30
 _TRANSCRIBE_TIMEOUT = 180
 _SEPARATE_TIMEOUT = 1800  # فصل صوتي (Demucs) تقيل، ممكن ياخد دقايق كتير على CPU
 
+_DIARIZE_KEYRING_SERVICE = "nezuko-diarize"
+_DIARIZE_TOKEN_NAME = "hf_token"
+_DIARIZE_MODEL = "pyannote/speaker-diarization-3.1"
+
 
 def _voice_cache_dir() -> pathlib.Path:
     # نفس منطق _quarantine_dir في security_scan_plugin.py: exe المبني
@@ -104,6 +128,56 @@ def _voice_cache_dir() -> pathlib.Path:
     d = base / "voice_cache"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def _diarize_config_path() -> pathlib.Path:
+    base = pathlib.Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) \
+        else pathlib.Path(__file__).resolve().parent.parent
+    return base / "diarize_config.json"
+
+
+def _hf_token() -> str | None:
+    if _HAS_KEYRING:
+        try:
+            token = keyring.get_password(_DIARIZE_KEYRING_SERVICE, _DIARIZE_TOKEN_NAME)
+        except KeyringError:
+            token = None
+        if token:
+            return token
+    path = _diarize_config_path()
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    token = data.get("hf_token")
+    return token if token else None
+
+
+def _set_hf_token_keyring(token: str) -> bool:
+    """يحاول يحفظ التوكن في keyring، يرجع True لو نجح، وبيمسح أي نسخة
+    نص عادي قديمة كانت متسجلة لو نجح الحفظ الآمن. نفس نموذج
+    youtube_strategy_plugin.py._set_api_key_keyring."""
+    if not _HAS_KEYRING:
+        return False
+    try:
+        keyring.set_password(_DIARIZE_KEYRING_SERVICE, _DIARIZE_TOKEN_NAME, token)
+    except KeyringError:
+        return False
+    path = _diarize_config_path()
+    if path.is_file():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = None
+        if data and data.get("hf_token"):
+            data["hf_token"] = None
+            try:
+                path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            except OSError:
+                pass
+    return True
 
 
 def _download(url: str, dest: pathlib.Path) -> bool:
@@ -330,8 +404,6 @@ def _transcribe_vosk(wav_path: pathlib.Path) -> tuple[str | None, bool]:
     if not model_dir.is_dir():
         return None, False
     try:
-        import json as _json
-
         import vosk
     except ImportError:
         return None, False
@@ -346,10 +418,10 @@ def _transcribe_vosk(wav_path: pathlib.Path) -> tuple[str | None, bool]:
                 if not data:
                     break
                 if rec.AcceptWaveform(data):
-                    chunk = _json.loads(rec.Result()).get("text", "")
+                    chunk = json.loads(rec.Result()).get("text", "")
                     if chunk:
                         parts.append(chunk)
-            final = _json.loads(rec.FinalResult()).get("text", "")
+            final = json.loads(rec.FinalResult()).get("text", "")
             if final:
                 parts.append(final)
         text = " ".join(parts).strip()
@@ -417,6 +489,108 @@ def _cmd_separate_vocals(ctx) -> str:
         return f"❌ فشل: {proc.stderr.strip()[-600:]}"
     stems = "vocals + no_vocals" if mode == "vocals" else "vocals + drums + bass + other"
     return f"✅ اتفصل الصوت ({stems}) في {out_dir}"
+
+
+# ═══════════════════════════════════════════════════════════════════
+# تحديد المتكلمين (speaker diarization عبر pyannote.audio) — أداة
+# خارجية اختيارية، محتاجة توكن Hugging Face (نموذج gated)
+# ═══════════════════════════════════════════════════════════════════
+
+_diarize_pipeline_cache: dict[str, object] = {}
+
+
+def _cmd_diarize_set_token(ctx) -> str:
+    if not ctx.args:
+        return "usage: diarize_set_token <hf_token>"
+    token = ctx.args[0].strip()
+    if not token:
+        return "❌ توكن فاضي مش هيتحفظ"
+    if _set_hf_token_keyring(token):
+        return (
+            "✅ اتحفظ توكن Hugging Face بأمان في مخزن أسرار نظام التشغيل (keyring).\n"
+            "لو أول مرة، لازم كمان توافق يدويًا على شروط الاستخدام مرة واحدة — شوف diarize_key_status."
+        )
+    path = _diarize_config_path()
+    data = {}
+    if path.is_file():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = {}
+    data["hf_token"] = token
+    try:
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError as e:
+        return f"❌ تعذر حفظ التوكن: {e}"
+    return (
+        "⚠️ اتحفظ التوكن كنص عادي في diarize_config.json — تخزين keyring الآمن مش متاح دلوقتي.\n"
+        "   لتخزين أأمن: pip install keyring\n"
+        "لو أول مرة، لازم كمان توافق يدويًا على شروط الاستخدام مرة واحدة — شوف diarize_key_status."
+    )
+
+
+def _cmd_diarize_key_status(ctx) -> str:
+    token = _hf_token()
+    if not token:
+        return (
+            "❌ مفيش توكن Hugging Face متظبط — استخدم diarize_set_token <token>\n"
+            "التوكن من: https://huggingface.co/settings/tokens (مجاني)\n"
+            "ولازم توافق يدويًا (مرة واحدة بس، ماينفعش أوتوماتيك) على شروط النموذجين دول:\n"
+            f"  - https://huggingface.co/{_DIARIZE_MODEL}\n"
+            "  - https://huggingface.co/pyannote/segmentation-3.0"
+        )
+    masked = token[:4] + "…" + token[-2:] if len(token) > 8 else "…"
+    line = f"✅ فيه توكن متظبط ({masked})"
+    if not _HAS_KEYRING:
+        line += "\n⚠️ keyring مش متثبت — بيتخزن كنص عادي (pip install keyring لتخزين أأمن)"
+    try:
+        import pyannote.audio  # noqa: F401
+    except ImportError:
+        line += "\n❌ pyannote.audio مش متثبت — نزّله بـ: pip install pyannote.audio"
+    return line
+
+
+def _cmd_diarize(ctx) -> str:
+    if not ctx.args:
+        return "usage: diarize <audio> — يحدد مين اتكلم وإمتى في تسجيل فيه أكتر من متكلم (pyannote.audio)"
+    try:
+        from pyannote.audio import Pipeline
+    except ImportError:
+        return "❌ pyannote.audio مش متثبت — نزّله بـ: pip install pyannote.audio (مجاني ومفتوح المصدر)"
+    src = ctx.args[0]
+    if not pathlib.Path(src).is_file():
+        return f"❌ الملف مش موجود: {src}"
+    token = _hf_token()
+    if not token:
+        return "❌ محتاج توكن Hugging Face الأول — استخدم diarize_set_token <token> (تفاصيل: diarize_key_status)"
+
+    pipeline = _diarize_pipeline_cache.get(_DIARIZE_MODEL)
+    if pipeline is None:
+        try:
+            pipeline = Pipeline.from_pretrained(_DIARIZE_MODEL, token=token)
+        except Exception as e:
+            return f"❌ تعذر تحميل نموذج pyannote: {e}"
+        if pipeline is None:
+            return (
+                "❌ تعذر تحميل النموذج — لازم توافق يدويًا على شروط الاستخدام الأول على:\n"
+                f"  https://huggingface.co/{_DIARIZE_MODEL}\n"
+                "  https://huggingface.co/pyannote/segmentation-3.0"
+            )
+        _diarize_pipeline_cache[_DIARIZE_MODEL] = pipeline
+
+    try:
+        diarization = pipeline(src)
+    except Exception as e:
+        return f"❌ فشل التحليل: {e}"
+
+    segments = list(diarization.itertracks(yield_label=True))
+    if not segments:
+        return "ℹ️ مفيش متكلمين واضحين اتلقوا في التسجيل ده"
+    speakers = {speaker for _turn, _track, speaker in segments}
+    lines = [f"🗣️ {len(speakers)} متكلم اتلقى:"]
+    for turn, _track, speaker in segments:
+        lines.append(f"  [{turn.start:6.1f}s → {turn.end:6.1f}s] {speaker}")
+    return "\n".join(lines)
 
 
 def _parse_listen_seconds(ctx) -> tuple[int, str | None]:
@@ -510,3 +684,6 @@ def register(engine):
     engine.registry.register("listen_run", _cmd_listen_run, "listen_run [seconds] — زي listen لكن ينفذ النص المسموع كأمر فورًا")
     engine.registry.register("stt_status", _cmd_stt_status, "stt_status — حالة أدوات الاستماع الصوتي المتاحة (sounddevice + whisper)")
     engine.registry.register("separate_vocals", _cmd_separate_vocals, "separate_vocals <audio> <out_dir> [mode=all|vocals] — فصل المسارات الصوتية (Demucs)")
+    engine.registry.register("diarize_set_token", _cmd_diarize_set_token, "diarize_set_token <hf_token> — تسجيل توكن Hugging Face لتحديد المتكلمين")
+    engine.registry.register("diarize_key_status", _cmd_diarize_key_status, "diarize_key_status — هل فيه توكن Hugging Face متظبط؟")
+    engine.registry.register("diarize", _cmd_diarize, "diarize <audio> — يحدد مين اتكلم وإمتى (speaker diarization، pyannote.audio)")
