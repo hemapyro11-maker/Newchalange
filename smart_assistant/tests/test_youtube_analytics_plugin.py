@@ -167,6 +167,34 @@ def test_growth_report_identifies_best_and_worst(make_ctx, isolated_config, monk
     assert "Worst" in result
 
 
+def test_growth_report_trend_correct_despite_api_response_reordering(make_ctx, isolated_config, monkeypatch):
+    """videos.list بمعرّفات متعددة (id=v1,v2,...) مش مضمون يحافظ على
+    ترتيب الطلب في استجابته — لازم اتجاه النمو يتحسب صح من publishedAt
+    الحقيقي حتى لو استجابة الـ API رجعت بترتيب معاكس/عشوائي تمامًا عن
+    ترتيب playlistItems الأصلي."""
+    _set_key(isolated_config)
+
+    def fake_urlopen(req, timeout):
+        if "channels?" in req.full_url:
+            return _json_resp({"items": [_channel()]})
+        if "playlistItems?" in req.full_url:
+            items = [{"contentDetails": {"videoId": f"v{i}"}} for i in range(4)]
+            return _json_resp({"items": items})
+        # ترتيب استجابة videos.list هنا مقصود إنه مختلف عن ترتيب
+        # الطلب — نمو حقيقي واضح بمرور الوقت (v0 الأقدم أقل views،
+        # v3 الأحدث أكتر views) لكن مبعوت بترتيب مبعثر.
+        return _json_resp({"items": [
+            _video(vid="v2", views=800, published="2024-01-03T00:00:00Z"),
+            _video(vid="v0", views=100, published="2024-01-01T00:00:00Z"),
+            _video(vid="v3", views=1000, published="2024-01-04T00:00:00Z"),
+            _video(vid="v1", views=300, published="2024-01-02T00:00:00Z"),
+        ]})
+
+    monkeypatch.setattr(yap.urllib.request, "urlopen", fake_urlopen)
+    result = yap._cmd_channel_growth_report(make_ctx("channel_growth_report", ["@x"]))
+    assert "📈 في تصاعد" in result
+
+
 def test_growth_report_no_videos(make_ctx, isolated_config, monkeypatch):
     _set_key(isolated_config)
 

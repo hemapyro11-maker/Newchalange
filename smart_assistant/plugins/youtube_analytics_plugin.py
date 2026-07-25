@@ -199,9 +199,13 @@ def _cmd_channel_growth_report(ctx) -> str:
     def views_of(v):
         return int(v.get("statistics", {}).get("viewCount", 0) or 0)
 
-    # ترتيب زمني (الأحدث أول) هو ترتيب playlistItems الطبيعي، فبنعكسه هنا
-    # عشان "أول نص" يبقى فعليًا الأقدم و"تاني نص" الأحدث للمقارنة الاتجاهية.
-    videos_chrono = list(reversed(videos))
+    # مهم: videos.list بمعرّفات متعددة (comma-separated id=) مش مضمون
+    # يحافظ على ترتيب playlistItems الأصلي (نتيجة موثّقة وغير متسقة من
+    # الـ endpoint ده) — فبدل ما نفترض إن ترتيب الاستجابة لسه "الأحدث
+    # أول" ونعكسه، بنرتب فعليًا حسب snippet.publishedAt الحقيقي (اللي
+    # الاستجابة نفسها بترجعه، وطلبناه أصلاً في part=snippet). كده "أول
+    # نص" مضمون يبقى فعليًا الأقدم مهما كان ترتيب استجابة الـ API.
+    videos_chrono = sorted(videos, key=lambda v: v.get("snippet", {}).get("publishedAt", ""))
     views_list = [views_of(v) for v in videos_chrono]
     avg_views = statistics.mean(views_list)
     best = max(videos_chrono, key=views_of)
