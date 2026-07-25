@@ -524,6 +524,8 @@ def _cmd_separate_vocals(ctx) -> str:
         return f"⏱ انتهت المهلة ({_SEPARATE_TIMEOUT}s) — الفصل الصوتي بطيء على CPU، جرب ملف أقصر أو جهاز فيه GPU"
     if proc.returncode != 0:
         return f"❌ فشل: {proc.stderr.strip()[-600:]}"
+    if not any(pathlib.Path(out_dir).rglob("*.wav")):
+        return "❌ فشل الفصل — demucs خلص من غير خطأ ظاهر بس مفيش ملفات صوت خرج حقيقية"
     stems = "vocals + no_vocals" if mode == "vocals" else "vocals + drums + bass + other"
     return f"✅ اتفصل الصوت ({stems}) في {out_dir}"
 

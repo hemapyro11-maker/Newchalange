@@ -925,18 +925,35 @@ def test_separate_vocals_rejects_bad_mode(make_ctx, tmp_path, monkeypatch):
 def test_separate_vocals_uses_two_stems_flag_for_vocals_mode(make_ctx, tmp_path, monkeypatch):
     monkeypatch.setattr(vp.shutil, "which", lambda name: "/usr/bin/demucs" if name == "demucs" else None)
     captured = {}
+    out_dir = tmp_path / "out"
 
     def fake_run(cmd, **kwargs):
         captured["cmd"] = cmd
+        # بيحاكي هيكل خرج demucs الحقيقي: <out_dir>/<model>/<track>/*.wav
+        stem_dir = out_dir / "htdemucs" / "in"
+        stem_dir.mkdir(parents=True, exist_ok=True)
+        (stem_dir / "vocals.wav").write_bytes(b"fake")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     monkeypatch.setattr(vp.subprocess, "run", fake_run)
     f = tmp_path / "in.wav"
     f.write_bytes(b"x")
-    result = vp._cmd_separate_vocals(make_ctx("separate_vocals", [str(f), str(tmp_path / "out"), "vocals"]))
+    result = vp._cmd_separate_vocals(make_ctx("separate_vocals", [str(f), str(out_dir), "vocals"]))
     assert result.startswith("✅")
     assert "--two-stems" in captured["cmd"]
     assert "vocals" in captured["cmd"]
+
+
+def test_separate_vocals_detects_exit_zero_but_no_output(make_ctx, tmp_path, monkeypatch):
+    # نفس مشكلة realesrgan-ncnn-vulkan/auto-editor (exit 0 حتى لو فشل
+    # فعليًا) — لازم نتأكد من وجود ملفات .wav حقيقية مش نثق في exit code بس.
+    monkeypatch.setattr(vp.shutil, "which", lambda name: "/usr/bin/demucs" if name == "demucs" else None)
+    monkeypatch.setattr(vp.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""))
+    f = tmp_path / "in.wav"
+    f.write_bytes(b"x")
+    result = vp._cmd_separate_vocals(make_ctx("separate_vocals", [str(f), str(tmp_path / "out")]))
+    assert result.startswith("❌")
+    assert "مفيش ملفات صوت خرج حقيقية" in result
 
 
 def test_separate_vocals_timeout_reported(make_ctx, tmp_path, monkeypatch):

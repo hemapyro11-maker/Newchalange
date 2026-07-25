@@ -66,14 +66,22 @@ def _missing_files(*paths: str) -> list[str]:
     return [p for p in paths if not pathlib.Path(p).is_file()]
 
 
+def _run_ffprobe(args: list[str]) -> subprocess.CompletedProcess | None:
+    """نداء ffprobe آمن — بيرجع None لو انتهت المهلة أو الأمر مش موجود
+    فعليًا (TOCTOU بين shutil.which وقت التشغيل)، بدل ما نسيب الاستثناء
+    يهرب من الدالة اللي بتنادينا ويكسر الـ traceback في وش المستخدم من
+    غير رسالة ❌ زي أي فشل تاني في الملف ده."""
+    try:
+        return subprocess.run(args, capture_output=True, text=True, timeout=30)
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+
+
 def _probe_dimensions(path: str) -> tuple[int, int] | None:
     if not shutil.which("ffprobe"):
         return None
-    result = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams", path],
-        capture_output=True, text=True, timeout=30,
-    )
-    if result.returncode != 0:
+    result = _run_ffprobe(["ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams", path])
+    if result is None or result.returncode != 0:
         return None
     try:
         data = json.loads(result.stdout)
@@ -90,10 +98,9 @@ def _probe_dimensions(path: str) -> tuple[int, int] | None:
 def _probe_duration(path: str) -> float | None:
     if not shutil.which("ffprobe"):
         return None
-    result = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", path],
-        capture_output=True, text=True, timeout=30,
-    )
+    result = _run_ffprobe(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", path])
+    if result is None:
+        return None
     try:
         return float(result.stdout.strip())
     except (ValueError, AttributeError):
@@ -103,11 +110,12 @@ def _probe_duration(path: str) -> float | None:
 def _probe_fps(path: str) -> float | None:
     if not shutil.which("ffprobe"):
         return None
-    result = subprocess.run(
+    result = _run_ffprobe(
         ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=r_frame_rate",
          "-of", "default=nw=1:nk=1", path],
-        capture_output=True, text=True, timeout=30,
     )
+    if result is None:
+        return None
     try:
         num, den = result.stdout.strip().split("/")
         return float(num) / float(den)
@@ -500,6 +508,9 @@ def _cmd_auto_trim_silence(ctx) -> str:
     )
     if not ok:
         return f"❌ فشل: {err}"
+    dst_path = pathlib.Path(dst)
+    if not dst_path.is_file() or dst_path.stat().st_size == 0:
+        return "❌ فشل القص — auto-editor خلص من غير خطأ ظاهر بس مفيش ملف خرج حقيقي"
     return f"✅ اتقص الصمت/اللقطات الميتة تلقائيًا (threshold={threshold}) في {dst}"
 
 
@@ -610,7 +621,8 @@ def _cmd_upscale_video(ctx) -> str:
         ok, err = _run_ffmpeg(["ffmpeg", "-y", "-i", src, str(frames_in / "frame_%06d.png")], timeout=600)
         if not ok:
             return f"❌ فشل استخراج الفريمات: {err}"
-        if not any(frames_in.iterdir()):
+        frames_in_count = sum(1 for _ in frames_in.iterdir())
+        if frames_in_count == 0:
             return "❌ فشل استخراج الفريمات — مفيش فريمات اتولدت"
 
         # فريم فريم عبر Vulkan (زي upscale_image بالظبط) — بطيء جدًا من
@@ -621,8 +633,19 @@ def _cmd_upscale_video(ctx) -> str:
         )
         if not ok:
             return f"❌ فشل التكبير: {err}"
-        if not any(frames_out.iterdir()):
+        # مش كفاية نتأكد إن فيه فريم واحد على الأقل — realesrgan-ncnn-vulkan
+        # ممكن يعلّق/يفشل نص الطريق (اتجرب فعليًا إنه غير مستقر تحت
+        # Vulkan software rendering) وبرضو يرجع exit code صفر، فلو عدد
+        # فريمات الخرج أقل من الدخل، ffmpeg هيجمّع فيديو مقصوص بصمت (image2
+        # demuxer بيوقف عند أول اسم فريم ناقص بالترتيب) من غير أي تحذير.
+        frames_out_count = sum(1 for _ in frames_out.iterdir())
+        if frames_out_count == 0:
             return "❌ فشل التكبير — الأداة خلصت من غير خطأ ظاهر بس مفيش فريمات خرج حقيقية"
+        if frames_out_count < frames_in_count:
+            return (
+                f"❌ فشل التكبير جزئيًا — اتكبر {frames_out_count} فريم بس من أصل {frames_in_count} "
+                "(الأداة وقفت نص الطريق من غير خطأ ظاهر). جرب تاني أو على مقطع أقصر."
+            )
 
         ok, err = _run_ffmpeg(
             ["ffmpeg", "-y", "-r", str(fps), "-i", str(frames_out / "frame_%06d.png"),

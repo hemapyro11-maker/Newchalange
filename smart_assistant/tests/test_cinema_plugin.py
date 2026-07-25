@@ -1,3 +1,4 @@
+import pathlib
 import shutil
 import subprocess
 
@@ -302,6 +303,18 @@ def test_auto_trim_silence_missing_input(make_ctx, tmp_path):
     assert result.startswith("❌")
 
 
+def test_auto_trim_silence_detects_exit_zero_but_no_output(make_ctx, tmp_path, monkeypatch):
+    # نفس مشكلة realesrgan-ncnn-vulkan (exit 0 حتى لو فشل فعليًا) —
+    # لازم نتأكد من وجود ملف خرج حقيقي مش نثق في exit code بس.
+    monkeypatch.setattr(cp.shutil, "which", lambda name: "/usr/bin/auto-editor")
+    monkeypatch.setattr(cp.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""))
+    f = tmp_path / "in.mp4"
+    f.write_bytes(b"x")
+    result = cp._cmd_auto_trim_silence(make_ctx("auto_trim_silence", [str(f), str(tmp_path / "out.mp4")]))
+    assert result.startswith("❌")
+    assert "مفيش ملف خرج حقيقي" in result
+
+
 @requires_auto_editor
 def test_auto_trim_silence_cuts_real_silence(make_ctx, clip_with_silence, tmp_path):
     out = tmp_path / "trimmed.mp4"
@@ -478,6 +491,36 @@ def test_upscale_video_reports_missing_ffmpeg(make_ctx, tmp_path, monkeypatch):
     assert "ffmpeg غير موجود" in result
 
 
+def test_upscale_video_detects_partial_frame_output(make_ctx, tmp_path, monkeypatch):
+    # realesrgan-ncnn-vulkan اتجرب فعليًا وغير مستقر تحت Vulkan software
+    # rendering — ممكن يوقف نص الطريق ويرجع عدد فريمات أقل من المدخل،
+    # برضو من غير أي خطأ ظاهر (exit 0). لازم نكتشف الفرق ده صراحةً بدل
+    # ما نجمّع فيديو مقصوص بصمت.
+    monkeypatch.setattr(cp.shutil, "which", lambda name: "/usr/bin/x")
+
+    def fake_run_ffmpeg(args, timeout):
+        if args[0] == "ffmpeg" and "-r" not in args:
+            frames_in_dir = pathlib.Path(args[-1]).parent
+            for i in range(1, 6):
+                (frames_in_dir / f"frame_{i:06d}.png").write_bytes(b"x")
+            return True, ""
+        if args[0] == "realesrgan-ncnn-vulkan":
+            frames_out_dir = pathlib.Path(args[args.index("-o") + 1])
+            for i in range(1, 3):  # 2 بس من 5 — فشل جزئي
+                (frames_out_dir / f"frame_{i:06d}.png").write_bytes(b"x")
+            return True, ""
+        raise AssertionError("reassembly shouldn't run when frame counts mismatch")
+
+    monkeypatch.setattr(cp, "_run_ffmpeg", fake_run_ffmpeg)
+    monkeypatch.setattr(cp, "_probe_fps", lambda src: 25.0)
+    f = tmp_path / "in.mp4"
+    f.write_bytes(b"x")
+    result = cp._cmd_upscale_video(make_ctx("upscale_video", [str(f), str(tmp_path / "out.mp4")]))
+    assert result.startswith("❌")
+    assert "فشل التكبير جزئيًا" in result
+    assert "2 فريم بس من أصل 5" in result
+
+
 @requires_realesrgan
 @requires_ffmpeg
 def test_upscale_video_real_run_produces_output(make_ctx, tiny_clip, tmp_path):
@@ -486,3 +529,39 @@ def test_upscale_video_real_run_produces_output(make_ctx, tiny_clip, tmp_path):
     assert result.startswith("✅")
     assert out.is_file()
     assert _duration(out) > 0
+
+
+# ── _probe_dimensions/_probe_duration/_probe_fps: must not crash on
+# ffprobe timeout/disappearing (regression — used to call subprocess.run
+# with no try/except at all, unlike every other subprocess call in this
+# file which goes through _run_ffmpeg) ───────────────────────────────
+
+def test_probe_dimensions_returns_none_on_timeout(monkeypatch):
+    monkeypatch.setattr(cp.shutil, "which", lambda name: "/usr/bin/ffprobe")
+
+    def fake_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 30))
+
+    monkeypatch.setattr(cp.subprocess, "run", fake_run)
+    assert cp._probe_dimensions("whatever.mp4") is None
+
+
+def test_probe_duration_returns_none_on_missing_binary_race(monkeypatch):
+    # TOCTOU: shutil.which لقاه، لكن اختفى قبل ما ينفّذ فعليًا
+    monkeypatch.setattr(cp.shutil, "which", lambda name: "/usr/bin/ffprobe")
+
+    def fake_run(cmd, **kwargs):
+        raise OSError("No such file or directory")
+
+    monkeypatch.setattr(cp.subprocess, "run", fake_run)
+    assert cp._probe_duration("whatever.mp4") is None
+
+
+def test_probe_fps_returns_none_on_timeout(monkeypatch):
+    monkeypatch.setattr(cp.shutil, "which", lambda name: "/usr/bin/ffprobe")
+
+    def fake_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 30))
+
+    monkeypatch.setattr(cp.subprocess, "run", fake_run)
+    assert cp._probe_fps("whatever.mp4") is None
