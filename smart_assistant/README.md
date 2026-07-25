@@ -95,6 +95,7 @@ build_exe.bat
     `content_research_plugin.py`، `youtube_seo_plugin.py`،
     `thumbnail_plugin.py`، `youtube_ads_plugin.py`،
     `community_manager_plugin.py`، `youtube_analytics_plugin.py`.
+  - `environment_plugin.py` — "طبيب" بيئة العمل: `env_check` (شرح تفصيلي تحت).
 - `connectors.example.json` — مثال لإعداد MCP Connectors (انسخه لـ
   `connectors.json` وعدّله). `connectors.json` نفسه بيتعمل تلقائياً
   أول ما التطبيق يشتغل ومش متتبع في git (ممكن يحتوي مسارات/أسرار خاصة بيك).
@@ -115,7 +116,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-480 اختبار حقيقي (مش placeholders) بتغطي كل plugin و Core Engine —
+514 اختبار حقيقي (مش placeholders) بتغطي كل plugin و Core Engine —
 تحليل ELF/PE حقيقي، معالجة فيديو حقيقية عبر FFmpeg، توليد أيقونات
 حقيقي، حلقة توليد/تصحيح plugin_forge كاملة، إلخ. الاختبارات اللي
 محتاجة أدوات اختيارية (FFmpeg, Pillow, capstone, mcp) بتتخطى تلقائياً
@@ -495,6 +496,38 @@ youtube_key_status             # هل فيه مفتاح متظبط؟
   Analytics API بمصادقة OAuth على حسابه — مش متاح عبر مفتاح API عام، والأداة
   بتقول كده صراحةً بدل ما تدّعي عكس ده.
 - `report_export <channel> <out.csv>` — تصدير CSV حقيقي لإحصائيات الفيديوهات.
+
+## طبيب بيئة العمل — `environment_plugin.py`
+
+نيزوكو بتعتمد على عشرات الأدوات الخارجية ومكتبات بايثون الاختيارية
+(FFmpeg، ClamAV، Ollama، Node.js، Docker، إلخ) عبر جلسة العمل كلها. بدل
+ما تكتشف الناقص واحدة واحدة لما أمر يفشل، `env_check` بيفحصهم كلهم
+مرة واحدة ويوريك بالظبط إيه المتاح وإيه لأ:
+
+```
+env_check                    # فحص شامل، مقسّم بالتصنيف، بأمر تثبيت مضبوط لنظامك
+env_install <tool_key>       # تثبيت أداة واحدة (dry-run افتراضيًا)
+env_install <tool_key> --yes # تثبيت فعلي (لمكتبات بايثون بس)
+env_install_all --yes        # تثبيت كل مكتبات بايثون الناقصة دفعة واحدة
+```
+
+**قرار تصميم مقصود ومهم:** الأداة بتفرّق بوضوح بين نوعين:
+
+- **مكتبات بايثون** (Pillow, pandas, capstone, edge-tts...) — دي فعلاً
+  بتتثبت تلقائيًا (`pip install`) لما تكتب `--yes`، لأنها بتشتغل في
+  مساحة المستخدم بدون أي صلاحيات مرتفعة — نفس فلسفة
+  `pip install -r requirements.txt` الموجودة من الأول.
+- **أدوات نظام** (FFmpeg, Docker, Node.js, ClamAV...) — دي **مبتتثبتش
+  تلقائيًا أبدًا**، حتى مع `--yes`. الأداة بتوريك بس الأمر المضبوط
+  لنظامك (`apt`/`dnf`/`pacman`/`brew`/`winget`/`choco`، مكتشف تلقائيًا)
+  وانت اللي تنسخه وتشغّله. تشغيل `sudo` أو أي مثبّت نظام تلقائيًا من
+  جوه تطبيق من غير علمك الصريح ثغرة صلاحيات حقيقية — مش راحة، بغض
+  النظر عن نية الأداة.
+
+Ollama حالة خاصة: مش قابلة للفحص بـ `shutil.which` (بتشتغل كسيرفر
+محلي على `localhost:11434`)، فالفحص بيكون HTTP ping حقيقي، والتثبيت
+دايمًا تعليمات يدوية (تنزيل من ollama.com) لأنه مش package management
+عادي.
 
 ## ليه مفيش "توليد فيديو/صورة بالذكاء الاصطناعي" زي Higgsfield؟
 
