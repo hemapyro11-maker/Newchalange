@@ -31,6 +31,13 @@ log = logging.getLogger("assistant.core")
 
 CommandHandler = Callable[["CommandContext"], str | None]
 
+# عنصر فريد (object identity، مش نص) لإشارة الإيقاف جوه الطابور —
+# لو استخدمنا نص عادي زي "__stop__" بدل كده، أي مستخدم يكتب "__stop__"
+# فعليًا كنص أمر (أو نص جاي من macro/schedule/لصق) كان هيوقف الـ worker
+# thread بصمت زي لو stop() اتنادت فعلاً، من غير أي رسالة أو تحذير.
+# عنصر object() فريد مينفعش أي نص مكتوب "يطابقه" أبداً.
+_STOP_SENTINEL = object()
+
 # ── فهم النية (intent understanding) — الأمر مش متطابق حرفيًا؟ ─────────
 # مرحلتين: (1) تصحيح إملائي زيرو-كوست دايمًا شغال (difflib، بدون أي
 # اعتماد خارجي)، وبعدين (2) لو مفيش تصحيح واضح، محاولة فهم نية حرة عبر
@@ -127,10 +134,10 @@ class AssistantEngine:
         self._loaded_plugins: list[str] = []
         self.skills_path = default_state_dir() / "skills.json"
         self.skills = self._load_skills()
-        self._queue: queue.Queue[tuple[str, Callable | None]] = queue.Queue()
+        self._queue: queue.Queue[tuple[str, object | None]] = queue.Queue()
         self._stop_flag = threading.Event()
         self._worker: threading.Thread | None = None
-        self._pending_intent: tuple[str, list[str]] | None = None
+        self._pending_intent: tuple[str, list[str], str] | None = None
         self._register_builtin_commands()
         self.load_plugins()
 
@@ -181,7 +188,7 @@ class AssistantEngine:
         if not self.is_running():
             return
         self._stop_flag.set()
-        self._queue.put(("__stop__", None))
+        self._queue.put(("", _STOP_SENTINEL))
 
     def is_running(self) -> bool:
         return bool(self._worker and self._worker.is_alive())
@@ -294,7 +301,7 @@ class AssistantEngine:
                 text, fn = self._queue.get(timeout=0.2)
             except queue.Empty:
                 continue
-            if text == "__stop__" and fn is None:
+            if fn is _STOP_SENTINEL:
                 break
             try:
                 if fn is not None:
@@ -314,9 +321,14 @@ class AssistantEngine:
             pending, self._pending_intent = self._pending_intent, None
             reply = text.lower()
             if reply in _CONFIRM_YES:
-                pending_name, pending_args = pending
+                pending_name, pending_args, pending_raw = pending
                 self._log(f"↪ بينفذ: {pending_name} {' '.join(pending_args)}".strip(), "info")
-                self._execute(pending_name, pending_args, text)
+                # لازم نبعت النص الأصلي (pending_raw)، مش رد التأكيد ("y")
+                # نفسه — بعض الإضافات (زي database_plugin.py, connectors_plugin.py)
+                # بتقرا ctx.raw مباشرة (مش ctx.args) عشان تتفادى مشاكل
+                # shlex.split مع نصوص فيها JSON/SQL، فلو بعتنا "y" هنا
+                # كانت هتشتغل على نص فاضي بدل الأمر اللي المستخدم أكّده فعلاً.
+                self._execute(pending_name, pending_args, pending_raw)
                 return
             if reply in _CONFIRM_NO:
                 self._log("❌ اتلغى", "info")
@@ -336,7 +348,7 @@ class AssistantEngine:
             suggestion = self._suggest_command(name, args)
             if suggestion:
                 sugg_name, sugg_args, message, level = suggestion
-                self._pending_intent = (sugg_name, sugg_args)
+                self._pending_intent = (sugg_name, sugg_args, text)
                 self._log(message, level)
             else:
                 self._log(f"❓ unknown command: {name} (try 'help')", "warn")

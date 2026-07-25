@@ -96,6 +96,43 @@ def test_double_start_is_idempotent(bare_engine):
     time.sleep(0.2)
 
 
+def test_submit_literal_stop_string_does_not_stop_engine(bare_engine):
+    # راجع: الإيقاف كان بيتعرّف بمطابقة نص "__stop__" حرفيًا جوه الطابور
+    # — لو مستخدم كتب النص ده فعليًا (أو جاله من macro/schedule/لصق)،
+    # كان الـ worker thread بيوقف بصمت زي لو stop() اتنادت فعلاً، من
+    # غير أي رسالة. دلوقتي الإيقاف بيتعرّف بـ sentinel object فريد
+    # (object identity) مش بمطابقة نص، فمينفعش أي نص مكتوب "يطابقه".
+    logs = []
+    bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
+    bare_engine.start()
+    bare_engine.submit("__stop__")
+    time.sleep(0.3)
+    assert bare_engine.is_running()
+    assert any("__stop__" in msg and level == "warn" for level, msg in logs)
+    bare_engine.stop()
+    time.sleep(0.2)
+    assert not bare_engine.is_running()
+
+
+def test_dispatch_confirm_yes_passes_original_raw_not_confirmation_reply(bare_engine, monkeypatch):
+    # راجع: pending_intent كان بيخزن (name, args) بس، من غير النص
+    # الأصلي اللي المستخدم كتبه — فلما يتأكد بـ "y"، ctx.raw بتاع الأمر
+    # المنفَّذ كان بيبقى "y" نفسها بدل النص الحقيقي. إضافات زي
+    # database_plugin.py/connectors_plugin.py بتقرا ctx.raw مباشرة (مش
+    # ctx.args) عشان تتفادى مشاكل shlex.split مع JSON/SQL، فكانت بتشتغل
+    # على نص فاضي/غلط تمامًا بعد التأكيد.
+    monkeypatch.setattr(bare_engine, "_try_llm_intent", lambda text: None)
+    bare_engine.registry.register("rawcmd", lambda ctx: f"raw was: {ctx.raw!r}")
+
+    logs = []
+    bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
+    bare_engine._dispatch("rawcmdd some real arguments")  # typo قريب من rawcmd
+    assert bare_engine._pending_intent is not None
+    logs.clear()
+    bare_engine._dispatch("y")
+    assert any("raw was: 'rawcmdd some real arguments'" in msg for _, msg in logs)
+
+
 def test_submit_and_command_result_reaches_log(bare_engine):
     logs = []
     bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
@@ -232,7 +269,7 @@ def test_dispatch_typo_sets_pending_and_does_not_execute(bare_engine, monkeypatc
     logs = []
     bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
     bare_engine._dispatch("hlp")
-    assert bare_engine._pending_intent == ("help", [])
+    assert bare_engine._pending_intent == ("help", [], "hlp")
     assert any("قصدك" in msg for _, msg in logs)
     # مفيش تنفيذ حصل — الـ echo/help output مفيهوش أي دليل تنفيذ فعلي
 
@@ -273,7 +310,7 @@ def test_dispatch_unrelated_input_discards_pending_and_processes_normally(bare_e
 def test_dispatch_pending_preserves_original_args(bare_engine, monkeypatch):
     monkeypatch.setattr(bare_engine, "_try_llm_intent", lambda text: None)
     bare_engine._dispatch("ecoh hello there")  # typo لأمر echo مع وسائط
-    assert bare_engine._pending_intent == ("echo", ["hello", "there"])
+    assert bare_engine._pending_intent == ("echo", ["hello", "there"], "ecoh hello there")
 
 
 # ── فهم النية: توجيه ذكي عبر Ollama (موك بالكامل — مفيش شبكة حقيقية) ─
@@ -366,7 +403,7 @@ def test_dispatch_llm_intent_full_flow_with_confirmation(bare_engine, monkeypatc
     bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
 
     bare_engine._dispatch("can you say something for me please")
-    assert bare_engine._pending_intent == ("echo", ["intent", "worked"])
+    assert bare_engine._pending_intent == ("echo", ["intent", "worked"], "can you say something for me please")
     assert any("🧠" in msg for _, msg in logs)
 
     logs.clear()
