@@ -4,7 +4,12 @@ echo   Nezuko (Smart Assistant) - Build EXE
 echo ====================================
 
 :: تثبيت المتطلبات
-py -m pip install customtkinter pyinstaller mcp capstone Pillow pandas matplotlib edge-tts piper-tts --quiet
+:: ملحوظة: typer مش مستخدم فعليًا في نيزوكو نفسه — لكن --collect-all mcp
+:: تحت بيحاول يمسح كل sub-modules بتاعة mcp، وده بيشمل mcp.cli اللي
+:: بيعمل import لـ typer وقت الفحص بس (مش وقت التشغيل الفعلي). من غيره
+:: البناء بالكامل بيفشل بـ "ModuleNotFoundError: No module named 'typer'"
+:: حتى لو الميزة دي (mcp.cli) نيزوكو نفسه ماستخدمهاش أبدًا.
+py -m pip install customtkinter pyinstaller mcp typer capstone Pillow pandas matplotlib edge-tts piper-tts --quiet
 
 :: بناء الـ EXE
 py -m PyInstaller ^
