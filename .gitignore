@@ -25,3 +25,4 @@ smart_assistant/think_memory.json
 smart_assistant/schedule.json
 smart_assistant/playbooks/
 smart_assistant/telegram_config.json
+smart_assistant/discord_config.json

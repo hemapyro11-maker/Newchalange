@@ -24,7 +24,9 @@ echo ====================================
 :: لو حابب قناة تليجرام تشتغل — اسم الحزمة على pip مختلف عن اسم الـ
 :: import (زي Pillow/PIL بالظبط): بتتثبت بـ python-telegram-bot، وبيتجمع
 :: بـ --collect-all telegram.
-py -m pip install customtkinter pyinstaller mcp typer capstone Pillow pandas matplotlib edge-tts piper-tts sounddevice python-telegram-bot --quiet
+:: discord.py: نفس الفكرة بالظبط لقناة ديسكورد (discord_plugin.py) —
+:: اسم الحزمة discord.py، اسم الـ import discord.
+py -m pip install customtkinter pyinstaller mcp typer capstone Pillow pandas matplotlib edge-tts piper-tts sounddevice python-telegram-bot discord.py --quiet
 
 :: بناء الـ EXE
 py -m PyInstaller ^
@@ -45,6 +47,7 @@ py -m PyInstaller ^
     --collect-all onnxruntime ^
     --collect-all sounddevice ^
     --collect-all telegram ^
+    --collect-all discord ^
     --add-data "core_engine.py;." ^
     --add-data "i18n.py;." ^
     --add-data "version.py;." ^
@@ -86,5 +89,8 @@ echo   - قناة تليجرام (telegram_set_token) محتاجة إنترنت 
 echo     (بوليينج عادي، مفيش سيرفر عام مطلوب). أول مستخدم يكلم البوت
 echo     لازم يتوافق عليه من على الجهاز نفسه بـ telegram_approve
 echo     <code> — التوافق ده بيدّي صلاحية كاملة زي القاعد على الجهاز.
+echo   - قناة ديسكورد (discord_set_token) نفس فكرة تليجرام بالظبط
+echo     (discord_approve <code>)، لكن لازم تفعّل 'Message Content
+echo     Intent' من Discord Developer Portal وإلا الرسائل هتوصل فاضية.
 echo ====================================
 pause
