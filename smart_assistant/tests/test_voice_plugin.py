@@ -1,4 +1,5 @@
 import json
+import os
 import pathlib
 import shutil
 import subprocess
@@ -26,6 +27,13 @@ def _isolate_keyring(monkeypatch):
 def isolated_diarize_config(tmp_path, monkeypatch):
     path = tmp_path / "diarize_config.json"
     monkeypatch.setattr(vp, "_diarize_config_path", lambda: path)
+    return path
+
+
+@pytest.fixture
+def isolated_clone_config(tmp_path, monkeypatch):
+    path = tmp_path / "clone_voice_config.json"
+    monkeypatch.setattr(vp, "_clone_voice_config_path", lambda: path)
     return path
 
 
@@ -672,6 +680,7 @@ def test_register_adds_stt_commands():
     for cmd in (
         "speak", "voice_status", "listen", "listen_run", "stt_status", "separate_vocals",
         "diarize_set_token", "diarize_key_status", "diarize",
+        "clone_voice_agree_license", "clone_voice",
     ):
         assert cmd in FakeEngine.registry.names
 
@@ -975,3 +984,171 @@ def test_separate_vocals_real_run_produces_stems(make_ctx, tmp_path):
     assert result.startswith("✅")
     vocals_files = list(out_dir.rglob("vocals.wav"))
     assert vocals_files, f"no vocals.wav found under {out_dir}"
+
+
+# ── clone_voice_agree_license ────────────────────────────────────────────
+
+def test_clone_voice_agree_license_saves_and_reports(make_ctx, isolated_clone_config):
+    result = vp._cmd_clone_voice_agree_license(make_ctx("clone_voice_agree_license", []))
+    assert result.startswith("✅")
+    assert "coqui.ai/cpml" in result
+    assert vp._clone_license_agreed() is True
+
+
+def test_clone_license_agreed_false_by_default(isolated_clone_config):
+    assert vp._clone_license_agreed() is False
+
+
+# ── clone_voice ─────────────────────────────────────────────────────────
+
+def test_clone_voice_no_args(make_ctx):
+    result = vp._cmd_clone_voice(make_ctx("clone_voice", []))
+    assert result.startswith("usage")
+    assert "موافقته" in result  # التذكير الأخلاقي موجود حتى في رسالة usage
+
+
+def test_clone_voice_requires_license_agreement_first(make_ctx, tmp_path, isolated_clone_config):
+    f = tmp_path / "ref.wav"
+    f.write_bytes(b"x")
+    result = vp._cmd_clone_voice(make_ctx("clone_voice", [str(f), "hello", str(tmp_path / "out.wav")]))
+    assert result.startswith("❌")
+    assert "clone_voice_agree_license" in result
+
+
+def test_clone_voice_reports_missing_tool(make_ctx, tmp_path, monkeypatch, isolated_clone_config):
+    vp._cmd_clone_voice_agree_license(make_ctx("clone_voice_agree_license", []))
+    monkeypatch.setitem(sys.modules, "TTS.api", None)
+    f = tmp_path / "ref.wav"
+    f.write_bytes(b"x")
+    result = vp._cmd_clone_voice(make_ctx("clone_voice", [str(f), "hello", str(tmp_path / "out.wav")]))
+    assert "TTS (Coqui) مش متثبت" in result
+    assert "pip install TTS" in result
+
+
+def test_clone_voice_missing_reference_file(make_ctx, tmp_path, monkeypatch, isolated_clone_config):
+    vp._cmd_clone_voice_agree_license(make_ctx("clone_voice_agree_license", []))
+    fake_module = types.ModuleType("TTS.api")
+    fake_module.TTS = object
+    monkeypatch.setitem(sys.modules, "TTS.api", fake_module)
+    result = vp._cmd_clone_voice(make_ctx("clone_voice", [str(tmp_path / "nope.wav"), "hello", str(tmp_path / "out.wav")]))
+    assert result.startswith("❌")
+    assert "مش موجود" in result
+
+
+def test_clone_voice_empty_text(make_ctx, tmp_path, monkeypatch, isolated_clone_config):
+    vp._cmd_clone_voice_agree_license(make_ctx("clone_voice_agree_license", []))
+    fake_module = types.ModuleType("TTS.api")
+    fake_module.TTS = object
+    monkeypatch.setitem(sys.modules, "TTS.api", fake_module)
+    f = tmp_path / "ref.wav"
+    f.write_bytes(b"x")
+    result = vp._cmd_clone_voice(make_ctx("clone_voice", [str(f), "   ", str(tmp_path / "out.wav")]))
+    assert result.startswith("❌")
+    assert "فاضي" in result
+
+
+def test_clone_voice_rejects_bad_language(make_ctx, tmp_path, monkeypatch, isolated_clone_config):
+    vp._cmd_clone_voice_agree_license(make_ctx("clone_voice_agree_license", []))
+    fake_module = types.ModuleType("TTS.api")
+    fake_module.TTS = object
+    monkeypatch.setitem(sys.modules, "TTS.api", fake_module)
+    f = tmp_path / "ref.wav"
+    f.write_bytes(b"x")
+    result = vp._cmd_clone_voice(make_ctx("clone_voice", [str(f), "hello", str(tmp_path / "out.wav"), "klingon"]))
+    assert result.startswith("❌")
+    assert "language" in result
+
+
+def test_clone_voice_success_creates_output_and_sets_tos_env(make_ctx, tmp_path, monkeypatch, isolated_clone_config):
+    vp._cmd_clone_voice_agree_license(make_ctx("clone_voice_agree_license", []))
+    monkeypatch.delenv("COQUI_TOS_AGREED", raising=False)
+
+    calls = []
+
+    class _FakeCoquiTTS:
+        def __init__(self, model_name, progress_bar=True, gpu=False):
+            calls.append(("init", model_name))
+
+        def tts_to_file(self, text, speaker_wav, language, file_path):
+            calls.append(("synth", text, speaker_wav, language, file_path))
+            pathlib.Path(file_path).write_bytes(b"fake-audio")
+
+    fake_module = types.ModuleType("TTS.api")
+    fake_module.TTS = _FakeCoquiTTS
+    monkeypatch.setitem(sys.modules, "TTS.api", fake_module)
+    monkeypatch.setattr(vp, "_clone_voice_models", {})
+
+    f = tmp_path / "ref.wav"
+    f.write_bytes(b"x")
+    out = tmp_path / "out.wav"
+    result = vp._cmd_clone_voice(make_ctx("clone_voice", [str(f), "أهلاً بيكي", str(out), "ar"]))
+
+    assert result.startswith("✅")
+    assert out.is_file()
+    assert os.environ.get("COQUI_TOS_AGREED") == "1"
+    assert calls[0] == ("init", vp._CLONE_MODEL)
+    assert calls[1] == ("synth", "أهلاً بيكي", str(f), "ar", str(out))
+
+
+def test_clone_voice_caches_model_across_calls(make_ctx, tmp_path, monkeypatch, isolated_clone_config):
+    vp._cmd_clone_voice_agree_license(make_ctx("clone_voice_agree_license", []))
+    init_calls = []
+
+    class _FakeCoquiTTS:
+        def __init__(self, model_name, progress_bar=True, gpu=False):
+            init_calls.append(model_name)
+
+        def tts_to_file(self, text, speaker_wav, language, file_path):
+            pathlib.Path(file_path).write_bytes(b"fake-audio")
+
+    fake_module = types.ModuleType("TTS.api")
+    fake_module.TTS = _FakeCoquiTTS
+    monkeypatch.setitem(sys.modules, "TTS.api", fake_module)
+    monkeypatch.setattr(vp, "_clone_voice_models", {})
+
+    f = tmp_path / "ref.wav"
+    f.write_bytes(b"x")
+    vp._cmd_clone_voice(make_ctx("clone_voice", [str(f), "hi", str(tmp_path / "out1.wav")]))
+    vp._cmd_clone_voice(make_ctx("clone_voice", [str(f), "hi again", str(tmp_path / "out2.wav")]))
+    assert init_calls == [vp._CLONE_MODEL]
+
+
+def test_clone_voice_reports_when_output_missing(make_ctx, tmp_path, monkeypatch, isolated_clone_config):
+    vp._cmd_clone_voice_agree_license(make_ctx("clone_voice_agree_license", []))
+
+    class _FakeCoquiTTS:
+        def __init__(self, model_name, progress_bar=True, gpu=False):
+            pass
+
+        def tts_to_file(self, text, speaker_wav, language, file_path):
+            pass  # عمداً مبيكتبش أي ملف — بيحاكي فشل صامت
+
+    fake_module = types.ModuleType("TTS.api")
+    fake_module.TTS = _FakeCoquiTTS
+    monkeypatch.setitem(sys.modules, "TTS.api", fake_module)
+    monkeypatch.setattr(vp, "_clone_voice_models", {})
+
+    f = tmp_path / "ref.wav"
+    f.write_bytes(b"x")
+    result = vp._cmd_clone_voice(make_ctx("clone_voice", [str(f), "hi", str(tmp_path / "missing_out.wav")]))
+    assert result.startswith("❌")
+    assert "مفيش ملف خرج" in result
+
+
+def test_clone_voice_model_load_error_reported(make_ctx, tmp_path, monkeypatch, isolated_clone_config):
+    vp._cmd_clone_voice_agree_license(make_ctx("clone_voice_agree_license", []))
+
+    class _FailingTTS:
+        def __init__(self, model_name, progress_bar=True, gpu=False):
+            raise RuntimeError("boom")
+
+    fake_module = types.ModuleType("TTS.api")
+    fake_module.TTS = _FailingTTS
+    monkeypatch.setitem(sys.modules, "TTS.api", fake_module)
+    monkeypatch.setattr(vp, "_clone_voice_models", {})
+
+    f = tmp_path / "ref.wav"
+    f.write_bytes(b"x")
+    result = vp._cmd_clone_voice(make_ctx("clone_voice", [str(f), "hi", str(tmp_path / "out.wav")]))
+    assert result.startswith("❌")
+    assert "boom" in result

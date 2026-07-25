@@ -68,8 +68,23 @@ install pyannote.audio`). النموذج الافتراضي (pyannote/speaker-di
 قبل أول استخدام. التوكن بيتحفظ بنفس نموذج keyring-مع-fallback بتاع
 telegram_plugin.py/youtube_strategy_plugin.py عبر `diarize_set_token`.
 
+**استنساخ الصوت (voice cloning):** `clone_voice` بيستنسخ أي صوت من
+عينة صوتية قصيرة (~6 ثواني كفاية) وينطق بيه نص جديد، عبر Coqui
+XTTS-v2 (اختيارية، `pip install TTS` — أول تشغيل بيحمّل نموذج تقيل
+~2GB). زي pyannote، النموذج ده محتاج موافقة صريحة على الترخيص
+(Coqui Public Model License — استخدام غير تجاري بشكل أساسي،
+https://coqui.ai/cpml) قبل أول استخدام؛ نيزوكو **مش** بيوافق نيابة
+عنك أوتوماتيك — لازم تشغّل `clone_voice_agree_license` بنفسك مرة
+واحدة الأول. **مهم:** الاستخدام المقصود هنا هو استنساخ صوتك إنت أو
+صوت عندك إذن صريح منه — مش تقليد صوت أي حد من غير موافقته.
+محتاج GPU عشان يبقى سريع؛ على CPU بيشتغل بس بطيء جدًا (دقايق للجملة
+الواحدة)، عكس فلسفة سلسلة speak (edge-tts/Piper/espeak-ng) اللي
+مصممة تكون خفيفة على أي جهاز — ده قيد حقيقي في التكنولوجيا نفسها،
+مش قرار تصميم.
+
 الأوامر: speak, voice_status, listen, listen_run, stt_status,
-separate_vocals, diarize_set_token, diarize_key_status, diarize
+separate_vocals, diarize_set_token, diarize_key_status, diarize,
+clone_voice_agree_license, clone_voice
 """
 from __future__ import annotations
 
@@ -118,6 +133,11 @@ _DIARIZE_KEYRING_SERVICE = "nezuko-diarize"
 _DIARIZE_TOKEN_NAME = "hf_token"
 _DIARIZE_MODEL = "pyannote/speaker-diarization-3.1"
 
+_CLONE_MODEL = "tts_models/multilingual/multi-dataset/xtts_v2"
+_CLONE_LANGUAGES = {
+    "ar", "en", "es", "fr", "de", "it", "pt", "pl", "tr", "ru", "nl", "cs", "zh-cn", "ja", "hu", "ko", "hi",
+}
+
 
 def _voice_cache_dir() -> pathlib.Path:
     # نفس منطق _quarantine_dir في security_scan_plugin.py: exe المبني
@@ -128,6 +148,23 @@ def _voice_cache_dir() -> pathlib.Path:
     d = base / "voice_cache"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def _clone_voice_config_path() -> pathlib.Path:
+    base = pathlib.Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) \
+        else pathlib.Path(__file__).resolve().parent.parent
+    return base / "clone_voice_config.json"
+
+
+def _clone_license_agreed() -> bool:
+    path = _clone_voice_config_path()
+    if not path.is_file():
+        return False
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return bool(data.get("license_agreed"))
 
 
 def _diarize_config_path() -> pathlib.Path:
@@ -593,6 +630,83 @@ def _cmd_diarize(ctx) -> str:
     return "\n".join(lines)
 
 
+# ═══════════════════════════════════════════════════════════════════
+# استنساخ الصوت (Coqui XTTS-v2) — أداة خارجية اختيارية، محتاجة موافقة
+# صريحة على الترخيص قبل أول استخدام (ماينفعش نيزوكو يوافق نيابة عنك)
+# ═══════════════════════════════════════════════════════════════════
+
+_clone_voice_models: dict[str, object] = {}
+
+
+def _cmd_clone_voice_agree_license(ctx) -> str:
+    path = _clone_voice_config_path()
+    data = {}
+    if path.is_file():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = {}
+    data["license_agreed"] = True
+    try:
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError as e:
+        return f"❌ تعذر حفظ الموافقة: {e}"
+    return (
+        "✅ اتسجلت موافقتك على Coqui Public Model License (CPML) لنموذج XTTS-v2.\n"
+        "التفاصيل الكاملة: https://coqui.ai/cpml — بالمختصر: استخدام غير تجاري بشكل\n"
+        "أساسي. نيزوكو مش هيوافق نيابة عنك على ترخيص بيخص استخدامك الشخصي، فلازم\n"
+        "الأمر ده يتشغّل صراحة مرة واحدة قبل clone_voice.\n"
+        "جرّب دلوقتي: clone_voice <reference.wav> \"<نص>\" <output.wav> [language=ar]"
+    )
+
+
+def _cmd_clone_voice(ctx) -> str:
+    if len(ctx.args) < 3:
+        return (
+            "usage: clone_voice <reference.wav> <text> <output.wav> [language=ar] — "
+            "يستنسخ صوت من عينة صوتية قصيرة (~6+ ثواني) وينطق بيه أي نص (Coqui XTTS-v2)\n"
+            "⚠️ استخدمه لصوتك إنت أو صوت عندك إذن صريح تستنسخه — مش لتقليد حد من غير موافقته."
+        )
+    if not _clone_license_agreed():
+        return (
+            "❌ محتاج توافق مرة واحدة بس على ترخيص Coqui Public Model License (CPML) قبل أول استخدام:\n"
+            "   التفاصيل: https://coqui.ai/cpml\n"
+            "   وافق بـ: clone_voice_agree_license"
+        )
+    try:
+        from TTS.api import TTS as CoquiTTS
+    except ImportError:
+        return "❌ TTS (Coqui) مش متثبت — نزّله بـ: pip install TTS (مجاني، أول تشغيل بيحمّل نموذج XTTS-v2 تقيل ~2GB)"
+
+    reference, text, output = ctx.args[0], ctx.args[1], ctx.args[2]
+    if not pathlib.Path(reference).is_file():
+        return f"❌ ملف الصوت المرجعي مش موجود: {reference}"
+    if not text.strip():
+        return "❌ النص فاضي"
+    language = ctx.args[3] if len(ctx.args) > 3 else "ar"
+    if language not in _CLONE_LANGUAGES:
+        return f"❌ language لازم يكون واحدة من: {', '.join(sorted(_CLONE_LANGUAGES))}"
+
+    os.environ["COQUI_TOS_AGREED"] = "1"  # موافقتنا الصريحة فوق سجّلت فعلاً — ده بس بيبلّغ مكتبة Coqui نفسها
+
+    model = _clone_voice_models.get(_CLONE_MODEL)
+    if model is None:
+        try:
+            model = CoquiTTS(_CLONE_MODEL, progress_bar=False, gpu=False)
+        except Exception as e:
+            return f"❌ تعذر تحميل نموذج XTTS-v2: {e}"
+        _clone_voice_models[_CLONE_MODEL] = model
+
+    try:
+        model.tts_to_file(text=text, speaker_wav=reference, language=language, file_path=output)
+    except Exception as e:
+        return f"❌ فشل استنساخ الصوت: {e}"
+
+    if not pathlib.Path(output).is_file():
+        return "❌ فشل استنساخ الصوت — مفيش ملف خرج حقيقي"
+    return f"✅ اتستنسخ الصوت (لغة: {language}) في {output}"
+
+
 def _parse_listen_seconds(ctx) -> tuple[int, str | None]:
     if not ctx.args:
         return _LISTEN_DEFAULT_SECONDS, None
@@ -687,3 +801,5 @@ def register(engine):
     engine.registry.register("diarize_set_token", _cmd_diarize_set_token, "diarize_set_token <hf_token> — تسجيل توكن Hugging Face لتحديد المتكلمين")
     engine.registry.register("diarize_key_status", _cmd_diarize_key_status, "diarize_key_status — هل فيه توكن Hugging Face متظبط؟")
     engine.registry.register("diarize", _cmd_diarize, "diarize <audio> — يحدد مين اتكلم وإمتى (speaker diarization، pyannote.audio)")
+    engine.registry.register("clone_voice_agree_license", _cmd_clone_voice_agree_license, "clone_voice_agree_license — موافقة صريحة (مرة واحدة) على ترخيص نموذج استنساخ الصوت")
+    engine.registry.register("clone_voice", _cmd_clone_voice, "clone_voice <reference.wav> <text> <output.wav> [language=ar] — استنساخ صوت من عينة صوتية (Coqui XTTS-v2)")
