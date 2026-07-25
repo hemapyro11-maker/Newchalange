@@ -443,6 +443,64 @@ def _make_custom_hdb_signature(clamav_db_dir, content: bytes, sig_name: str):
     (clamav_db_dir / "pytest_custom.hdb").write_text(f"{md5}:{len(content)}:{sig_name}\n")
 
 
+def test_virus_scan_reports_partial_quarantine_honestly(make_ctx, tmp_path, monkeypatch):
+    # واحد من المسارين المصابين بيتشال من على القرص قبل ما clamscan
+    # يرجع نتيجته (TOCTOU) — بيحاكي أي حالة المسار المبلّغ عنه مش ملف
+    # حقيقي فعليًا (عنصر جوه أرشيف، أو اتشال). لازم الرسالة تقول صراحةً
+    # إن مش كله اتنقل، مش "اتنقلوا كلهم" الوهمية.
+    monkeypatch.setattr(ssp.shutil, "which", lambda name: "/usr/bin/clamscan" if name == "clamscan" else None)
+    real_infected = tmp_path / "real.exe"
+    real_infected.write_bytes(b"x")
+    vanished_path = str(tmp_path / "vanished.exe")  # مش موجود فعليًا على القرص
+
+    stdout = f"{real_infected}: Test.Sig-1 FOUND\n{vanished_path}: Test.Sig-2 FOUND\n"
+    monkeypatch.setattr(
+        ssp.subprocess, "run",
+        lambda cmd, **kw: ssp.subprocess.CompletedProcess(cmd, 1, stdout=stdout, stderr=""),
+    )
+
+    result = ssp._cmd_virus_scan(make_ctx("virus_scan", [str(tmp_path)]))
+    assert "⚠️" in result
+    assert "اتنقلوا كلهم" not in result
+    assert "1 بس من 2" in result
+    assert vanished_path in result
+    assert not real_infected.exists()  # اللي كان ملف حقيقي فعلاً اتنقل
+
+
+def test_virus_scan_reports_all_skipped_when_none_are_real_files(make_ctx, tmp_path, monkeypatch):
+    monkeypatch.setattr(ssp.shutil, "which", lambda name: "/usr/bin/clamscan" if name == "clamscan" else None)
+    vanished_path = str(tmp_path / "vanished.exe")
+    stdout = f"{vanished_path}: Test.Sig-1 FOUND\n"
+    monkeypatch.setattr(
+        ssp.subprocess, "run",
+        lambda cmd, **kw: ssp.subprocess.CompletedProcess(cmd, 1, stdout=stdout, stderr=""),
+    )
+
+    result = ssp._cmd_virus_scan(make_ctx("virus_scan", [str(tmp_path)]))
+    assert "⚠️" in result
+    assert "اتنقلوا كلهم" not in result
+    assert "محدش من الـ 1 ملف المصاب اتنقل" in result
+
+
+def test_virus_scan_reports_success_when_all_real_files_quarantined(make_ctx, tmp_path, monkeypatch):
+    monkeypatch.setattr(ssp.shutil, "which", lambda name: "/usr/bin/clamscan" if name == "clamscan" else None)
+    infected1 = tmp_path / "a.exe"
+    infected1.write_bytes(b"x")
+    infected2 = tmp_path / "b.exe"
+    infected2.write_bytes(b"y")
+    stdout = f"{infected1}: Test.Sig-1 FOUND\n{infected2}: Test.Sig-2 FOUND\n"
+    monkeypatch.setattr(
+        ssp.subprocess, "run",
+        lambda cmd, **kw: ssp.subprocess.CompletedProcess(cmd, 1, stdout=stdout, stderr=""),
+    )
+
+    result = ssp._cmd_virus_scan(make_ctx("virus_scan", [str(tmp_path)]))
+    assert "اتنقلوا كلهم للحجر الصحي تلقائيًا (2 ملف)" in result
+    assert "⚠️" not in result
+    assert not infected1.exists()
+    assert not infected2.exists()
+
+
 @requires_clamscan
 def test_virus_scan_detects_and_quarantines_real_signature_match(make_ctx, tmp_path):
     """اختبار حقيقي كامل: بنعمل توقيع ClamAV مخصص (custom .hdb) بنفسنا

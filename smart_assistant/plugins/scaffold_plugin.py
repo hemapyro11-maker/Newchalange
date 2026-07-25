@@ -36,6 +36,19 @@ def _slugify(name: str) -> str:
     return slug or "project"
 
 
+def _ensure_identifier(candidate: str, fallback: str) -> str:
+    """يتأكد إن candidate معرّف (identifier) صالح في بايثون/Kotlin/Swift/
+    Solidity/C — كل اللغات دي بتتفق إن المعرّف مايبدأش برقم. لو فاضي،
+    بيرجع fallback؛ لو بادئ برقم، بيضيف underscore قبله (بادئة صالحة
+    في كل اللغات الخمس) بدل ما يولّد كود مكسور (زي SyntaxError في
+    بايثون لو اسم المشروع "9lives" اتحط زي ما هو كـ اسم موديول)."""
+    if not candidate:
+        return fallback
+    if candidate[0].isdigit():
+        return "_" + candidate
+    return candidate
+
+
 def _scaffold_web(root: pathlib.Path, name: str) -> list[str]:
     slug = _slugify(name)
     _write(root / "src" / "index.html", (
@@ -96,8 +109,8 @@ def _scaffold_web(root: pathlib.Path, name: str) -> list[str]:
 
 
 def _scaffold_android(root: pathlib.Path, name: str) -> list[str]:
-    slug = "".join(c.lower() for c in name if c.isalnum())
-    pkg = "com.example." + slug if slug else "com.example.app"
+    slug = _ensure_identifier("".join(c.lower() for c in name if c.isalnum()), "app")
+    pkg = "com.example." + slug
     pkg_path = pkg.replace(".", "/")
     _write(root / "settings.gradle.kts", f'''pluginManagement {{
     repositories {{
@@ -236,7 +249,7 @@ gradle assembleDebug     # يبني APK
 
 
 def _scaffold_ios(root: pathlib.Path, name: str) -> list[str]:
-    safe = "".join(c for c in name if c.isalnum()) or "App"
+    safe = _ensure_identifier("".join(c for c in name if c.isalnum()), "App")
     _write(root / f"{safe}App.swift", f"""import SwiftUI
 
 @main
@@ -442,7 +455,7 @@ pytest                   # منطق اللاعب + headless smoke test للحل�
 
 def _scaffold_python(root: pathlib.Path, name: str) -> list[str]:
     slug = _slugify(name)
-    pkg = slug.replace("-", "_")
+    pkg = _ensure_identifier(slug.replace("-", "_"), "app")
 
     _write(root / "src" / pkg / "__init__.py", f'"""{name}."""\n\n__version__ = "0.1.0"\n')
     _write(root / "src" / pkg / "main.py", f'''"""نقطة الدخول الرئيسية."""
@@ -912,7 +925,7 @@ tox                   # اختبار على كل نسخ بايثون في [tox] 
 
 def _scaffold_ml(root: pathlib.Path, name: str) -> list[str]:
     slug = _slugify(name)
-    pkg = slug.replace("-", "_")
+    pkg = _ensure_identifier(slug.replace("-", "_"), "app")
 
     _write(root / "src" / pkg / "__init__.py", f'"""{name} — ML pipeline."""\n\n__version__ = "0.1.0"\n')
     _write(root / "src" / pkg / "data.py", '''"""تحميل وتقسيم البيانات — طبقة منفصلة عشان تقدر تستبدلها ببيانات
@@ -1142,7 +1155,7 @@ pytest    # بنية الدائرة + تحقق فعلي من خاصية التش
 
 
 def _scaffold_blockchain(root: pathlib.Path, name: str) -> list[str]:
-    safe = "".join(c for c in name if c.isalnum()) or "MyContract"
+    safe = _ensure_identifier("".join(c for c in name if c.isalnum()), "MyContract")
     _write(root / "contracts" / f"{safe}.sol", f'''// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -1380,7 +1393,7 @@ make test    # يبني ويشغّل اختبار حقيقي لمنطق blink.c 
 
 
 def _scaffold_kernel_module(root: pathlib.Path, name: str) -> list[str]:
-    safe = "".join(c.lower() if c.isalnum() else "_" for c in name) or "hello_module"
+    safe = _ensure_identifier("".join(c.lower() if c.isalnum() else "_" for c in name), "hello_module")
     _write(root / f"{safe}.c", f'''#include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>

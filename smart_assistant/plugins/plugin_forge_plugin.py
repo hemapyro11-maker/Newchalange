@@ -4,14 +4,24 @@ plugin_forge_plugin.py — المساعد يقدر يصمم Plugins جديدة �
 لحد سقف محاولات محدود)، باستخدام نموذج محلي مجاني (Ollama) — بدون أي
 API مدفوع، اتساقاً مع self_improve_plugin.py.
 
-النطاق الآمن: التوليد والتصحيح شغالين بالكامل بدون تدخل بشري في حلقة
-إعادة المحاولة نفسها — ده الجزء اللي بيحقق "يستكشف أخطاءها ويصلحها".
-لكن الكود المتولد بيتحط في plugins_pending/ (مش plugins/) ومش بيتحمّل
-في التطبيق الحي غير بعد أمر approve_plugin صريح منك، بعد ما تقدر تراجعه
-بـ review_pending. كود مولّد آلياً — حتى من نموذج محلي — وارد يبقى فيه
-غلط أو سلوك مش متوقع، وتنفيذه بامتيازات كاملة في التطبيق تلقائياً هو
-بالتعريف مخاطرة تنفيذ كود غير مراجَع. الخطوة الوحيدة المحتاجة إذنك:
-approve_plugin. باقي الحلقة (توليد، تحقق، تصحيح، إعادة محاولة) تلقائي.
+النطاق الآمن: الكود المتولد بيتحط في plugins_pending/ (مش plugins/)
+ومش بيتحمّل **جوه محرك نيزوكو الحي** غير بعد أمر approve_plugin صريح
+منك، بعد ما تقدر تراجعه بـ review_pending — الخطوة الوحيدة المحتاجة
+إذنك فعليًا.
+
+**ملحوظة صادقة مهمة (مش تفصيلة صغيرة):** حلقة "توليد → تحقق → تصحيح
+→ إعادة محاولة" بتنفذ الكود المتولد فعليًا وقت كل محاولة تحقق —
+`_validate_candidate()` بتعمل `exec_module()` وتنادي `register(engine)`
+الحقيقية بتاعة الكود المرشّح، في subprocess منفصل (مهلة 10 ثواني،
+بدون أي عزل/sandboxing حقيقي على مستوى نظام التشغيل — نفس صلاحيات
+حسابك بالظبط) — لحد MAX_ATTEMPTS (4) مرات، **قبل ما تشوفه إنت خالص**
+عبر review_pending. يعني كود غلط أو غير متوقع من النموذج المحلي (حتى
+من غير أي نية سيئة، مجرد هلوسة نموذج) ممكن يتنفذ فعليًا على جهازك —
+مش بس "يتفحص نظريًا" — قبل ما توافق على حاجة. عزل حقيقي (container/
+sandbox) خارج نطاق مشروع مساعد سطح مكتب بسيط زي ده، فالحماية الوحيدة
+العملية دلوقتي هي إنك متستخدمش create_plugin/fix_plugin على وصف مهمة
+حساسة (زي "امسح ملفات قديمة") من غير ما تكون واثق في النموذج المحلي
+بتاعك.
 """
 from __future__ import annotations
 
@@ -294,8 +304,12 @@ def _cmd_review_pending(ctx) -> str:
 
 def _cmd_approve_plugin(ctx) -> str:
     if not ctx.args:
-        return "usage: approve_plugin <name>"
-    name = ctx.args[0]
+        return "usage: approve_plugin <name> [--force]"
+    force = "--force" in ctx.args
+    args = [a for a in ctx.args if a != "--force"]
+    if not args:
+        return "usage: approve_plugin <name> [--force]"
+    name = args[0]
     name_error = _validate_name(name)
     if name_error:
         return name_error
@@ -303,9 +317,14 @@ def _cmd_approve_plugin(ctx) -> str:
     if not code_path.is_file():
         return f"❌ مفيش plugin مستني اسمه {name}"
     target_dir = ctx.engine.plugins_dirs[-1]  # جنب الـ exe/كود المصدر (قابل للكتابة)، مش الـ bundle للقراءة بس
+    target_path = target_dir / f"{name}.py"
+    if target_path.is_file() and not force:
+        return (
+            f"⚠️ فيه plugin موجود فعلاً اسمه {name}.py — الموافقة دي هتستبدله بالكامل بالكود المولّد.\n"
+            f"لو متأكد إنك عايز تستبدله، استخدم: approve_plugin {name} --force"
+        )
     try:
         target_dir.mkdir(parents=True, exist_ok=True)
-        target_path = target_dir / f"{name}.py"
         target_path.write_text(code_path.read_text(encoding="utf-8"), encoding="utf-8")
         code_path.unlink()
         (_pending_dir() / f"{name}.meta.json").unlink(missing_ok=True)
@@ -339,5 +358,5 @@ def register(engine):
     engine.registry.register("fix_plugin", _cmd_fix_plugin, "fix_plugin <name> [error] — يصلح plugin موجود تلقائياً")
     engine.registry.register("list_pending", _cmd_list_pending, "عرض الـ plugins المولّدة المستنية موافقتك")
     engine.registry.register("review_pending", _cmd_review_pending, "review_pending <name> — عرض كود plugin مستني قبل الموافقة")
-    engine.registry.register("approve_plugin", _cmd_approve_plugin, "approve_plugin <name> — تفعيل plugin بعد مراجعتك")
+    engine.registry.register("approve_plugin", _cmd_approve_plugin, "approve_plugin <name> [--force] — تفعيل plugin بعد مراجعتك (بيرفض يستبدل plugin موجود من غير --force)")
     engine.registry.register("reject_plugin", _cmd_reject_plugin, "reject_plugin <name> — رفض/حذف plugin مستني")

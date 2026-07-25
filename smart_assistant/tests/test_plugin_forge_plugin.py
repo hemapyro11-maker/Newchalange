@@ -129,6 +129,50 @@ def test_full_lifecycle_generate_review_approve(monkeypatch, tmp_path, bare_engi
     assert result == "pong"
 
 
+def test_approve_plugin_refuses_to_overwrite_existing_without_force(monkeypatch, tmp_path, bare_engine):
+    pending = tmp_path / "pending"
+    pending.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(pf, "_pending_dir", lambda: pending)
+    live_dir = tmp_path / "live"
+    live_dir.mkdir(parents=True, exist_ok=True)
+    bare_engine.plugins_dirs = [live_dir]
+
+    existing_content = "def register(engine):\n    pass\n"
+    (live_dir / "weatherbot.py").write_text(existing_content, encoding="utf-8")
+
+    ok, code, msg, attempts = pf._generate_with_retries(bare_engine, "prompt", "weatherbot", ask=_fake_generator)
+    pf._save_candidate("weatherbot", code, "desc", ok, attempts, msg)
+
+    approve = pf._cmd_approve_plugin(CommandContext(raw="approve_plugin weatherbot", args=["weatherbot"], engine=bare_engine))
+    assert approve.startswith("⚠️")
+    assert "--force" in approve
+    # الملف الموجود فضل زي ما هو من غير أي لمس
+    assert (live_dir / "weatherbot.py").read_text(encoding="utf-8") == existing_content
+    # المرشّح لسه مستني، مش اتنقل ولا اتمسح
+    assert (pending / "weatherbot.py").is_file()
+
+
+def test_approve_plugin_overwrites_existing_with_force(monkeypatch, tmp_path, bare_engine):
+    pending = tmp_path / "pending"
+    pending.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(pf, "_pending_dir", lambda: pending)
+    live_dir = tmp_path / "live"
+    live_dir.mkdir(parents=True, exist_ok=True)
+    bare_engine.plugins_dirs = [live_dir]
+
+    (live_dir / "weatherbot.py").write_text("def register(engine):\n    pass\n", encoding="utf-8")
+
+    ok, code, msg, attempts = pf._generate_with_retries(bare_engine, "prompt", "weatherbot", ask=_fake_generator)
+    pf._save_candidate("weatherbot", code, "desc", ok, attempts, msg)
+
+    approve = pf._cmd_approve_plugin(
+        CommandContext(raw="approve_plugin weatherbot --force", args=["weatherbot", "--force"], engine=bare_engine)
+    )
+    assert approve.startswith("✅")
+    assert "ping" in (live_dir / "weatherbot.py").read_text(encoding="utf-8")
+    assert bare_engine.registry.get("ping") is not None
+
+
 def test_reject_plugin_removes_candidate(monkeypatch, tmp_path, bare_engine):
     pending = tmp_path / "pending"
     pending.mkdir(parents=True, exist_ok=True)

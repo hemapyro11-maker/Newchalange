@@ -28,6 +28,73 @@ def test_scaffold_rejects_path_traversal_name(make_ctx, tmp_path):
     assert result.startswith("❌")
 
 
+# ── _ensure_identifier: digit-leading project names must not produce
+# invalid identifiers (regression — was producing real SyntaxErrors and
+# unusable code before this fix) ──────────────────────────────────────
+
+def test_ensure_identifier_prefixes_digit_leading_candidate():
+    assert sp._ensure_identifier("9lives", "app") == "_9lives"
+
+
+def test_ensure_identifier_uses_fallback_for_empty():
+    assert sp._ensure_identifier("", "app") == "app"
+
+
+def test_ensure_identifier_leaves_valid_candidate_unchanged():
+    assert sp._ensure_identifier("nezuko", "app") == "nezuko"
+
+
+def test_scaffold_python_digit_leading_name_compiles(make_ctx, tmp_path):
+    result = sp._cmd_scaffold(make_ctx("scaffold", ["python", "9lives", str(tmp_path)]))
+    assert result.startswith("✅")
+    root = tmp_path / "9lives"
+    py_compile.compile(str(root / "src" / "_9lives" / "main.py"), doraise=True)
+    py_compile.compile(str(root / "tests" / "test_main.py"), doraise=True)
+    assert "from _9lives.main import greet" in (root / "tests" / "test_main.py").read_text(encoding="utf-8")
+
+
+def test_scaffold_ml_digit_leading_name_compiles(make_ctx, tmp_path):
+    result = sp._cmd_scaffold(make_ctx("scaffold", ["ml", "9lives", str(tmp_path)]))
+    assert result.startswith("✅")
+    root = tmp_path / "9lives"
+    py_compile.compile(str(root / "src" / "_9lives" / "data.py"), doraise=True)
+    py_compile.compile(str(root / "tests" / "test_pipeline.py"), doraise=True)
+
+
+def test_scaffold_android_digit_leading_name_valid_package(make_ctx, tmp_path):
+    result = sp._cmd_scaffold(make_ctx("scaffold", ["android", "9Lives", str(tmp_path)]))
+    assert result.startswith("✅")
+    build_gradle = (tmp_path / "9Lives" / "app" / "build.gradle.kts").read_text(encoding="utf-8")
+    assert 'namespace = "com.example._9lives"' in build_gradle
+    assert (tmp_path / "9Lives" / "app" / "src" / "main" / "java" / "com" / "example" / "_9lives" / "Greeter.kt").is_file()
+
+
+def test_scaffold_ios_digit_leading_name_valid_swift(make_ctx, tmp_path):
+    result = sp._cmd_scaffold(make_ctx("scaffold", ["ios", "3DGame", str(tmp_path)]))
+    assert result.startswith("✅")
+    root = tmp_path / "3DGame"
+    assert (root / "_3DGameApp.swift").is_file()
+    content = (root / "_3DGameApp.swift").read_text(encoding="utf-8")
+    assert "struct _3DGameApp: App" in content
+
+
+def test_scaffold_blockchain_digit_leading_name_valid_solidity(make_ctx, tmp_path):
+    result = sp._cmd_scaffold(make_ctx("scaffold", ["blockchain", "9Coin", str(tmp_path)]))
+    assert result.startswith("✅")
+    root = tmp_path / "9Coin"
+    assert (root / "contracts" / "_9Coin.sol").is_file()
+    assert "contract _9Coin {" in (root / "contracts" / "_9Coin.sol").read_text(encoding="utf-8")
+
+
+def test_scaffold_kernel_module_digit_leading_name_valid_c(make_ctx, tmp_path):
+    result = sp._cmd_scaffold(make_ctx("scaffold", ["kernel_module", "9mod", str(tmp_path)]))
+    assert result.startswith("✅")
+    root = tmp_path / "9mod"
+    assert (root / "_9mod.c").is_file()
+    content = (root / "_9mod.c").read_text(encoding="utf-8")
+    assert "static int __init _9mod_init(void)" in content
+
+
 def test_scaffold_rejects_existing_nonempty_dir(make_ctx, tmp_path):
     project = tmp_path / "MyApp"
     project.mkdir()

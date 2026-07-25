@@ -679,6 +679,7 @@ def _cmd_virus_scan(ctx) -> str:
 
     lines = [f"🛑 لقيت {len(infected)} ملف مصاب في {root}:"]
     quarantined = []
+    skipped = []
     for file_path, signature in infected:
         lines.append(f"  🦠 {file_path} — {signature}")
         if not no_quarantine:
@@ -686,13 +687,29 @@ def _cmd_virus_scan(ctx) -> str:
             if p.is_file():
                 entry = _quarantine_move(p, f"virus_scan: {signature}")
                 quarantined.append(entry["id"])
+            else:
+                skipped.append(file_path)
 
-    if quarantined:
+    # مهم: "اتنقلوا كلهم" (all moved) لازم تتقال بس لو فعلاً كل ملف
+    # مصاب اتنقل — مش بس لو القايمة مش فاضية. لو مسار مصاب مش ملف
+    # حقيقي على القرص (عنصر جوه أرشيف، أو TOCTOU اتشال بين الفحص
+    # والنقل)، لازم المستخدم يعرف إنه لسه في مكانه بدل ما نديله إحساس
+    # أمان زايف إن كل حاجة اتحجرت.
+    if no_quarantine:
+        lines.append("\n(--no-quarantine: الملفات اتسابت في مكانها من غير ما تتلمس)")
+    elif quarantined and not skipped:
         lines.append(f"\n🔒 اتنقلوا كلهم للحجر الصحي تلقائيًا ({len(quarantined)} ملف) — ماتم مسحهم ولا 'تنظيفهم' في مكانهم")
         lines.append("عشان أي محاولة 'تنظيف' فيروس مع ضمان إن الملف يفضل شغال زي الأول مش حاجة أي أداة أمان بتضمنها فعليًا.")
         lines.append("للاستعادة (لو false positive): quarantine_restore <id> — شوف quarantine_list")
-    elif no_quarantine:
-        lines.append("\n(--no-quarantine: الملفات اتسابت في مكانها من غير ما تتلمس)")
+    else:
+        if quarantined:
+            lines.append(f"\n⚠️ اتنقل {len(quarantined)} بس من {len(infected)} ملف مصاب للحجر الصحي — الباقي فضل في مكانه من غير ما يتلمس:")
+        else:
+            lines.append(f"\n⚠️ محدش من الـ {len(infected)} ملف المصاب اتنقل للحجر الصحي — كلهم فضلوا في مكانهم من غير ما يتلمسوا:")
+        for sp in skipped:
+            lines.append(f"    • {sp} (مش ملف حقيقي على القرص — يمكن عنصر جوه أرشيف)")
+        if quarantined:
+            lines.append("للاستعادة (لو false positive): quarantine_restore <id> — شوف quarantine_list")
 
     return "\n".join(lines)
 
