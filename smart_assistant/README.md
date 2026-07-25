@@ -139,7 +139,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-662 اختبار حقيقي (مش placeholders) بتغطي كل plugin و Core Engine —
+679 اختبار حقيقي (مش placeholders) بتغطي كل plugin و Core Engine —
 تحليل ELF/PE حقيقي، معالجة فيديو حقيقية عبر FFmpeg، توليد أيقونات
 حقيقي، حلقة توليد/تصحيح plugin_forge كاملة، إلخ. الاختبارات اللي
 محتاجة أدوات اختيارية (FFmpeg, Pillow, capstone, mcp) بتتخطى تلقائياً
@@ -272,7 +272,28 @@ think_model <name>       # تغيير النموذج المحلي (الافتر�
 think_critique on|off    # تشغيل/إيقاف المراجعة الذاتية للإجابات
 think_remember <ملاحظة>  # حفظ حقيقة دائمة تعدي كل الجلسات القادمة
 think_forget              # مسح كل الملاحظات الدائمة
+think_playbooks list|add|show|remove   # تعليمات markdown متخصصة (شرح تحت)
 ```
+
+**Playbooks — تعليمات markdown متخصصة، مستوحاة من نظام SKILL.md في
+Clawdbot:** بدل ما تكتب plugin بايثون كامل عشان تعلّم `think` سلوك
+متخصص في موضوع معيّن، تقدر تكتب ملف markdown بسيط:
+
+```
+think_playbooks add yt_growth لما حد يسأل عن نمو قناة يوتيوب، ابدأ دايمًا
+بـ channel_growth_report قبل أي تحليل أو نصيحة.
+
+think ازاي أنمي قناتي؟
+🗺 الخطة: هفحص بيانات القناة الأول زي ما الـ playbook بيقول
+🔧 محتاج أشغّل: channel_growth_report @yourchannel
+```
+
+`think` بيفلتر أوتوماتيك أقرب playbook لموضوع سؤالك الحالي (نفس أسلوب
+فلترة الأدوار فوق — تشابه نصي، بيستبعد كلمات الربط القصيرة زي "عن"/"من"
+عشان محدش يتطابق بالصدفة) وبيحقن بس اللي فعلاً له علاقة، مش كل
+الملفات كل مرة. الملفات في `playbooks/` (محلي، خارج git). سُمّيت
+"playbook" مش "skill" عشان الاسم ده مستخدم فعلاً لحاجة تانية تمامًا
+في نيزوكو (سجل `skills.json`/أمر `skills` بتاع core_engine).
 
 **لتفكير أعمق فعليًا:** llama3.2 الافتراضي نموذج عام صغير، مش مصمم
 للاستدلال العميق. نماذج زي **DeepSeek-R1** أو **QwQ** (مجانية

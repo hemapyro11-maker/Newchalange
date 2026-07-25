@@ -28,6 +28,16 @@ llama3.2 الافتراضي) بحجم وقدرة محدودين مقارنة ب�
    حتى بعد `think_reset` أو إعادة تشغيل البرنامج، وبتتحقن في كل محادثة
    جديدة كسياق طويل الأمد.
 
+**Playbooks — تعليمات متخصصة بملفات markdown (مستوحاة من نظام
+SKILL.md في أدوات زي Clawdbot):** بدل ما تكتب plugin بايثون كامل عشان
+تعلّم النموذج حاجة متخصصة، تقدر تكتب ملف markdown بسيط في مجلد
+`playbooks/` (زي: "لما حد يسأل عن تحليل قناة يوتيوب، ابدأ دايمًا بـ
+channel_growth_report قبل أي حاجة تانية"). `think` بيفلتر أوتوماتيك
+أقرب playbook لموضوع سؤالك (نفس أسلوب فلترة الأدوار فوق) ويحقنه في
+سياق النموذج بس لو كان فعلاً ذو صلة — مش كل الـ playbooks كل مرة. سُمّي
+"playbook" مش "skill" عشان الاسم ده مستخدم فعلاً لحاجة تانية تمامًا في
+نيزوكو (سجل `skills.json`/أمر `skills` بتاع core_engine).
+
 **الأمان أهم حاجة هنا:** النموذج ممكن "يقترح" يشغّل أي أداة، لكن
 **مفيش أي تنفيذ تلقائي أبدًا** — نفس مبدأ المشروع كله. لازم تأكيد
 صريح (`think y`) قبل ما أي أداة تتشغّل فعليًا، والنموذج بيتحقق من
@@ -36,7 +46,7 @@ llama3.2 الافتراضي) بحجم وقدرة محدودين مقارنة ب�
 بتشيل أسماء أوامر متشابهة/مربكة مش لها علاقة بالسؤال.
 
 الأوامر: think, think_reset, think_status, think_model, think_critique,
-think_remember, think_forget
+think_remember, think_forget, think_playbooks
 """
 from __future__ import annotations
 
@@ -56,8 +66,11 @@ MAX_HISTORY_MESSAGES = 30  # يمنع الـ context من الانفجار في 
 MAX_MEMORY_NOTES = 50
 RELEVANT_TOOLS_LIMIT = 20
 MAX_CONSECUTIVE_TOOL_FAILURES = 3
+RELEVANT_PLAYBOOKS_LIMIT = 2
+MAX_PLAYBOOK_CHARS = 2000
 
 _TOOL_RE = re.compile(r"^TOOL:\s*(\S+)(.*)$", re.MULTILINE)
+_PLAYBOOK_NAME_RE = re.compile(r"^[A-Za-z0-9_؀-ۿ-]+$")
 _PLAN_RE = re.compile(r"^PLAN:\s*(.+)$", re.MULTILINE)
 _YES = {"y", "yes", "نعم", "أيوه", "ايوه", "اه", "آه", "تمام"}
 _NO = {"n", "no", "لا", "لأ"}
@@ -127,6 +140,86 @@ def _save_memory(notes: list[str]) -> None:
         pass
 
 
+# ── playbooks (تعليمات متخصصة بملفات markdown، مستوحاة من SKILL.md) ────
+
+def _playbooks_dir() -> pathlib.Path:
+    if getattr(sys, "frozen", False):
+        base = pathlib.Path(sys.executable).resolve().parent
+    else:
+        base = pathlib.Path(__file__).resolve().parent.parent
+    d = base / "playbooks"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _valid_playbook_name(name: str) -> bool:
+    return bool(_PLAYBOOK_NAME_RE.match(name))
+
+
+def _list_playbooks() -> list[str]:
+    return sorted(f.stem for f in _playbooks_dir().glob("*.md"))
+
+
+def _read_playbook(name: str) -> str | None:
+    if not _valid_playbook_name(name):
+        return None
+    path = _playbooks_dir() / f"{name}.md"
+    if not path.is_file():
+        return None
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _write_playbook(name: str, content: str) -> bool:
+    if not _valid_playbook_name(name):
+        return False
+    try:
+        (_playbooks_dir() / f"{name}.md").write_text(content, encoding="utf-8")
+    except OSError:
+        return False
+    return True
+
+
+def _delete_playbook(name: str) -> bool:
+    if not _valid_playbook_name(name):
+        return False
+    path = _playbooks_dir() / f"{name}.md"
+    if not path.is_file():
+        return False
+    try:
+        path.unlink()
+    except OSError:
+        return False
+    return True
+
+
+def _relevant_playbooks(query: str) -> list[tuple[str, str]]:
+    """بيرجع أقرب playbooks لموضوع السؤال بس — مش كل الملفات كل مرة،
+    نفس فلسفة _relevant_tools بالظبط."""
+    names = _list_playbooks()
+    if not names or not query.strip():
+        return []
+    # بنستبعد الكلمات الأقصر من 3 حروف — حروف الجر/الروابط القصيرة زي
+    # "عن"، "من"، "في" بتتكرر بالصدفة في أي نص عربي طبيعي، فلو سبناها
+    # في الحساب هتعمل تطابق وهمي بين موضوعين مالهمش أي علاقة ببعض.
+    q_tokens = {t for t in re.findall(r"\w+", query.lower()) if len(t) >= 3}
+    if not q_tokens:
+        return []
+    scored: list[tuple[int, str, str]] = []
+    for name in names:
+        content = _read_playbook(name)
+        if not content:
+            continue
+        c_tokens = {t for t in re.findall(r"\w+", content.lower()) if len(t) >= 3}
+        overlap = len(q_tokens & c_tokens)
+        if overlap > 0:
+            scored.append((overlap, name, content))
+    scored.sort(key=lambda t: t[0], reverse=True)
+    return [(name, content[:MAX_PLAYBOOK_CHARS]) for _, name, content in scored[:RELEVANT_PLAYBOOKS_LIMIT]]
+
+
 # ── اختيار أدوات ذكي (بدل ما نديله كل الأوامر كل مرة) ───────────────────
 
 def _relevant_tools(engine, query: str) -> list:
@@ -192,6 +285,10 @@ def _system_prompt(engine, query: str, state: dict) -> str:
     if memory:
         notes = "\n".join(f"- {n}" for n in memory[-15:])
         parts.append(f"\nLong-term notes remembered from previous sessions:\n{notes}\n")
+    playbooks = _relevant_playbooks(query)
+    if playbooks:
+        for name, content in playbooks:
+            parts.append(f"\nRelevant playbook '{name}':\n{content}\n")
     parts.append(f"\nAvailable tools:\n{catalog}")
     return "".join(parts)
 
@@ -452,6 +549,57 @@ def _cmd_think_forget(ctx) -> str:
     return f"🗑 اتمسحت كل الملاحظات الدائمة ({n} ملاحظة)"
 
 
+def _playbooks_usage() -> str:
+    return (
+        "usage:\n"
+        "  think_playbooks list                    — عرض كل الـ playbooks المحفوظة\n"
+        "  think_playbooks add <name> <محتوى...>   — إنشاء/تحديث playbook (بصياغة markdown)\n"
+        "  think_playbooks show <name>              — عرض محتوى playbook معيّن\n"
+        "  think_playbooks remove <name>            — حذف playbook\n"
+        "  (name: حروف/أرقام/underscore/شرطة/عربي بس — من غير مسافات أو /)"
+    )
+
+
+def _cmd_think_playbooks(ctx) -> str:
+    if not ctx.args:
+        return _playbooks_usage()
+    sub = ctx.args[0].lower()
+
+    if sub == "list":
+        names = _list_playbooks()
+        if not names:
+            return "مفيش أي playbook محفوظ. أضف واحد بـ: think_playbooks add <name> <محتوى...>"
+        return "📘 الـ playbooks المتاحة:\n" + "\n".join(f"  - {n}" for n in names)
+
+    if sub == "add":
+        parts = ctx.raw.split(maxsplit=3)
+        if len(parts) < 4 or not parts[3].strip():
+            return _playbooks_usage()
+        name, content = parts[2], parts[3].strip()
+        if not _valid_playbook_name(name):
+            return f"❌ اسم غير صالح: '{name}' — حروف/أرقام/underscore/شرطة/عربي بس، من غير مسافات أو /"
+        if not _write_playbook(name, content):
+            return f"❌ فشل حفظ playbook '{name}'"
+        return f"✅ اتحفظ playbook '{name}' ({len(content)} حرف)"
+
+    if sub == "show":
+        if len(ctx.args) < 2:
+            return "usage: think_playbooks show <name>"
+        content = _read_playbook(ctx.args[1])
+        if content is None:
+            return f"❌ مفيش playbook بالاسم '{ctx.args[1]}'"
+        return f"📘 {ctx.args[1]}:\n{content}"
+
+    if sub == "remove":
+        if len(ctx.args) < 2:
+            return "usage: think_playbooks remove <name>"
+        if not _delete_playbook(ctx.args[1]):
+            return f"❌ مفيش playbook بالاسم '{ctx.args[1]}'"
+        return f"🗑 اتشال playbook '{ctx.args[1]}'"
+
+    return _playbooks_usage()
+
+
 def register(engine):
     engine.registry.register("think", _cmd_think,
                               "think <رسالتك> — تفكير عميق متعدد الأدوار، بيستخدم أوامر نيزوكو الحقيقية كأدوات")
@@ -467,3 +615,5 @@ def register(engine):
                               "think_remember <ملاحظة> — حفظ حقيقة دائمة تعدي كل جلسات think المستقبلية")
     engine.registry.register("think_forget", _cmd_think_forget,
                               "think_forget — مسح كل الملاحظات الدائمة المحفوظة من think_remember")
+    engine.registry.register("think_playbooks", _cmd_think_playbooks,
+                              "think_playbooks list|add|show|remove — تعليمات markdown متخصصة بتتحقن في تفكير think حسب الصلة")

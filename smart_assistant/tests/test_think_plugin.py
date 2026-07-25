@@ -12,6 +12,19 @@ def _isolate_memory(tmp_path, monkeypatch):
     monkeypatch.setattr(tp, "_memory_path", lambda: tmp_path / "think_memory.json")
 
 
+@pytest.fixture(autouse=True)
+def _isolate_playbooks(tmp_path, monkeypatch):
+    """كل اختبار بيشتغل بمجلد playbooks/ خاص بيه، عشان محدش يكتب فوق
+    smart_assistant/playbooks/ الحقيقي بتاع المستخدم."""
+    playbooks_dir = tmp_path / "playbooks_test"
+
+    def _fake_dir():
+        playbooks_dir.mkdir(parents=True, exist_ok=True)
+        return playbooks_dir
+
+    monkeypatch.setattr(tp, "_playbooks_dir", _fake_dir)
+
+
 def _fake_chat_response(content: str):
     class FakeResp:
         def read(self):
@@ -518,6 +531,132 @@ def test_register_adds_all_commands():
     tp.register(FakeEngine)
     for cmd in (
         "think", "think_reset", "think_status", "think_model",
-        "think_critique", "think_remember", "think_forget",
+        "think_critique", "think_remember", "think_forget", "think_playbooks",
     ):
         assert cmd in FakeEngine.registry.names
+
+
+# ── think_playbooks ───────────────────────────────────────────────────
+
+def test_playbook_name_validation():
+    assert tp._valid_playbook_name("youtube_seo")
+    assert tp._valid_playbook_name("خطة-يوتيوب")
+    assert not tp._valid_playbook_name("../../etc/passwd")
+    assert not tp._valid_playbook_name("bad name")
+    assert not tp._valid_playbook_name("bad/name")
+    assert not tp._valid_playbook_name("")
+
+
+def test_playbooks_add_and_list(make_ctx, bare_engine):
+    result = tp._cmd_think_playbooks(make_ctx(
+        "think_playbooks add yt_seo دايمًا استخدم channel_growth_report الأول",
+        ["add", "yt_seo", "دايمًا", "استخدم", "channel_growth_report", "الأول"],
+        engine=bare_engine,
+    ))
+    assert "✅" in result
+    assert "yt_seo" in result
+
+    result = tp._cmd_think_playbooks(make_ctx("think_playbooks list", ["list"], engine=bare_engine))
+    assert "yt_seo" in result
+
+
+def test_playbooks_add_rejects_invalid_name(make_ctx, bare_engine):
+    result = tp._cmd_think_playbooks(make_ctx(
+        "think_playbooks add ../evil محتوى خبيث",
+        ["add", "../evil", "محتوى", "خبيث"],
+        engine=bare_engine,
+    ))
+    assert result.startswith("❌")
+    assert tp._list_playbooks() == []
+
+
+def test_playbooks_add_no_content_shows_usage(make_ctx, bare_engine):
+    result = tp._cmd_think_playbooks(make_ctx("think_playbooks add yt_seo", ["add", "yt_seo"], engine=bare_engine))
+    assert result.startswith("usage")
+
+
+def test_playbooks_list_empty(make_ctx, bare_engine):
+    result = tp._cmd_think_playbooks(make_ctx("think_playbooks list", ["list"], engine=bare_engine))
+    assert "مفيش" in result
+
+
+def test_playbooks_show(make_ctx, bare_engine):
+    tp._cmd_think_playbooks(make_ctx(
+        "think_playbooks add yt_seo محتوى تفصيلي هنا",
+        ["add", "yt_seo", "محتوى", "تفصيلي", "هنا"],
+        engine=bare_engine,
+    ))
+    result = tp._cmd_think_playbooks(make_ctx("think_playbooks show yt_seo", ["show", "yt_seo"], engine=bare_engine))
+    assert "محتوى تفصيلي هنا" in result
+
+
+def test_playbooks_show_unknown(make_ctx, bare_engine):
+    result = tp._cmd_think_playbooks(make_ctx("think_playbooks show ghost", ["show", "ghost"], engine=bare_engine))
+    assert result.startswith("❌")
+
+
+def test_playbooks_remove(make_ctx, bare_engine):
+    tp._cmd_think_playbooks(make_ctx(
+        "think_playbooks add yt_seo محتوى", ["add", "yt_seo", "محتوى"], engine=bare_engine,
+    ))
+    result = tp._cmd_think_playbooks(make_ctx("think_playbooks remove yt_seo", ["remove", "yt_seo"], engine=bare_engine))
+    assert "🗑" in result
+    assert tp._list_playbooks() == []
+
+
+def test_playbooks_remove_unknown(make_ctx, bare_engine):
+    result = tp._cmd_think_playbooks(make_ctx("think_playbooks remove ghost", ["remove", "ghost"], engine=bare_engine))
+    assert result.startswith("❌")
+
+
+def test_playbooks_no_args_shows_usage(make_ctx, bare_engine):
+    result = tp._cmd_think_playbooks(make_ctx("think_playbooks", [], engine=bare_engine))
+    assert result.startswith("usage")
+
+
+def test_playbooks_unknown_subcommand_shows_usage(make_ctx, bare_engine):
+    result = tp._cmd_think_playbooks(make_ctx("think_playbooks frobnicate", ["frobnicate"], engine=bare_engine))
+    assert result.startswith("usage")
+
+
+# ── _relevant_playbooks ──────────────────────────────────────────────
+
+def test_relevant_playbooks_matches_by_keyword_overlap(bare_engine):
+    tp._write_playbook("yt", "لما حد يسأل عن قناة يوتيوب استخدم channel_growth_report")
+    tp._write_playbook("db", "لما حد يسأل عن قاعدة بيانات استخدم db_migrate")
+
+    result = tp._relevant_playbooks("عايز أحلل قناة يوتيوب بتاعتي")
+    names = [name for name, _ in result]
+    assert "yt" in names
+    assert "db" not in names
+
+
+def test_relevant_playbooks_empty_when_no_match(bare_engine):
+    tp._write_playbook("yt", "لما حد يسأل عن قناة يوتيوب استخدم channel_growth_report")
+    result = tp._relevant_playbooks("سؤال مالوش أي علاقة خالص بكلمات تانية")
+    assert result == []
+
+
+def test_relevant_playbooks_empty_when_no_playbooks_exist(bare_engine):
+    assert tp._relevant_playbooks("عايز أحلل قناة يوتيوب") == []
+
+
+def test_relevant_playbooks_truncates_long_content(bare_engine):
+    long_content = "يوتيوب " * 1000
+    tp._write_playbook("yt", long_content)
+    result = tp._relevant_playbooks("يوتيوب")
+    assert len(result) == 1
+    assert len(result[0][1]) <= tp.MAX_PLAYBOOK_CHARS
+
+
+def test_system_prompt_injects_relevant_playbook(bare_engine):
+    tp._write_playbook("yt", "لما حد يسأل عن قناة يوتيوب استخدم channel_growth_report الأول")
+    prompt = tp._system_prompt(bare_engine, "عايز أحلل قناة يوتيوب", tp._state(bare_engine))
+    assert "channel_growth_report" in prompt
+    assert "yt" in prompt
+
+
+def test_system_prompt_skips_irrelevant_playbook(bare_engine):
+    tp._write_playbook("yt", "لما حد يسأل عن قناة يوتيوب استخدم channel_growth_report الأول")
+    prompt = tp._system_prompt(bare_engine, "سؤال عادي عن حاجة تانية خالص", tp._state(bare_engine))
+    assert "channel_growth_report" not in prompt
