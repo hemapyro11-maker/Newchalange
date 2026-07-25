@@ -347,10 +347,22 @@ def _auto_entry_offset(data: bytes) -> tuple[int, str] | None:
     try:
         if data[:4] == b"\x7fELF":
             info = _parse_elf(data)
+            machine = info["machine"]
+            if info["bits"] == 64 and "x86" in machine:
+                arch = "x64"
+            elif "x86" in machine:
+                arch = "x86"
+            elif "AArch64" in machine:
+                arch = "arm64"
+            elif machine == "ARM":
+                arch = "arm"
+            else:
+                # معمارية مش مدعومة في _ARCH_MAP (MIPS/PowerPC/...) —
+                # أحسن نرجع None بدل ما نخمّن arch غلط ونفك تجميع بايتات
+                # حقيقية كأنها تعليمات ARM (يطلع كلام يشبه الكود بس غلط).
+                return None
             for s in info["sections"]:
                 if s["addr"] <= info["entry"] < s["addr"] + s["size"] and s["addr"]:
-                    arch = "x64" if info["bits"] == 64 and "x86" in info["machine"] else \
-                        ("x86" if "x86" in info["machine"] else "arm64" if "AArch64" in info["machine"] else "arm")
                     return s["offset"] + (info["entry"] - s["addr"]), arch
         elif data[:2] == b"MZ":
             info = _parse_pe(data)
