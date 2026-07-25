@@ -48,7 +48,29 @@ echo ====================================
 :: بيعمل لها import اختياري (try/except) مش إجباري زي customtkinter
 :: نفسها — لو مش موجودة، الواجهة تشتغل عادي من غير تلميحات بس. اتجرب
 :: فعليًا (onefile Linux بنفس الفلاج ده بنى واشتغل من غير أي crash).
-py -m pip install customtkinter CTkToolTip pyinstaller mcp typer capstone Pillow pandas matplotlib edge-tts piper-tts sounddevice faster-whisper vosk python-telegram-bot discord.py keyring --quiet
+:: scenedetect: كشف تلقائي لتغييرات المشاهد (detect_scenes في
+:: cinema_plugin.py) — نيزوكو بيعمل import ليها فعليًا (زي
+:: faster-whisper بالظبط)، فمحتاجة collect-all. بتجيب معاها
+:: opencv-python (حزمة كبيرة الحجم لكنها مستقرة ومعروفة) — اتجرب
+:: فعليًا (onefile Linux بنفس الفلاج ده بنى واشتغل من غير أي crash).
+::
+:: ═══════════════════════════════════════════════════════════════
+:: ملحوظة معمارية مهمة: pyannote.audio و TTS (Coqui) عن قصد **مش**
+:: هنا ولا في collect-all تحت، رغم إن diarize/clone_voice في
+:: voice_plugin.py بيعملوا لهم import مباشر (مش subprocess). السبب:
+:: الحزمتين دول بيجيبوا معاهم PyTorch كامل + عشرات الحزم الفرعية
+:: (torchaudio, pytorch-lightning, transformers, إلخ) — تقيلين
+:: بمراحل عن faster-whisper (اللي مبني على CTranslate2 الأخف عمداً)
+:: أو حتى opencv بتاعة scenedetect فوق. ضمهم هيزود حجم/وقت البناء
+:: بشكل كبير جداً لميزتين متقدمتين (diarize محتاج توكن Hugging
+:: Face + موافقة يدوية على نموذج gated، clone_voice محتاج موافقة
+:: على ترخيص CPML + تحميل نموذج ~2GB) اللي غالبية المستخدمين مش
+:: هيستخدموها أصلاً. النتيجة العملية: diarize/clone_voice بيشتغلوا
+:: بس لو نيزوكو شغّال من السورس (python main_gui.py) مع تثبيت
+:: pyannote.audio/TTS يدويًا في نفس بيئة بايثون — مش متاحين في
+:: Nezuko.exe الجاهز. ده قيد معماري صريح ومقصود، مش نسيان.
+:: ═══════════════════════════════════════════════════════════════
+py -m pip install customtkinter CTkToolTip pyinstaller mcp typer capstone Pillow pandas matplotlib edge-tts piper-tts sounddevice faster-whisper vosk scenedetect[opencv] python-telegram-bot discord.py keyring --quiet
 
 :: بناء الـ EXE
 py -m PyInstaller ^
@@ -71,6 +93,7 @@ py -m PyInstaller ^
     --collect-all sounddevice ^
     --collect-all faster_whisper ^
     --collect-all vosk ^
+    --collect-all scenedetect ^
     --collect-all telegram ^
     --collect-all discord ^
     --collect-all keyring ^
@@ -124,5 +147,21 @@ echo     <code> — التوافق ده بيدّي صلاحية كاملة زي 
 echo   - قناة ديسكورد (discord_set_token) نفس فكرة تليجرام بالظبط
 echo     (discord_approve <code>)، لكن لازم تفعّل 'Message Content
 echo     Intent' من Discord Developer Portal وإلا الرسائل هتوصل فاضية.
+echo   - auto_trim_silence محتاج auto-editor (اختياري: pip install
+echo     auto-editor) — قص صمت تلقائي من فيديو/بودكاست.
+echo   - detect_scenes متضمّن في الـ exe نفسه أصلاً (scenedetect، شوف فوق).
+echo   - upscale_image/upscale_video محتاجين realesrgan-ncnn-vulkan (ملف
+echo     تنفيذي جاهز، مش pip): https://github.com/xinntao/Real-ESRGAN/releases
+echo     — حطه في PATH. بطيء جدًا من غير GPU حقيقي بيدعم Vulkan.
+echo   - separate_vocals محتاج demucs (اختياري: pip install demucs) —
+echo     أول استخدام بيحمّل نموذجه (~80MB).
+echo   - diarize محتاج pyannote.audio (pip install pyannote.audio، شغّال
+echo     من السورس بس — شوف الملحوظة المعمارية فوق) + توكن Hugging Face
+echo     مجاني (diarize_set_token) + موافقة يدوية لمرة واحدة على نموذج
+echo     gated (diarize_key_status بيوريك الروابط).
+echo   - clone_voice محتاج TTS/Coqui (pip install TTS، شغّال من السورس
+echo     بس) + موافقة صريحة على ترخيص CPML (clone_voice_agree_license)
+echo     + تحميل نموذج XTTS-v2 (~2GB) عند أول استخدام. استخدمه لصوتك
+echo     إنت أو صوت عندك إذن صريح تستنسخه بس.
 echo ====================================
 pause

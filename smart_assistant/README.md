@@ -150,10 +150,11 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-775 اختبار حقيقي (مش placeholders) بتغطي كل plugin و Core Engine —
+832 اختبار حقيقي (مش placeholders) بتغطي كل plugin و Core Engine —
 تحليل ELF/PE حقيقي، معالجة فيديو حقيقية عبر FFmpeg، توليد أيقونات
 حقيقي، حلقة توليد/تصحيح plugin_forge كاملة، إلخ. الاختبارات اللي
-محتاجة أدوات اختيارية (FFmpeg, Pillow, capstone, mcp, bandit) بتتخطى تلقائياً
+محتاجة أدوات اختيارية (FFmpeg, Pillow, capstone, mcp, bandit,
+auto-editor, scenedetect, realesrgan-ncnn-vulkan, demucs) بتتخطى تلقائياً
 (`SKIPPED`) لو الأداة مش متثبتة، بدل ما تفشل — جرّبتها في البيئتين
 (بالأداة وبدونها) والنتيجة صح في الحالتين.
 
@@ -669,6 +670,26 @@ Ghidra/radare2). كل النتائج اتقارنت واتأكد إنها مطا
 - `title_card <text> <out> [duration] [size]` — لوحة عنوان متحركة
   (fade in/out حقيقي، مش نص ثابت).
 
+**أدوات خارجية اختيارية** (من بحث GitHub — كل واحدة بتتحقق من وجود
+الأداة وترجع رسالة تنزيل واضحة لو مش متثبتة، مش أوامر وهمية):
+
+- `auto_trim_silence <in> <out> [threshold=4%]` — قص الصمت/اللقطات
+  الميتة من فيديو أو بودكاست تلقائيًا، عبر
+  [auto-editor](https://github.com/WyattBlue/auto-editor)
+  (`pip install auto-editor`).
+- `detect_scenes <video> [threshold=27.0]` — كشف تلقائي لتغييرات
+  المشاهد (scene cuts) عبر
+  [PySceneDetect](https://github.com/Breakthrough/PySceneDetect)
+  (`pip install scenedetect[opencv]`) — مفيد لتوليد فصول/timestamps
+  تلقائيًا.
+- `upscale_image`/`upscale_video <in> <out> [scale=4] [model]` —
+  تكبير بالذكاء الاصطناعي عبر
+  [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) (ملف تنفيذي
+  جاهز `realesrgan-ncnn-vulkan`، مش pip — من صفحة الإصدارات على
+  GitHub). بيشتغل عبر Vulkan (أي GPU بيدعمه، مش NVIDIA بس)، لكن
+  **بطيء جدًا من غير GPU حقيقي** (اتجرب فعليًا). `upscale_video` بيقص
+  الفيديو لفريمات، يكبّر كل واحد، ويجمّعهم تاني مع الصوت الأصلي.
+
 **بصراحة كاملة:** الأدوات دي بتديك نفس المحرك التقني اللي أفلام
 هوليوود بتتمنتج بيه (FFmpeg نفسه بيتستخدم في استوديوهات حقيقية) —
 لكن "جودة هوليوود" الفعلية قرارات فنية (توقيت القص، اختيار الألوان،
@@ -740,6 +761,42 @@ stt_status            # حالة sounddevice + المحركات التلاتة (
 حقيقي، بيمر على نفس نظام تصحيح الأخطاء الإملائية والتأكيد بتاع
 core_engine بالظبط زي أي نص متكتوب يدويًا، فمفيش تنفيذ أعمى لنص مسموع
 غلط.
+
+## معالجة صوت متقدمة — فصل مسارات، تحديد متكلمين، استنساخ صوت
+
+تلات إضافات من بحث GitHub في `voice_plugin.py`، كل واحدة بأداة خارجية
+حقيقية مختلفة:
+
+- **`separate_vocals <audio> <out_dir> [mode=all|vocals]`** — فصل
+  المسارات الصوتية (صوت/طبول/باص/باقي، أو صوت/بدون-صوت بس) عبر
+  [Demucs](https://github.com/facebookresearch/demucs) (Meta،
+  `pip install demucs`) — مفيد لعزل الصوت من موسيقى خلفية قبل STT، أو
+  استخراج instrumental.
+- **`diarize <audio>`** — "مين اتكلم وإمتى" في تسجيل فيه أكتر من
+  متكلم، عبر [pyannote.audio](https://github.com/pyannote/pyannote-audio)
+  (`pip install pyannote.audio`). النموذج **gated** على Hugging
+  Face — محتاج توكن حساب مجاني (`diarize_set_token <token>`، بيتحفظ
+  بـ keyring زي باقي التوكنات) **وموافقة يدوية لمرة واحدة** على شروط
+  الاستخدام على صفحة النموذج نفسها (`diarize_key_status` بيوريك
+  الروابط بالظبط) — خطوة Hugging Face نفسها، مش حاجة نيزوكو يقدر
+  يتخطاها أوتوماتيك.
+- **`clone_voice <reference.wav> <text> <output.wav> [language=ar]`**
+  — استنساخ صوت من عينة صوتية قصيرة (~6 ثواني كفاية) عبر
+  [Coqui XTTS-v2](https://github.com/coqui-ai/TTS) (`pip install TTS`،
+  أول تشغيل بيحمّل نموذج ~2GB). محتاج موافقة صريحة (مرة واحدة) على
+  ترخيص [CPML](https://coqui.ai/cpml) عبر `clone_voice_agree_license`
+  قبل أول استخدام — نيزوكو **مش** بيوافق نيابة عنك على ترخيص بيخص
+  استخدامك الشخصي. **مهم:** استخدمه لصوتك إنت أو صوت عندك إذن صريح
+  تستنسخه، مش لتقليد حد من غير موافقته. بطيء جدًا من غير GPU حقيقي —
+  قيد حقيقي في التكنولوجيا، مش قرار تصميم.
+
+**ملحوظة معمارية مهمة:** `pyannote.audio` و`TTS` مكتبات ML تقيلة جدًا
+(PyTorch كامل + عشرات الحزم الفرعية) — عن قصد **مش** مضمومين في
+`build_exe.bat`/`requirements.txt` (بعكس faster-whisper الأخف). يعني
+`diarize`/`clone_voice` بيشتغلوا بس لو نيزوكو شغّال من السورس
+(`python main_gui.py`) مع تثبيت الحزمتين دول يدويًا في نفس بيئة
+بايثون — مش متاحين في الـ `.exe` الجاهز. تفاصيل أكتر في تعليقات
+`build_exe.bat`.
 
 ## فريق يوتيوب الاحترافي — 7 إضافات بمستوى متخصص حقيقي
 

@@ -12,6 +12,7 @@ sounddevice>=0.4.6
 faster-whisper>=0.10.0
 openai-whisper>=20231117
 vosk>=0.3.45
+scenedetect[opencv]>=0.6.4
 python-telegram-bot>=21.0
 discord.py>=2.3.0
 keyring>=24.0.0
