@@ -96,6 +96,10 @@ build_exe.bat
     `thumbnail_plugin.py`، `youtube_ads_plugin.py`،
     `community_manager_plugin.py`، `youtube_analytics_plugin.py`.
   - `environment_plugin.py` — "طبيب" بيئة العمل: `env_check` (شرح تفصيلي تحت).
+  - `external_tools_plugin.py` — ربط أي برنامج خارجي (CLI/سطح مكتب)
+    كأمر دائم في نيزوكو (شرح تفصيلي تحت).
+  - `android_plugin.py` — تحكم حقيقي في تطبيقات أندرويد عبر ADB (شرح
+    تفصيلي تحت).
 - `connectors.example.json` — مثال لإعداد MCP Connectors (انسخه لـ
   `connectors.json` وعدّله). `connectors.json` نفسه بيتعمل تلقائياً
   أول ما التطبيق يشتغل ومش متتبع في git (ممكن يحتوي مسارات/أسرار خاصة بيك).
@@ -116,7 +120,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-514 اختبار حقيقي (مش placeholders) بتغطي كل plugin و Core Engine —
+568 اختبار حقيقي (مش placeholders) بتغطي كل plugin و Core Engine —
 تحليل ELF/PE حقيقي، معالجة فيديو حقيقية عبر FFmpeg، توليد أيقونات
 حقيقي، حلقة توليد/تصحيح plugin_forge كاملة، إلخ. الاختبارات اللي
 محتاجة أدوات اختيارية (FFmpeg, Pillow, capstone, mcp) بتتخطى تلقائياً
@@ -533,6 +537,53 @@ Ollama حالة خاصة: مش قابلة للفحص بـ `shutil.which` (بتش
 محلي على `localhost:11434`)، فالفحص بيكون HTTP ping حقيقي، والتثبيت
 دايمًا تعليمات يدوية (تنزيل من ollama.com) لأنه مش package management
 عادي.
+
+## ربط أي برنامج خارجي — `external_tools_plugin.py`
+
+عايز تشغّل برنامج معين (CLI، سكربت بايثون/جافا/شل، أو حتى تطبيق سطح
+مكتب) من جوه نيزوكو باسم قصير بدل ما تكتب المسار الكامل كل مرة؟
+
+```
+external_add myamr "/path/to/tool.exe {args}"     # {args} تتحدد مكانها بالظبط
+external_add ffmpeg_custom "/usr/local/bin/myffmpeg"  # من غير {args} — الوسائط بتتضاف في الآخر تلقائيًا
+external_add photoshop "open -a Photoshop" --type desktop   # تطبيق سطح مكتب — بيتشغّل في الخلفية
+
+myamr -i input.txt -o output.txt   # بينفّذ فعليًا: /path/to/tool.exe -i input.txt -o output.txt
+
+external_list       # كل الأدوات المسجّلة
+external_remove myamr
+```
+
+الأداة بتتسجّل **دائمًا** (`external_tools.json`، مش متتبع في git) —
+بتفضل شغالة بعد إعادة تشغيل نيزوكو من غير ما تسجّلها تاني. زي أمر
+`run` المدمج بالظبط من ناحية الأمان (subprocess بدون shell=True) —
+شرح كامل للفرق ونموذج الثقة في [`SECURITY.md`](SECURITY.md).
+
+## تحكم في تطبيقات أندرويد — `android_plugin.py`
+
+تحكم حقيقي عبر [ADB](https://developer.android.com/tools/releases/platform-tools)
+(مجاني ومفتوح المصدر، جزء من Android SDK) — محتاج محاكي (زي Android
+Studio Emulator) أو جهاز حقيقي متصل بـ USB debugging مفعّل:
+
+```
+android_devices                          # الأجهزة/المحاكيات المتصلة
+android_install app.apk                  # تثبيت APK
+android_launch com.example.app           # تشغيل تطبيق
+android_shell pm list packages           # أي أمر adb shell مباشرة
+android_shell input tap 500 800          # محاكاة لمسة
+android_screenshot shot.png              # لقطة شاشة حقيقية
+android_uninstall com.example.app
+```
+
+`android_shell` هو "نفّذ أي أمر" الحقيقي بتاع أندرويد — بيمرر أي
+أمر تكتبه مباشرة لـ `adb shell`، يعني بتقدر تعمل أي حاجة adb نفسها
+تقدر تعملها. تفاصيل كاملة عن حدود الصلاحية في [`SECURITY.md`](SECURITY.md).
+
+**بصراحة عن iOS:** مفيش أداة مكافئة لـ ADB في نظام آبل — التحكم في
+تطبيقات iOS محتاج Mac + Xcode فعليًا، وحتى مع كده بيشتغل بس مع
+تطبيقات إنت عندك ملف الـ .app/.ipa بتاعها (مش أي تطبيق من App
+Store). ده قيد منصة آبل نفسها مش حاجة نيزوكو تقدر تلتف حواليها —
+الشرح الكامل في [`SECURITY.md`](SECURITY.md).
 
 ## ليه مفيش "توليد فيديو/صورة بالذكاء الاصطناعي" زي Higgsfield؟
 

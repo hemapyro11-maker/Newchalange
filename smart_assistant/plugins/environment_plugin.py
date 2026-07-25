@@ -120,6 +120,12 @@ TOOLS: dict[str, dict] = {
         "kind": "binary", "bin": "kotlinc",
         "apt": None, "brew": "kotlin", "winget": "JetBrains.Kotlin",
     },
+    "adb": {
+        "category": "أدوات تطوير", "label": "ADB (android_plugin — تحكم في تطبيقات أندرويد)",
+        "kind": "binary", "bin": "adb",
+        "apt": "android-tools-adb", "dnf": "android-tools", "pacman": "android-tools",
+        "brew": "android-platform-tools", "winget": "Google.PlatformTools",
+    },
 
     # ── ذكاء اصطناعي محلي ────────────────────────────────────────────────
     "ollama": {
