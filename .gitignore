@@ -26,3 +26,8 @@ smart_assistant/schedule.json
 smart_assistant/playbooks/
 smart_assistant/telegram_config.json
 smart_assistant/discord_config.json
+
+# حالة المخ ومفاتيحه — محلية لكل جهاز، ممكن تحتوي أسرار
+smart_assistant/brain_config.json
+smart_assistant/brain_state.json
+smart_assistant/intent_cache.json
