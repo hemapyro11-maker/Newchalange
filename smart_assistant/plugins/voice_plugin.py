@@ -16,7 +16,21 @@ voice_plugin.py — نطق نصوص بصوت أنثوي مصري (نيزوكو) 
    في كل الحالات.
 
 السلسلة بتجرب بالترتيب ده وتاخد أول واحد يشتغل فعليًا — مش اختيار
-عشوائي. الأوامر: speak, voice_status
+عشوائي.
+
+**استماع صوتي (STT) — الاتجاه التاني اللي كان ناقص:** نيزوكو كان
+عنده نطق (TTS) بس من غير استماع خالص — نقطة متسجلة في CLAUDE.md نفسه
+("Voice Interaction Pipeline"). `listen`/`listen_run` بيسجلوا من
+المايك عبر `sounddevice` (مكتبة بايثون خفيفة، مش أداة CLI منفصلة —
+بتيجي جاهزة بـ PortAudio مبني جواها في الـ wheel، من غير تعقيد تحديد
+اسم جهاز المايك يدويًا زي ما ffmpeg بيحتاج على ويندوز) ويفرّغوا الصوت
+لنص عبر `whisper` CLI (من حزمة `openai-whisper` مفتوحة المصدر —
+بيتحمّل نموذجه مرة واحدة زي Piper، وبعدين offline بالكامل). `listen`
+بس بيرجع النص من غير تنفيذ؛ `listen_run` بينفذ النص كأمر فعلي فورًا
+(لو مش أمر مطابق حرفيًا، بيمر على نفس نظام تصحيح الأخطاء الإملائية
+والتأكيد بتاع core_engine — نفس الحماية اللي أي نص متكتوب بييجي منها).
+
+الأوامر: speak, voice_status, listen, listen_run, stt_status
 """
 from __future__ import annotations
 
@@ -27,6 +41,12 @@ import sys
 import tempfile
 import urllib.error
 import urllib.request
+import wave
+
+try:
+    import sounddevice as sd
+except (ImportError, OSError):
+    sd = None
 
 EDGE_VOICE = "ar-EG-SalmaNeural"
 PIPER_VOICE_NAME = "ar_JO-kareem-medium"
@@ -36,6 +56,12 @@ PIPER_CONFIG_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/a
 _NETWORK_TIMEOUT = 20
 _SYNTH_TIMEOUT = 30
 _PLAYBACK_TIMEOUT = 120
+
+WHISPER_MODEL = "base"
+_SAMPLE_RATE = 16000
+_LISTEN_DEFAULT_SECONDS = 5
+_LISTEN_MAX_SECONDS = 30
+_TRANSCRIBE_TIMEOUT = 180
 
 
 def _voice_cache_dir() -> pathlib.Path:
@@ -196,6 +222,112 @@ def _cmd_voice_status(ctx) -> str:
     return "\n".join(lines)
 
 
+# ── استماع صوتي (STT): sounddevice للتسجيل + whisper CLI للتفريغ ────────
+
+def _record_audio(seconds: int, out_path: pathlib.Path) -> str | None:
+    """يسجل من المايك الافتراضي، يرجع None لو نجح أو رسالة خطأ لو فشل."""
+    if sd is None:
+        return "مكتبة sounddevice مش متثبتة — pip install sounddevice"
+    try:
+        audio = sd.rec(int(seconds * _SAMPLE_RATE), samplerate=_SAMPLE_RATE, channels=1, dtype="int16")
+        sd.wait()
+    except Exception as e:
+        return f"تعذر التسجيل من المايك: {e}"
+    try:
+        with wave.open(str(out_path), "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)  # int16 = 2 بايت
+            wf.setframerate(_SAMPLE_RATE)
+            wf.writeframes(audio.tobytes())
+    except OSError as e:
+        return f"تعذر حفظ التسجيل: {e}"
+    return None
+
+
+def _transcribe(wav_path: pathlib.Path, model: str = WHISPER_MODEL) -> tuple[str | None, str | None]:
+    """يرجع (النص، None) لو نجح، أو (None، رسالة خطأ) لو فشل."""
+    if not shutil.which("whisper"):
+        return None, "❌ أداة whisper مش متثبتة — pip install openai-whisper (محتاج FFmpeg برضه، موجود أصلاً في نيزوكو)"
+    with tempfile.TemporaryDirectory(prefix="nezuko_stt_") as tmp:
+        cmd = [
+            "whisper", str(wav_path), "--model", model,
+            "--output_format", "txt", "--output_dir", tmp, "--fp16", "False",
+        ]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_TRANSCRIBE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            return None, f"⏱ التفريغ أخد وقت أطول من {_TRANSCRIBE_TIMEOUT}s"
+        if proc.returncode != 0:
+            return None, f"❌ whisper فشل: {(proc.stderr or '').strip()[:300]}"
+        txt_path = pathlib.Path(tmp) / f"{wav_path.stem}.txt"
+        if not txt_path.is_file():
+            return None, "❌ whisper ما رجعش أي ملف نص"
+        text = txt_path.read_text(encoding="utf-8").strip()
+        if not text:
+            return None, "🔇 مسمعتش أي كلام واضح"
+        return text, None
+
+
+def _parse_listen_seconds(ctx) -> tuple[int, str | None]:
+    if not ctx.args:
+        return _LISTEN_DEFAULT_SECONDS, None
+    try:
+        seconds = int(ctx.args[0])
+    except ValueError:
+        return 0, f"usage: listen [seconds]   (1-{_LISTEN_MAX_SECONDS})"
+    return max(1, min(seconds, _LISTEN_MAX_SECONDS)), None
+
+
+def _listen_and_transcribe(seconds: int) -> tuple[str | None, str | None]:
+    with tempfile.TemporaryDirectory(prefix="nezuko_listen_") as tmp:
+        wav_path = pathlib.Path(tmp) / "input.wav"
+        err = _record_audio(seconds, wav_path)
+        if err:
+            return None, f"❌ {err}"
+        return _transcribe(wav_path)
+
+
+def _cmd_listen(ctx) -> str:
+    seconds, err = _parse_listen_seconds(ctx)
+    if err:
+        return err
+    text, err = _listen_and_transcribe(seconds)
+    if err:
+        return err
+    return f"🎤 سمعت: {text}"
+
+
+def _cmd_listen_run(ctx) -> str:
+    seconds, err = _parse_listen_seconds(ctx)
+    if err:
+        return err
+    text, err = _listen_and_transcribe(seconds)
+    if err:
+        return err
+    ctx.engine.submit(text)
+    return f"🎤 سمعت: {text}\n▶️ اتبعت للتنفيذ"
+
+
+def _cmd_stt_status(ctx) -> str:
+    lines = ["🎤 حالة الاستماع الصوتي (نيزوكو):"]
+    mic_ok = sd is not None
+    lines.append(
+        f"  {'✅' if mic_ok else '❌'} sounddevice (تسجيل من المايك)"
+        + ("" if mic_ok else " — pip install sounddevice")
+    )
+    whisper_ok = shutil.which("whisper") is not None
+    lines.append(
+        f"  {'✅' if whisper_ok else '❌'} whisper (تفريغ الصوت لنص، نموذج: {WHISPER_MODEL})"
+        + ("" if whisper_ok else " — pip install openai-whisper")
+    )
+    if not (mic_ok and whisper_ok):
+        lines.append("\n⚠️ لازم الاتنين شغالين عشان listen/listen_run يشتغلوا.")
+    return "\n".join(lines)
+
+
 def register(engine):
     engine.registry.register("speak", _cmd_speak, "speak <نص> — نطق نص بصوت نيزوكو (edge-tts أنثوي مصري → Piper محلي → espeak-ng احتياطي)")
     engine.registry.register("voice_status", _cmd_voice_status, "voice_status — عرض حالة محركات النطق المتاحة")
+    engine.registry.register("listen", _cmd_listen, "listen [seconds] — سجل من المايك وفرّغ الكلام لنص (بدون تنفيذ)")
+    engine.registry.register("listen_run", _cmd_listen_run, "listen_run [seconds] — زي listen لكن ينفذ النص المسموع كأمر فورًا")
+    engine.registry.register("stt_status", _cmd_stt_status, "stt_status — حالة أدوات الاستماع الصوتي المتاحة (sounddevice + whisper)")

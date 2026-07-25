@@ -9,7 +9,18 @@ echo ====================================
 :: بيعمل import لـ typer وقت الفحص بس (مش وقت التشغيل الفعلي). من غيره
 :: البناء بالكامل بيفشل بـ "ModuleNotFoundError: No module named 'typer'"
 :: حتى لو الميزة دي (mcp.cli) نيزوكو نفسه ماستخدمهاش أبدًا.
-py -m pip install customtkinter pyinstaller mcp typer capstone Pillow pandas matplotlib edge-tts piper-tts --quiet
+:: sounddevice: نيزوكو بيعمل import ليها فعليًا (voice_plugin.py، لتسجيل
+:: المايك لأمر listen) فمحتاجة تكون في بيئة البناء وتتجمع بـ collect-all
+:: تحت (بتحمل PortAudio كملف native جواها، زي ما customtkinter محتاج
+:: ملفات theme JSON تتجمع معاها). openai-whisper (أمر whisper CLI،
+:: لتفريغ الصوت لنص) عن قصد **مش** هنا ولا في collect-all: نيزوكو
+:: بيناديها عن طريق subprocess بس (زي ffmpeg/ClamAV/espeak-ng بالظبط)
+:: من غير أي import مباشر ليها، فمحتاجة تتثبت على جهاز المستخدم النهائي
+:: بس (pip install openai-whisper) مش جوه الـ exe نفسه — وبما إنها حزمة
+:: تقيلة (torch وغيرها)، ضمها بـ collect-all كان هيزود حجم/وقت البناء
+:: من غير أي فايدة حقيقية، وممكن كمان يكرر مشكلة mcp.cli اللي فوق مع
+:: أي submodule اختياري تاني جواها.
+py -m pip install customtkinter pyinstaller mcp typer capstone Pillow pandas matplotlib edge-tts piper-tts sounddevice --quiet
 
 :: بناء الـ EXE
 py -m PyInstaller ^
@@ -28,6 +39,7 @@ py -m PyInstaller ^
     --collect-all edge_tts ^
     --collect-all piper ^
     --collect-all onnxruntime ^
+    --collect-all sounddevice ^
     --add-data "core_engine.py;." ^
     --add-data "i18n.py;." ^
     --add-data "version.py;." ^
@@ -61,5 +73,9 @@ echo     إنترنت وقت الاستخدام (edge-tts، مجاني بالك�
 echo     بيرجع لـ Piper (صوت عربي محلي، بيتحمّل مرة واحدة ~60MB) وبعدين
 echo     espeak-ng (لازم يتثبت يدوي من espeak-ng.github.io، صوت روبوتي
 echo     بس ضامن يشتغل offline بالكامل من غير أي تحميل).
+echo   - أوامر listen/listen_run (استماع صوتي) محتاجة: pip install
+echo     openai-whisper على جهاز المستخدم النهائي (بيوصّل أمر whisper،
+echo     أول استخدام بيحمّل نموذجه مرة واحدة وبعدين offline بالكامل).
+echo     sounddevice (تسجيل المايك) متضمّن في الـ exe نفسه أصلاً.
 echo ====================================
 pause

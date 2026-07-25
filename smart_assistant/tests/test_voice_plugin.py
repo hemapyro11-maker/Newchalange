@@ -1,3 +1,4 @@
+import pathlib
 import shutil
 import subprocess
 
@@ -221,3 +222,204 @@ def test_voice_status_reports_available_backends(make_ctx, monkeypatch):
     assert "✅ espeak-ng" in result
     assert "❌ edge-tts" in result
     assert "pip install edge-tts" in result
+
+
+# ── STT: _record_audio ──────────────────────────────────────────────────
+
+class _FakeAudioArray:
+    def __init__(self, data: bytes):
+        self._data = data
+
+    def tobytes(self) -> bytes:
+        return self._data
+
+
+class _FakeSD:
+    def __init__(self, data: bytes = b"\x00\x01" * 100, raise_on_rec: Exception | None = None):
+        self._data = data
+        self._raise = raise_on_rec
+        self.rec_args = None
+        self.waited = False
+
+    def rec(self, n, samplerate, channels, dtype):
+        if self._raise:
+            raise self._raise
+        self.rec_args = (n, samplerate, channels, dtype)
+        return _FakeAudioArray(self._data)
+
+    def wait(self):
+        self.waited = True
+
+
+def test_record_audio_no_sounddevice_installed(monkeypatch, tmp_path):
+    monkeypatch.setattr(vp, "sd", None)
+    err = vp._record_audio(1, tmp_path / "out.wav")
+    assert err is not None
+    assert "sounddevice" in err
+
+
+def test_record_audio_success_writes_wav(monkeypatch, tmp_path):
+    fake = _FakeSD()
+    monkeypatch.setattr(vp, "sd", fake)
+    out_path = tmp_path / "out.wav"
+    err = vp._record_audio(1, out_path)
+    assert err is None
+    assert out_path.is_file()
+    assert fake.waited is True
+    assert fake.rec_args == (vp._SAMPLE_RATE, vp._SAMPLE_RATE, 1, "int16")
+
+
+def test_record_audio_mic_exception_reported(monkeypatch, tmp_path):
+    monkeypatch.setattr(vp, "sd", _FakeSD(raise_on_rec=RuntimeError("no mic found")))
+    err = vp._record_audio(1, tmp_path / "out.wav")
+    assert err is not None
+    assert "no mic found" in err
+
+
+# ── STT: _transcribe ─────────────────────────────────────────────────────
+
+def test_transcribe_whisper_not_installed(monkeypatch, tmp_path):
+    monkeypatch.setattr(vp.shutil, "which", lambda name: None)
+    wav = tmp_path / "in.wav"
+    wav.write_bytes(b"fake")
+    text, err = vp._transcribe(wav)
+    assert text is None
+    assert "whisper" in err
+    assert "pip install openai-whisper" in err
+
+
+def test_transcribe_success(monkeypatch, tmp_path):
+    monkeypatch.setattr(vp.shutil, "which", lambda name: "/usr/bin/whisper" if name == "whisper" else None)
+
+    def fake_run(cmd, **kwargs):
+        out_dir = pathlib.Path(cmd[cmd.index("--output_dir") + 1])
+        wav_stem = pathlib.Path(cmd[1]).stem
+        (out_dir / f"{wav_stem}.txt").write_text("شغّل الأمر ده", encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(vp.subprocess, "run", fake_run)
+    wav = tmp_path / "in.wav"
+    wav.write_bytes(b"fake")
+    text, err = vp._transcribe(wav)
+    assert err is None
+    assert text == "شغّل الأمر ده"
+
+
+def test_transcribe_nonzero_exit(monkeypatch, tmp_path):
+    monkeypatch.setattr(vp.shutil, "which", lambda name: "/usr/bin/whisper" if name == "whisper" else None)
+    monkeypatch.setattr(vp.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom"))
+    wav = tmp_path / "in.wav"
+    wav.write_bytes(b"fake")
+    text, err = vp._transcribe(wav)
+    assert text is None
+    assert "boom" in err
+
+
+def test_transcribe_timeout(monkeypatch, tmp_path):
+    monkeypatch.setattr(vp.shutil, "which", lambda name: "/usr/bin/whisper" if name == "whisper" else None)
+
+    def fake_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 1))
+
+    monkeypatch.setattr(vp.subprocess, "run", fake_run)
+    wav = tmp_path / "in.wav"
+    wav.write_bytes(b"fake")
+    text, err = vp._transcribe(wav)
+    assert text is None
+    assert "⏱" in err
+
+
+def test_transcribe_empty_output_reported_as_no_speech(monkeypatch, tmp_path):
+    monkeypatch.setattr(vp.shutil, "which", lambda name: "/usr/bin/whisper" if name == "whisper" else None)
+
+    def fake_run(cmd, **kwargs):
+        out_dir = pathlib.Path(cmd[cmd.index("--output_dir") + 1])
+        wav_stem = pathlib.Path(cmd[1]).stem
+        (out_dir / f"{wav_stem}.txt").write_text("   ", encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(vp.subprocess, "run", fake_run)
+    wav = tmp_path / "in.wav"
+    wav.write_bytes(b"fake")
+    text, err = vp._transcribe(wav)
+    assert text is None
+    assert "🔇" in err
+
+
+# ── listen / listen_run / stt_status ─────────────────────────────────────
+
+def test_listen_invalid_seconds_shows_usage(make_ctx):
+    result = vp._cmd_listen(make_ctx("listen abc", ["abc"]))
+    assert result.startswith("usage")
+
+
+def test_listen_clamps_seconds_to_max(monkeypatch, make_ctx):
+    captured = {}
+
+    def fake_listen_and_transcribe(seconds):
+        captured["seconds"] = seconds
+        return "تمام", None
+
+    monkeypatch.setattr(vp, "_listen_and_transcribe", fake_listen_and_transcribe)
+    vp._cmd_listen(make_ctx("listen 999", ["999"]))
+    assert captured["seconds"] == vp._LISTEN_MAX_SECONDS
+
+
+def test_listen_returns_transcribed_text_without_executing(monkeypatch, make_ctx, bare_engine):
+    monkeypatch.setattr(vp, "_listen_and_transcribe", lambda seconds: ("افتح الاعدادات", None))
+    result = vp._cmd_listen(make_ctx("listen", [], engine=bare_engine))
+    assert "افتح الاعدادات" in result
+    assert bare_engine._queue.empty()
+
+
+def test_listen_propagates_recording_error(monkeypatch, make_ctx):
+    monkeypatch.setattr(vp, "_listen_and_transcribe", lambda seconds: (None, "❌ تعذر التسجيل"))
+    result = vp._cmd_listen(make_ctx("listen", []))
+    assert result.startswith("❌")
+
+
+def test_listen_run_submits_transcribed_text(monkeypatch, make_ctx, bare_engine):
+    monkeypatch.setattr(vp, "_listen_and_transcribe", lambda seconds: ("echo hi", None))
+    result = vp._cmd_listen_run(make_ctx("listen_run", [], engine=bare_engine))
+    assert "▶️" in result
+    text, _fn = bare_engine._queue.get_nowait()
+    assert text == "echo hi"
+
+
+def test_listen_run_does_not_submit_on_error(monkeypatch, make_ctx, bare_engine):
+    monkeypatch.setattr(vp, "_listen_and_transcribe", lambda seconds: (None, "🔇 مسمعتش حاجة"))
+    result = vp._cmd_listen_run(make_ctx("listen_run", [], engine=bare_engine))
+    assert result.startswith("🔇")
+    assert bare_engine._queue.empty()
+
+
+def test_stt_status_reports_missing(make_ctx, monkeypatch):
+    monkeypatch.setattr(vp, "sd", None)
+    monkeypatch.setattr(vp.shutil, "which", lambda name: None)
+    result = vp._cmd_stt_status(make_ctx("stt_status", []))
+    assert result.count("❌") == 2
+    assert "pip install sounddevice" in result
+    assert "pip install openai-whisper" in result
+
+
+def test_stt_status_reports_available(make_ctx, monkeypatch):
+    monkeypatch.setattr(vp, "sd", _FakeSD())
+    monkeypatch.setattr(vp.shutil, "which", lambda name: "/usr/bin/whisper" if name == "whisper" else None)
+    result = vp._cmd_stt_status(make_ctx("stt_status", []))
+    assert result.count("✅") == 2
+
+
+def test_register_adds_stt_commands():
+    class FakeRegistry:
+        def __init__(self):
+            self.names = []
+
+        def register(self, name, handler, description=""):
+            self.names.append(name)
+
+    class FakeEngine:
+        registry = FakeRegistry()
+
+    vp.register(FakeEngine)
+    for cmd in ("speak", "voice_status", "listen", "listen_run", "stt_status"):
+        assert cmd in FakeEngine.registry.names
