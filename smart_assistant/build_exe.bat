@@ -20,7 +20,11 @@ echo ====================================
 :: تقيلة (torch وغيرها)، ضمها بـ collect-all كان هيزود حجم/وقت البناء
 :: من غير أي فايدة حقيقية، وممكن كمان يكرر مشكلة mcp.cli اللي فوق مع
 :: أي submodule اختياري تاني جواها.
-py -m pip install customtkinter pyinstaller mcp typer capstone Pillow pandas matplotlib edge-tts piper-tts sounddevice --quiet
+:: python-telegram-bot: نيزوكو بيعمل import ليها فعليًا (telegram_plugin.py)
+:: لو حابب قناة تليجرام تشتغل — اسم الحزمة على pip مختلف عن اسم الـ
+:: import (زي Pillow/PIL بالظبط): بتتثبت بـ python-telegram-bot، وبيتجمع
+:: بـ --collect-all telegram.
+py -m pip install customtkinter pyinstaller mcp typer capstone Pillow pandas matplotlib edge-tts piper-tts sounddevice python-telegram-bot --quiet
 
 :: بناء الـ EXE
 py -m PyInstaller ^
@@ -40,6 +44,7 @@ py -m PyInstaller ^
     --collect-all piper ^
     --collect-all onnxruntime ^
     --collect-all sounddevice ^
+    --collect-all telegram ^
     --add-data "core_engine.py;." ^
     --add-data "i18n.py;." ^
     --add-data "version.py;." ^
@@ -77,5 +82,9 @@ echo   - أوامر listen/listen_run (استماع صوتي) محتاجة: pip 
 echo     openai-whisper على جهاز المستخدم النهائي (بيوصّل أمر whisper،
 echo     أول استخدام بيحمّل نموذجه مرة واحدة وبعدين offline بالكامل).
 echo     sounddevice (تسجيل المايك) متضمّن في الـ exe نفسه أصلاً.
+echo   - قناة تليجرام (telegram_set_token) محتاجة إنترنت وقت التشغيل
+echo     (بوليينج عادي، مفيش سيرفر عام مطلوب). أول مستخدم يكلم البوت
+echo     لازم يتوافق عليه من على الجهاز نفسه بـ telegram_approve
+echo     <code> — التوافق ده بيدّي صلاحية كاملة زي القاعد على الجهاز.
 echo ====================================
 pause

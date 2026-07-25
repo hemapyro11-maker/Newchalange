@@ -9,3 +9,4 @@ edge-tts>=6.1.0
 piper-tts>=1.2.0
 sounddevice>=0.4.6
 openai-whisper>=20231117
+python-telegram-bot>=21.0
