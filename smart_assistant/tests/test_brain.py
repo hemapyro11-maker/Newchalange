@@ -12,6 +12,7 @@ def _isolate_brain(tmp_path, monkeypatch):
     monkeypatch.setattr(brain, "_base_dir", lambda: tmp_path)
     monkeypatch.setattr(brain, "_HAS_KEYRING", False)
     brain.reset_brain()
+    brain._probe_cache.clear()
     yield
     brain.reset_brain()
 
@@ -512,14 +513,51 @@ def test_post_json_wraps_other_http_errors(monkeypatch):
 
 # ── الحالة ───────────────────────────────────────────────────────────
 
-def test_status_lists_every_provider_with_key_state():
+def test_status_lists_every_provider_with_key_state(monkeypatch):
+    monkeypatch.setattr(brain, "is_local_alive", lambda prov, **kw: True)
     _key("groq")
     rows = brain.get_brain().status()
     by_name = {r["name"]: r for r in rows}
     assert by_name["groq"]["has_key"] is True
     assert by_name["gemini"]["has_key"] is False
-    assert by_name["ollama"]["has_key"] is True  # مش محتاج مفتاح أصلاً
     assert by_name["ollama"]["local"] is True
+
+
+def test_status_reports_local_provider_as_unavailable_when_not_running(monkeypatch):
+    # راجع: ollama مش محتاج مفتاح، فكان بيتحسب "جاهز ✅" دايمًا حتى لو
+    # مش متثبت على الجهاز خالص — أسوأ من إننا نقول مفيش مخ، لأن
+    # المستخدم بيفتكر إن كل حاجة تمام وهي مش شغالة.
+    monkeypatch.setattr(brain, "is_local_alive", lambda prov, **kw: False)
+    rows = {r["name"]: r for r in brain.get_brain().status()}
+    assert rows["ollama"]["has_key"] is False
+
+
+def test_local_probe_is_cached(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_urlopen(url, timeout):
+        calls["n"] += 1
+        raise OSError("down")
+
+    monkeypatch.setattr(brain.urllib.request, "urlopen", fake_urlopen)
+    brain._probe_cache.clear()
+    prov = brain.PROVIDERS["ollama"]
+    assert brain.is_local_alive(prov) is False
+    assert brain.is_local_alive(prov) is False
+    assert calls["n"] == 1  # الفحص التاني جه من الكاش
+
+
+def test_local_probe_true_when_server_answers(monkeypatch):
+    class FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(brain.urllib.request, "urlopen", lambda url, timeout: FakeResp())
+    brain._probe_cache.clear()
+    assert brain.is_local_alive(brain.PROVIDERS["ollama"]) is True
 
 
 def test_status_reports_privacy_flag_for_training_providers():

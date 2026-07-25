@@ -1,10 +1,43 @@
 """اختبارات Core Engine: CommandRegistry، الـ dispatch، تحميل الإضافات، وسجل المهارات."""
 import json
+import threading
 import time
-import urllib.error
 
+import brain
 import core_engine
+import intents
+import pytest
 from core_engine import AssistantEngine, CommandRegistry
+
+
+@pytest.fixture(autouse=True)
+def _isolate_brain_and_intents(tmp_path, monkeypatch):
+    """كل اختبار بحالة مخ/قاموس خاصة بيه — عشان محدش يكتب فوق ملفات
+    المستخدم الحقيقية، ومحدش يعمل نداء شبكة حقيقي."""
+    monkeypatch.setattr(brain, "_base_dir", lambda: tmp_path)
+    monkeypatch.setattr(brain, "_HAS_KEYRING", False)
+    monkeypatch.setattr(intents, "_cache_path", lambda: tmp_path / "intent_cache.json")
+    brain.reset_brain()
+    brain.save_config({**brain._default_config(), "enabled": []})
+    yield
+    brain.reset_brain()
+
+
+def _no_brain(monkeypatch):
+    """بيخلي المخ 'مش متظبط' — عشان التستات اللي بتختبر المسارات
+    المحلية (تصحيح إملائي، قاموس) تفضل حتمية وسريعة ومن غير شبكة."""
+    monkeypatch.setattr(brain.Brain, "ready", lambda self: False)
+
+
+def _fake_brain(monkeypatch, reply_text: str, label: str = "Fake"):
+    """بيرجّع رد ثابت من المخ من غير أي نداء شبكة."""
+    monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
+    monkeypatch.setattr(
+        brain.Brain, "chat",
+        lambda self, messages, **kw: brain.BrainReply(
+            text=reply_text, provider="fake", label=label, is_local=True
+        ),
+    )
 
 
 def test_registry_register_and_get():
@@ -58,10 +91,14 @@ def test_run_command_no_args_shows_usage(bare_engine, make_ctx):
 
 
 def test_dispatch_unknown_command_warns(bare_engine):
+    # الكلام اللي مالوش مقابل محلي بيروح للمخ، والمخ بيشتغل على thread
+    # منفصل (عشان مايقفلش الطابور) — فبنستنى شوية قبل ما نفحص اللوج.
     logs = []
     bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
     bare_engine._dispatch("totally_unknown_command")
+    time.sleep(0.4)
     assert any(level == "warn" for level, _ in logs)
+    assert any("totally_unknown_command" in msg for _, msg in logs)
 
 
 def test_dispatch_empty_command_is_noop(bare_engine):
@@ -121,7 +158,7 @@ def test_dispatch_confirm_yes_passes_original_raw_not_confirmation_reply(bare_en
     # database_plugin.py/connectors_plugin.py بتقرا ctx.raw مباشرة (مش
     # ctx.args) عشان تتفادى مشاكل shlex.split مع JSON/SQL، فكانت بتشتغل
     # على نص فاضي/غلط تمامًا بعد التأكيد.
-    monkeypatch.setattr(bare_engine, "_try_llm_intent", lambda text: None)
+    _no_brain(monkeypatch)
     bare_engine.registry.register("rawcmd", lambda ctx: f"raw was: {ctx.raw!r}")
 
     logs = []
@@ -247,25 +284,8 @@ def test_skills_ledger_survives_plugin_deletion(tmp_path):
 
 # ── فهم النية: تصحيح إملائي (fuzzy) ─────────────────────────────────
 
-def test_suggest_command_finds_close_typo(bare_engine):
-    suggestion = bare_engine._suggest_command("hlp", [])
-    assert suggestion is not None
-    name, _args, message, level = suggestion
-    assert name == "help"
-    assert level == "warn"
-    assert "help" in message
-
-
-def test_suggest_command_no_match_for_gibberish(bare_engine, monkeypatch):
-    # نتأكد إن مفيش استدعاء Ollama حتى بيتحاول لما مفيش هوية واضحة —
-    # لسه ممكن يتحاول، فبنموك عشان الاختبار يفضل حتمي وسريع.
-    monkeypatch.setattr(bare_engine, "_try_llm_intent", lambda text: None)
-    suggestion = bare_engine._suggest_command("totally_unrelated_gibberish_xyz", [])
-    assert suggestion is None
-
-
 def test_dispatch_typo_sets_pending_and_does_not_execute(bare_engine, monkeypatch):
-    monkeypatch.setattr(bare_engine, "_try_llm_intent", lambda text: None)
+    _no_brain(monkeypatch)
     logs = []
     bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
     bare_engine._dispatch("hlp")
@@ -275,7 +295,7 @@ def test_dispatch_typo_sets_pending_and_does_not_execute(bare_engine, monkeypatc
 
 
 def test_dispatch_confirm_yes_executes_pending_suggestion(bare_engine, monkeypatch):
-    monkeypatch.setattr(bare_engine, "_try_llm_intent", lambda text: None)
+    _no_brain(monkeypatch)
     logs = []
     bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
     bare_engine._dispatch("hlp")
@@ -286,7 +306,7 @@ def test_dispatch_confirm_yes_executes_pending_suggestion(bare_engine, monkeypat
 
 
 def test_dispatch_confirm_no_cancels_pending_suggestion(bare_engine, monkeypatch):
-    monkeypatch.setattr(bare_engine, "_try_llm_intent", lambda text: None)
+    _no_brain(monkeypatch)
     logs = []
     bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
     bare_engine._dispatch("hlp")
@@ -297,7 +317,7 @@ def test_dispatch_confirm_no_cancels_pending_suggestion(bare_engine, monkeypatch
 
 
 def test_dispatch_unrelated_input_discards_pending_and_processes_normally(bare_engine, monkeypatch):
-    monkeypatch.setattr(bare_engine, "_try_llm_intent", lambda text: None)
+    _no_brain(monkeypatch)
     logs = []
     bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
     bare_engine._dispatch("hlp")
@@ -308,112 +328,235 @@ def test_dispatch_unrelated_input_discards_pending_and_processes_normally(bare_e
 
 
 def test_dispatch_pending_preserves_original_args(bare_engine, monkeypatch):
-    monkeypatch.setattr(bare_engine, "_try_llm_intent", lambda text: None)
+    _no_brain(monkeypatch)
     bare_engine._dispatch("ecoh hello there")  # typo لأمر echo مع وسائط
     assert bare_engine._pending_intent == ("echo", ["hello", "there"], "ecoh hello there")
 
 
-# ── فهم النية: توجيه ذكي عبر Ollama (موك بالكامل — مفيش شبكة حقيقية) ─
+# ── فهم النية: القاموس المحلي (بصفر حصة) ────────────────────────────
 
-def _fake_ollama_response(text: str):
-    class FakeResp:
-        def read(self):
-            return json.dumps({"response": text}).encode("utf-8")
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-    return FakeResp()
-
-
-def test_try_llm_intent_no_ollama_running(bare_engine, monkeypatch):
-    def fake_urlopen(req, timeout):
-        raise urllib.error.URLError("connection refused")
-    monkeypatch.setattr(core_engine.urllib.request, "urlopen", fake_urlopen)
-    assert bare_engine._try_llm_intent("some free text") is None
-
-
-def test_try_llm_intent_valid_response_matches_real_command(bare_engine, monkeypatch):
+def test_local_dictionary_resolves_arabic_without_touching_brain(bare_engine, monkeypatch):
+    """الجملة دي في القاموس، فلازم تتنفذ من غير ما المخ يتنادى خالص —
+    ده جوهر توفير الحصة المجانية."""
+    called = {"brain": False}
     monkeypatch.setattr(
-        core_engine.urllib.request, "urlopen",
-        lambda req, timeout: _fake_ollama_response("echo hello world"),
+        brain.Brain, "ready",
+        lambda self: called.__setitem__("brain", True) or True,
     )
-    result = bare_engine._try_llm_intent("say hello world")
-    assert result == ("echo", ["hello", "world"])
-
-
-def test_try_llm_intent_none_response(bare_engine, monkeypatch):
-    monkeypatch.setattr(
-        core_engine.urllib.request, "urlopen",
-        lambda req, timeout: _fake_ollama_response("NONE"),
-    )
-    assert bare_engine._try_llm_intent("gibberish") is None
-
-
-def test_try_llm_intent_hallucinated_command_rejected(bare_engine, monkeypatch):
-    """النموذج المحلي ممكن "يهلوس" اسم أمر مش موجود فعليًا — المحرك
-    لازم يتحقق من الـ registry الحقيقي بدل ما يصدّق النص أعمى."""
-    monkeypatch.setattr(
-        core_engine.urllib.request, "urlopen",
-        lambda req, timeout: _fake_ollama_response("this_command_does_not_exist_anywhere"),
-    )
-    assert bare_engine._try_llm_intent("do something") is None
-
-
-def test_try_llm_intent_malformed_json_handled(bare_engine, monkeypatch):
-    class BadResp:
-        def read(self):
-            return b"not json at all"
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-    monkeypatch.setattr(core_engine.urllib.request, "urlopen", lambda req, timeout: BadResp())
-    assert bare_engine._try_llm_intent("anything") is None
-
-
-def test_try_llm_intent_empty_response(bare_engine, monkeypatch):
-    monkeypatch.setattr(
-        core_engine.urllib.request, "urlopen",
-        lambda req, timeout: _fake_ollama_response(""),
-    )
-    assert bare_engine._try_llm_intent("anything") is None
-
-
-def test_try_llm_intent_bad_quoting_in_reply_handled(bare_engine, monkeypatch):
-    monkeypatch.setattr(
-        core_engine.urllib.request, "urlopen",
-        lambda req, timeout: _fake_ollama_response('echo "unterminated'),
-    )
-    assert bare_engine._try_llm_intent("anything") is None
-
-
-def test_dispatch_llm_intent_full_flow_with_confirmation(bare_engine, monkeypatch):
-    """محاكاة كاملة: نص حر مش شبيه لأي أمر → Ollama بيقترح → المستخدم
-    بيأكد بـ y → الأمر الحقيقي بينفذ فعليًا."""
-    monkeypatch.setattr(
-        core_engine.urllib.request, "urlopen",
-        lambda req, timeout: _fake_ollama_response("echo intent worked"),
-    )
+    bare_engine.registry.register("env_check", lambda ctx: "بيئة تمام")
     logs = []
     bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
 
-    bare_engine._dispatch("can you say something for me please")
-    assert bare_engine._pending_intent == ("echo", ["intent", "worked"], "can you say something for me please")
-    assert any("🧠" in msg for _, msg in logs)
+    bare_engine._dispatch("ايه الناقص عندي")
+    assert any("بيئة تمام" in msg for _, msg in logs)
+    assert called["brain"] is False
 
-    logs.clear()
+
+def test_local_dictionary_derives_output_path(bare_engine, monkeypatch):
+    _no_brain(monkeypatch)
+    seen = {}
+    bare_engine.registry.register(
+        "auto_trim_silence", lambda ctx: seen.update(args=ctx.args) or "تم"
+    )
+    bare_engine._dispatch("شيل الصمت من /home/u/vid.mp4")
+    assert seen["args"] == ["/home/u/vid.mp4", "/home/u/vid_trimmed.mp4"]
+
+
+def test_missing_file_arg_asks_instead_of_calling_brain(bare_engine, monkeypatch):
+    called = {"brain": False}
+    monkeypatch.setattr(
+        brain.Brain, "ready", lambda self: called.__setitem__("brain", True) or True
+    )
+    bare_engine.registry.register("virus_scan", lambda ctx: "فحص")
+    logs = []
+    bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
+
+    bare_engine._dispatch("افحص ملف فيروسات")
+    assert bare_engine._pending_args is not None
+    assert any("📝" in msg for _, msg in logs)
+    assert called["brain"] is False
+
+
+def test_pending_arg_is_filled_by_next_message(bare_engine, monkeypatch):
+    _no_brain(monkeypatch)
+    seen = {}
+    bare_engine.registry.register("virus_scan", lambda ctx: seen.update(args=ctx.args) or "تم")
+    bare_engine._dispatch("افحص ملف فيروسات")
+    bare_engine._dispatch("C:/x/file.exe")
+    assert seen["args"] == ["C:/x/file.exe"]
+    assert bare_engine._pending_args is None
+
+
+def test_pending_arg_can_be_cancelled(bare_engine, monkeypatch):
+    _no_brain(monkeypatch)
+    logs = []
+    bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
+    bare_engine.registry.register("virus_scan", lambda ctx: "لازم مايتنفذش")
+    bare_engine._dispatch("افحص ملف فيروسات")
+    bare_engine._dispatch("إلغاء")
+    assert bare_engine._pending_args is None
+    assert any("اتلغى" in msg for _, msg in logs)
+
+
+def test_gui_file_hook_is_used_when_available(bare_engine, monkeypatch):
+    _no_brain(monkeypatch)
+    bare_engine.registry.register("virus_scan", lambda ctx: "تم")
+    asked = {}
+    bare_engine.on_need_file = lambda spec, cb: asked.update(prompt=spec.prompt)
+    bare_engine._dispatch("افحص ملف فيروسات")
+    assert "اختار" in asked["prompt"]
+
+
+def test_learned_phrase_resolves_locally_afterwards(bare_engine, monkeypatch):
+    _no_brain(monkeypatch)
+    intents.remember("اعمللي الحركة الغريبة دي", "echo")
+    seen = {}
+    monkeypatch.setattr(
+        bare_engine, "_execute",
+        lambda name, args, raw: seen.update(name=name),
+    )
+    bare_engine._dispatch("اعمللي الحركة الغريبة دي")
+    assert seen["name"] == "echo"
+
+
+# ── فهم النية: محادثة المخ ───────────────────────────────────────────
+
+def test_free_text_goes_to_brain_and_replies_conversationally(bare_engine, monkeypatch):
+    _fake_brain(monkeypatch, "أهلاً! أنا كويسة، إنت عامل إيه؟")
+    logs = []
+    bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
+    bare_engine._converse("إزيك عاملة إيه")
+    assert any("أهلاً" in msg for _, msg in logs)
+
+
+def test_brain_reply_carries_provider_badge(bare_engine, monkeypatch):
+    _fake_brain(monkeypatch, "رد", label="Groq")
+    logs = []
+    bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
+    bare_engine._converse("سؤال")
+    assert any("Groq" in msg for _, msg in logs)
+
+
+def test_brain_tool_suggestion_needs_confirmation_and_does_not_run(bare_engine, monkeypatch):
+    """مبدأ المشروع الثابت: مفيش تنفيذ تلقائي لأمر اقترحه نموذج."""
+    _fake_brain(monkeypatch, "هفحص الملف ده.\nTOOL: echo scanned")
+    ran = {"n": 0}
+    bare_engine.registry.register("echo", lambda ctx: ran.__setitem__("n", ran["n"] + 1))
+    bare_engine._converse("افحص حاجة")
+    assert bare_engine._pending_intent == ("echo", ["scanned"], "افحص حاجة")
+    assert ran["n"] == 0
+
+
+def test_confirming_brain_suggestion_executes_and_learns_the_phrase(bare_engine, monkeypatch):
+    """الحلقة اللي بتخلي الاستهلاك ينزل للصفر: صيغة كلام النموذج فهمها
+    مرة واحدة بتتحفظ، فنفس الصيغة تاني مرة بتتحل محليًا ببلاش."""
+    _fake_brain(monkeypatch, "تمام.\nTOOL: echo done")
+    logs = []
+    bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
+    bare_engine._converse("اعمل الحاجة دي بقى")
     bare_engine._dispatch("y")
-    assert bare_engine._pending_intent is None
-    assert any("intent worked" in msg for _, msg in logs)
+
+    assert any("done" in msg for _, msg in logs)
+    assert intents.load_cache()[intents.normalize("اعمل الحاجة دي بقى")] == "echo"
 
 
-def test_execute_helper_used_directly_matches_dispatch_behavior(bare_engine):
+def test_brain_hallucinated_tool_is_dropped_not_offered(bare_engine, monkeypatch):
+    _fake_brain(monkeypatch, "تمام.\nTOOL: command_that_does_not_exist x")
     logs = []
     bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
-    bare_engine._execute("echo", ["direct", "call"], "echo direct call")
-    assert any("direct call" in msg for _, msg in logs)
+    bare_engine._converse("حاجة")
+    assert bare_engine._pending_intent is None
+    assert not any("command_that_does_not_exist" in msg for _, msg in logs)
+
+
+def test_brain_error_is_reported_not_swallowed(bare_engine, monkeypatch):
+    monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
+    monkeypatch.setattr(
+        brain.Brain, "chat",
+        lambda self, messages, **kw: brain.BrainReply(text="", error="كله واقع"),
+    )
+    logs = []
+    bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
+    bare_engine._converse("سؤال")
+    assert any("كله واقع" in msg and level == "error" for level, msg in logs)
+
+
+def test_no_brain_configured_gives_actionable_message(bare_engine, monkeypatch):
+    _no_brain(monkeypatch)
+    logs = []
+    bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
+    bare_engine._converse("كلام مش مفهوم خالص للقاموس")
+    assert any("brain_setup" in msg for _, msg in logs)
+
+
+def test_chat_history_accumulates_and_is_capped(bare_engine, monkeypatch):
+    _fake_brain(monkeypatch, "رد")
+    for i in range(40):
+        bare_engine._converse(f"رسالة {i}")
+    assert len(bare_engine.chat_history) <= core_engine._MAX_CHAT_TURNS
+
+
+def test_deep_mode_uses_deep_chat(bare_engine, monkeypatch):
+    monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
+    used = {}
+    monkeypatch.setattr(
+        brain.Brain, "deep_chat",
+        lambda self, messages, **kw: [
+            used.setdefault("deep", True),
+            brain.BrainReply(text="عميق", provider="deep", label="deep"),
+        ][1],
+    )
+    cfg = brain.load_config()
+    cfg["deep_mode"] = True
+    brain.save_config(cfg)
+    bare_engine._converse("سؤال صعب")
+    assert used.get("deep") is True
+
+
+# ── فصل سطر TOOL ─────────────────────────────────────────────────────
+
+def test_split_tool_call_extracts_command_and_args():
+    body, tool = AssistantEngine._split_tool_call("شرح كده.\nTOOL: probe /a/b.mp4")
+    assert body == "شرح كده."
+    assert tool == ("probe", ["/a/b.mp4"])
+
+
+def test_split_tool_call_returns_none_when_absent():
+    body, tool = AssistantEngine._split_tool_call("رد عادي من غير أدوات")
+    assert tool is None
+    assert body == "رد عادي من غير أدوات"
+
+
+def test_split_tool_call_handles_quoted_args():
+    _, tool = AssistantEngine._split_tool_call('TOOL: probe "C:/My Files/a.mp4"')
+    assert tool == ("probe", ["C:/My Files/a.mp4"])
+
+
+def test_split_tool_call_survives_bad_quoting():
+    _, tool = AssistantEngine._split_tool_call('TOOL: echo "unterminated')
+    assert tool[0] == "echo"
+
+
+def test_split_tool_call_takes_only_the_first_tool_line():
+    _, tool = AssistantEngine._split_tool_call("TOOL: echo one\nTOOL: echo two")
+    assert tool == ("echo", ["one"])
+
+
+# ── التنفيذ مش بيتقفل على thread المحرك ─────────────────────────────
+
+def test_brain_call_runs_off_the_worker_thread(bare_engine, monkeypatch):
+    """راجع: نداء النموذج بياخد عشرات الثواني. لو اتنفذ على thread
+    الطابور كان هيقفل كل حاجة تانية (جداول، تليجرام، أوامر تانية)
+    طول المدة دي."""
+    monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
+    worker_thread = {}
+
+    def slow_chat(self, messages, **kw):
+        worker_thread["name"] = threading.current_thread().name
+        return brain.BrainReply(text="رد", provider="f", label="F")
+
+    monkeypatch.setattr(brain.Brain, "chat", slow_chat)
+    bare_engine._converse_async("كلام حر")
+    time.sleep(0.4)
+    assert worker_thread.get("name", "").startswith("nezuko-brain")
+

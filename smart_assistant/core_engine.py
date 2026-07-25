@@ -15,17 +15,19 @@ import json
 import logging
 import pathlib
 import queue
+import re
 import shlex
 import subprocess
 import sys
 import threading
 import time
 import traceback
-import urllib.error
-import urllib.request
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
+
+import brain
+import intents
 
 log = logging.getLogger("assistant.core")
 
@@ -38,19 +40,38 @@ CommandHandler = Callable[["CommandContext"], str | None]
 # عنصر object() فريد مينفعش أي نص مكتوب "يطابقه" أبداً.
 _STOP_SENTINEL = object()
 
-# ── فهم النية (intent understanding) — الأمر مش متطابق حرفيًا؟ ─────────
-# مرحلتين: (1) تصحيح إملائي زيرو-كوست دايمًا شغال (difflib، بدون أي
-# اعتماد خارجي)، وبعدين (2) لو مفيش تصحيح واضح، محاولة فهم نية حرة عبر
-# نموذج Ollama محلي مجاني (لو المستخدم مشغّله) — بنفس الـ endpoint اللي
-# self_improve_plugin/plugin_forge_plugin بيستخدموه بالظبط. الاقتراحين
-# مبيتنفذوش تلقائي أبدًا — لازم تأكيد صريح (y) زي أي حاجة تانية في
-# المشروع ده، اتساقاً مع مبدأ "مفيش تنفيذ من غير أمر واضح".
-OLLAMA_URL = "http://localhost:11434/api/generate"
-OLLAMA_INTENT_MODEL = "llama3.2"
-OLLAMA_INTENT_TIMEOUT = 10
+# ── فهم النية: أربع مراحل، أرخصها الأول ──────────────────────────────
+#
+#   1. أمر مطابق حرفيًا            → 🆓 صفر حصة
+#   2. قاموس محلي + ذاكرة متعلّمة  → 🆓 صفر حصة   (intents.py)
+#   3. تصحيح إملائي (difflib)      → 🆓 صفر حصة
+#   4. محادثة مع المخ              → ⚡ نداء واحد (brain.py)
+#
+# المراحل التلاتة الأولى بتغطي ~96% من الأوامر المسجّلة، فالمخ مبيتنداش
+# إلا للكلام اللي فعلاً محتاج فهم. ولما المخ يفهم صيغة جديدة والمستخدم
+# يأكّدها، بنحفظها في القاموس المتعلّم — فنفس الصيغة تاني مرة بتبقى 🆓.
+#
+# مبدأ ثابت مش بيتكسر: **مفيش تنفيذ تلقائي لأي أمر اقترحه نموذج**.
+# لازم تأكيد صريح (y) قبل أي تنفيذ، زي باقي المشروع بالظبط.
 FUZZY_CUTOFF = 0.6
 _CONFIRM_YES = {"y", "yes", "نعم", "أيوه", "ايوه", "اه", "آه", "تمام"}
 _CONFIRM_NO = {"n", "no", "لا", "لأ"}
+
+# أقصى عدد رسائل بنحتفظ بيها في محادثة المخ (brain.py بيقصّها كمان حسب
+# سياق المزوّد النشط، ده حد أعلى إضافي عشان الذاكرة متكبرش بلا نهاية)
+_MAX_CHAT_TURNS = 30
+
+_SYSTEM_PROMPT = (
+    "أنتي نيزوكو، مساعدة ذكية مصرية بتتكلمي عامية مصرية طبيعية ومختصرة. "
+    "بتشتغلي جوه برنامج على جهاز المستخدم، وعندك أدوات حقيقية تقدري تشغّليها.\n\n"
+    "لو المستخدم عايز حاجة محتاجة أداة، اكتبي سطر لوحده بالشكل ده بالظبط:\n"
+    "TOOL: <اسم_الأمر> <الوسائط>\n\n"
+    "قواعد مهمة:\n"
+    "- استخدمي بس الأوامر الموجودة في القايمة تحت. متخترعيش أسماء أوامر.\n"
+    "- لو السؤال عادي (سلام، رأي، شرح) جاوبي عادي من غير أي TOOL.\n"
+    "- سطر TOOL لازم يكون آخر حاجة في ردك، ومعاه سطر واحد بس بيشرح ليه.\n"
+    "- متقوليش إنك نفّذتي حاجة — المستخدم لازم يأكّد الأول.\n"
+)
 
 
 @dataclass
@@ -138,6 +159,13 @@ class AssistantEngine:
         self._stop_flag = threading.Event()
         self._worker: threading.Thread | None = None
         self._pending_intent: tuple[str, list[str], str] | None = None
+        # وسائط ناقصة لأمر اتعرف محليًا (زي مسار ملف) — بتتملي من رسالة
+        # المستخدم الجاية، وكل ده **بصفر حصة** (مفيش نموذج بيتنادى)
+        self._pending_args: tuple[str, list[str], list, str] | None = None
+        # محادثة المخ (مش متسجّلة على القرص — بتتصفّر مع كل تشغيل)
+        self.chat_history: list[dict] = []
+        # الواجهة بتحطه عشان تفتح نافذة اختيار ملف بدل ما تسأل بالنص
+        self.on_need_file = None
         self._register_builtin_commands()
         self.load_plugins()
 
@@ -322,6 +350,10 @@ class AssistantEngine:
             reply = text.lower()
             if reply in _CONFIRM_YES:
                 pending_name, pending_args, pending_raw = pending
+                # المستخدم أكّد إن الصيغة دي معناها الأمر ده — نحفظها
+                # في القاموس المتعلّم عشان نفس الصيغة تاني مرة تتحل
+                # محليًا بصفر حصة، من غير ما نسأل المخ تاني أبدًا.
+                intents.remember(pending_raw, pending_name)
                 self._log(f"↪ بينفذ: {pending_name} {' '.join(pending_args)}".strip(), "info")
                 # لازم نبعت النص الأصلي (pending_raw)، مش رد التأكيد ("y")
                 # نفسه — بعض الإضافات (زي database_plugin.py, connectors_plugin.py)
@@ -335,25 +367,101 @@ class AssistantEngine:
                 return
             # مش y ولا n — نسيب الاقتراح القديم ونعالج النص الجديد عادي
 
+        # وسيطة ناقصة مستنية؟ الرسالة دي هي الإجابة — كل ده 🆓
+        if self._pending_args is not None and self._fill_pending_arg(text):
+            return
+
+        known = {c.name for c in self.registry.list_commands()}
+
+        # ── 1+2: أمر مطابق، أو قاموس محلي، أو ذاكرة متعلّمة — كله 🆓 ──
+        match = intents.resolve(text, known)
+        if match is not None:
+            if match.source == "exact":
+                try:
+                    parts = shlex.split(text)
+                except ValueError as e:
+                    self._log(f"❌ parse error: {e}", "error")
+                    return
+                self._execute(parts[0], parts[1:], text)
+                return
+            if match.is_complete():
+                self._log(f"↪ {match.command_line()}", "info")
+                self._execute(match.command, match.args, match.command_line())
+                return
+            # اتعرف الأمر بس ناقصه وسيطة — نسأل عليها من غير أي نموذج
+            self._ask_for_arg(match, text)
+            return
+
+        # ── 3: تصحيح إملائي — 🆓 ──
         try:
-            parts = shlex.split(text)
-        except ValueError as e:
-            self._log(f"❌ parse error: {e}", "error")
+            first = shlex.split(text)[0]
+        except (ValueError, IndexError):
+            first = text.split(maxsplit=1)[0] if text.split() else ""
+        close = difflib.get_close_matches(first.lower(), sorted(known), n=1, cutoff=FUZZY_CUTOFF)
+        if close:
+            rest = text.split(maxsplit=1)
+            args = shlex.split(rest[1]) if len(rest) > 1 else []
+            self._pending_intent = (close[0], args, text)
+            self._log(
+                f"❓ أمر مش معروف: {first}\n"
+                f'🤔 قصدك "{close[0]}"؟ اكتب y للتنفيذ أو أي حاجة تانية للإلغاء.',
+                "warn",
+            )
             return
-        if not parts:
+
+        # ── 4: المخ — ⚡ نداء واحد ──
+        self._converse_async(text)
+
+    # ── ملء الوسائط الناقصة محليًا (بصفر حصة) ─────────────────────────
+    def _ask_for_arg(self, match, original_text: str):
+        """أمر اتعرف محليًا بس ناقصه وسيطة (زي مسار ملف).
+
+        بنسأل المستخدم مباشرة بدل ما نستدعي نموذج — الأمر نفسه معروف
+        بالفعل، اللي ناقص بيانات مش فهم.
+        """
+        spec = match.missing[0]
+        self._pending_args = (match.command, list(match.args), list(match.missing), original_text)
+        if spec.kind in (intents.FILE, intents.DIR) and callable(self.on_need_file):
+            # الواجهة هتفتح نافذة اختيار — أسرع وأنضف من كتابة المسار
+            self.on_need_file(spec, self._submit_arg_value)
             return
-        name, args = parts[0], parts[1:]
-        cmd = self.registry.get(name)
-        if cmd is None:
-            suggestion = self._suggest_command(name, args)
-            if suggestion:
-                sugg_name, sugg_args, message, level = suggestion
-                self._pending_intent = (sugg_name, sugg_args, text)
-                self._log(message, level)
+        prompt = spec.prompt or "محتاجة الحاجة الناقصة دي"
+        self._log(f"📝 {prompt} — ابعتهالي في رسالة جاية (أو اكتب: إلغاء)", "warn")
+
+    def _submit_arg_value(self, value: str):
+        """بتتنادى من الواجهة لما المستخدم يختار ملف من النافذة."""
+        if value:
+            self.submit(value)
+        else:
+            self._pending_args = None
+
+    def _fill_pending_arg(self, text: str) -> bool:
+        """بتحط قيمة في أول وسيطة ناقصة. بترجع True لو استهلكت الرسالة."""
+        command, args, missing, original = self._pending_args
+        if intents.normalize(text) in {"الغاء", "إلغاء", "cancel", "لا"}:
+            self._pending_args = None
+            self._log("❌ اتلغى", "info")
+            return True
+
+        missing.pop(0)
+        args.append(text.strip())
+        # ملف الخرج بيتشتق من ملف الدخل اللي المستخدم لسه مدخله
+        while missing and missing[0].kind == intents.OUT:
+            args.append(intents.derive_output(args[0], missing.pop(0)))
+        if missing:
+            self._pending_args = (command, args, missing, original)
+            nxt = missing[0]
+            if nxt.kind in (intents.FILE, intents.DIR) and callable(self.on_need_file):
+                self.on_need_file(nxt, self._submit_arg_value)
             else:
-                self._log(f"❓ unknown command: {name} (try 'help')", "warn")
-            return
-        self._execute(name, args, text)
+                self._log(f"📝 {nxt.prompt or 'الحاجة الجاية'}", "warn")
+            return True
+
+        self._pending_args = None
+        line = intents.IntentMatch(command, args).command_line()
+        self._log(f"↪ {line}", "info")
+        self._execute(command, args, line)
+        return True
 
     def _execute(self, name: str, args: list[str], raw: str):
         cmd = self.registry.get(name)
@@ -372,70 +480,89 @@ class AssistantEngine:
         if result:
             self._log(str(result), "info")
 
-    # ── فهم النية (مش تطابق حرفي) ──────────────────────────────────────
-    def _suggest_command(self, name: str, args: list[str]) -> tuple[str, list[str], str, str] | None:
-        """بترجع (اسم الأمر المقترح، وسائطه، رسالة العرض، مستوى اللوج)
-        أو None لو مفيش اقتراح — مبتنفذش حاجة بنفسها أبدًا، بس بترشّح."""
-        known = [c.name for c in self.registry.list_commands()]
-        close = difflib.get_close_matches(name.lower(), known, n=1, cutoff=FUZZY_CUTOFF)
-        if close:
-            return (
-                close[0], args,
-                f"❓ أمر مش معروف: {name}\n🤔 قصدك \"{close[0]}\"؟ اكتب y للتنفيذ أو أي حاجة تانية للإلغاء.",
+    # ── محادثة مع المخ (المرحلة الوحيدة اللي بتستهلك حصة) ─────────────
+    def _tool_catalog(self) -> str:
+        return "\n".join(
+            f"{c.name} — {c.description}" for c in self.registry.list_commands()
+        )
+
+    def _converse_async(self, text: str):
+        """بينادي المخ على thread منفصل.
+
+        مهم: `_run_loop` بيشتغل على thread واحد بينفذ كل حاجة بالتتابع.
+        نداء نموذج بياخد 20-30 ثانية، ولو عملناه هنا على طول كان هيقفل
+        كل حاجة تانية (الجداول المؤقتة، رسايل تليجرام، أي أمر تاني)
+        طول المدة دي. فبنفصله على thread لوحده والطابور يفضل ماشي.
+        """
+        threading.Thread(
+            target=self._converse, args=(text,), daemon=True,
+            name="nezuko-brain",
+        ).start()
+
+    def _converse(self, text: str):
+        b = brain.get_brain()
+        if not b.ready():
+            self._log(
+                f"❓ مش فاهمة: {text}\n"
+                "مفيش مخ متظبط عشان يفهم الكلام الحر. ظبّط واحد مجاني بـ: "
+                "brain_setup   (أو اكتب help لقايمة الأوامر)",
                 "warn",
             )
+            return
 
-        raw_text = " ".join([name, *args])
-        intent = self._try_llm_intent(raw_text)
-        if intent is not None:
-            intent_name, intent_args = intent
-            shown = f"{intent_name} {' '.join(intent_args)}".strip()
-            return (
-                intent_name, intent_args,
-                f"🧠 Ollama فهم قصدك: {shown}\nنفّذها؟ اكتب y للتأكيد أو أي حاجة تانية للإلغاء.",
-                "info",
-            )
-        return None
+        messages = [
+            {"role": "system", "content": _SYSTEM_PROMPT + "\nالأوامر المتاحة:\n" + self._tool_catalog()},
+            *self.chat_history[-_MAX_CHAT_TURNS:],
+            {"role": "user", "content": text},
+        ]
+        cfg = brain.load_config()
+        reply = b.deep_chat(messages) if cfg.get("deep_mode") else b.chat(messages)
 
-    def _try_llm_intent(self, text: str) -> tuple[str, list[str]] | None:
-        """بيحاول يفهم نص حر (عربي/إنجليزي) عبر نموذج Ollama محلي مجاني
-        (لو شغال) ويطابقه مع أقرب أمر حقيقي مسجّل فعلاً. بيرجع None
-        بهدوء تام لو Ollama مش شغال، أو لو ردّ باسم أمر مش موجود أصلاً —
-        محدش بيصدّق النموذج أعمى، لازم يتحقق من الـ registry الحقيقي."""
-        commands = self.registry.list_commands()
-        if not commands:
-            return None
-        catalog = "\n".join(f"{c.name} — {c.description}" for c in commands)
-        prompt = (
-            "You are a command router for a desktop assistant app. Given the user's "
-            "free-text request (Arabic or English) and the list of available commands "
-            "below, reply with ONLY the exact command line to run — the command name "
-            "followed by any arguments you can extract from the request. No explanation, "
-            "no markdown, nothing else. If nothing genuinely matches, reply with exactly: NONE\n\n"
-            f"Available commands:\n{catalog}\n\n"
-            f"User request: {text}\n\n"
-            "Command line:"
+        if not reply:
+            self._log(f"❌ المخ مردش: {reply.error}", "error")
+            return
+
+        body, tool = self._split_tool_call(reply.text)
+        badge = f"{'🔒' if reply.is_local else '☁️'} {reply.label}"
+
+        self.chat_history.append({"role": "user", "content": text})
+        self.chat_history.append({"role": "assistant", "content": reply.text})
+        del self.chat_history[:-_MAX_CHAT_TURNS]
+
+        if tool is None:
+            self._log(f"{body}\n\n— {badge}", "info")
+            return
+
+        tool_name, tool_args = tool
+        if self.registry.get(tool_name) is None:
+            # النموذج هلوس اسم أمر مش موجود — منعرضهوش أصلاً
+            self._log(f"{body}\n\n— {badge}", "info")
+            return
+
+        shown = f"{tool_name} {' '.join(tool_args)}".strip()
+        self._pending_intent = (tool_name, tool_args, text)
+        self._log(
+            f"{body}\n\n🔧 محتاجة أشغّل: {shown}\nاكتب y للتنفيذ أو أي حاجة تانية للإلغاء.\n— {badge}",
+            "info",
         )
-        payload = json.dumps({"model": OLLAMA_INTENT_MODEL, "prompt": prompt, "stream": False}).encode("utf-8")
-        req = urllib.request.Request(
-            OLLAMA_URL, data=payload, headers={"Content-Type": "application/json"},
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=OLLAMA_INTENT_TIMEOUT) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-        except (urllib.error.URLError, ConnectionError, TimeoutError, OSError, json.JSONDecodeError):
-            return None
-        reply = data.get("response", "").strip()
-        if not reply or reply.upper() == "NONE":
-            return None
-        try:
-            reply_parts = shlex.split(reply)
-        except ValueError:
-            return None
-        if not reply_parts:
-            return None
-        guessed_name, guessed_args = reply_parts[0], reply_parts[1:]
-        if self.registry.get(guessed_name) is None:
-            # النموذج هلوس اسم أمر مش موجود فعليًا — نتجاهله بدل ما نصدّقه
-            return None
-        return guessed_name, guessed_args
+
+    @staticmethod
+    def _split_tool_call(reply: str) -> tuple[str, tuple[str, list[str]] | None]:
+        """بيفصل نص الرد عن سطر `TOOL:` لو موجود.
+
+        بنستخدم بروتوكول نصي بدل function-calling الخاص بكل مزوّد، عشان
+        نفس الكود يشتغل على أي نموذج من غير ترجمة schema لكل واحد.
+        """
+        tool = None
+        kept: list[str] = []
+        for line in reply.splitlines():
+            m = re.match(r"^\s*TOOL:\s*(\S+)(.*)$", line)
+            if m and tool is None:
+                try:
+                    tool = (m.group(1), shlex.split(m.group(2).strip()))
+                except ValueError:
+                    tool = (m.group(1), m.group(2).split())
+                continue
+            kept.append(line)
+        return "\n".join(kept).strip(), tool
+

@@ -535,7 +535,11 @@ class Brain:
         for prov in sorted(PROVIDERS.values(), key=lambda p: -p.quality):
             st = self._states.setdefault(prov.name, _ProviderState())
             rpm, rpd = self._limits_for(prov, cfg)
-            has_key = (not prov.needs_key) or bool(get_key(prov.name))
+            if prov.name in LOCAL_PROVIDERS:
+                # مزوّد محلي مالوش مفتاح، فـ"جاهز" عنده = السيرفر رادّ
+                has_key = is_local_alive(prov)
+            else:
+                has_key = bool(get_key(prov.name))
             rows.append({
                 "name": prov.name,
                 "label": prov.label,
@@ -556,6 +560,32 @@ class Brain:
 
 class _RateLimited(Exception):
     """المزوّد رجّع 429 — نتعامل معاه غير الأخطاء العادية."""
+
+
+# ── فحص المزوّد المحلي ───────────────────────────────────────────────
+# مزوّد محلي "مش محتاج مفتاح"، بس ده **مش** معناه إنه شغال. من غير
+# الفحص ده كنا بنقول للمستخدم "مخ جاهز ✅" وهو مفيش أي حاجة متثبتة
+# عنده أصلاً — أسوأ من إننا نقوله مفيش.
+
+_probe_cache: dict[str, tuple[float, bool]] = {}
+_PROBE_TTL = 30.0
+
+
+def is_local_alive(prov: Provider, *, timeout: float = 1.0) -> bool:
+    """بيتأكد إن سيرفر محلي (زي Ollama) رادّ فعلاً. النتيجة بتتخزن
+    مؤقتًا عشان مانفحصش في كل نداء status."""
+    now = time.time()
+    cached = _probe_cache.get(prov.name)
+    if cached and now - cached[0] < _PROBE_TTL:
+        return cached[1]
+    root = prov.base_url.rsplit("/v1", 1)[0]
+    try:
+        with urllib.request.urlopen(f"{root}/api/tags", timeout=timeout):
+            alive = True
+    except Exception:  # noqa: BLE001 - أي فشل = مش شغال
+        alive = False
+    _probe_cache[prov.name] = (now, alive)
+    return alive
 
 
 # ── المحوّلات (adapters) ─────────────────────────────────────────────
