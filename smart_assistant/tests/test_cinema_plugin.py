@@ -16,6 +16,7 @@ requires_ffmpeg = pytest.mark.skipif(
 )
 requires_auto_editor = pytest.mark.skipif(not shutil.which("auto-editor"), reason="auto-editor not installed")
 requires_scenedetect = pytest.mark.skipif(not cp._HAS_SCENEDETECT, reason="scenedetect not installed")
+requires_realesrgan = pytest.mark.skipif(not shutil.which("realesrgan-ncnn-vulkan"), reason="realesrgan-ncnn-vulkan not installed")
 
 
 @pytest.fixture
@@ -367,3 +368,121 @@ def test_detect_scenes_no_cuts_in_continuous_clip(make_ctx, clip1):
     result = cp._cmd_detect_scenes(make_ctx("detect_scenes", [str(clip1)]))
     assert result.startswith("ℹ️")
     assert "مفيش تغييرات مشاهد" in result
+
+
+# ── upscale_image / upscale_video ────────────────────────────────────────
+
+@pytest.fixture
+def tiny_image(tmp_path):
+    out = tmp_path / "tiny.png"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=red:s=8x8", "-frames:v", "1", "-update", "1", str(out), "-loglevel", "error"],
+        check=True, capture_output=True,
+    )
+    return out
+
+
+@pytest.fixture
+def tiny_clip(tmp_path):
+    out = tmp_path / "tiny_clip.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=blue:s=8x8:d=1:r=1",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+         "-shortest", str(out), "-loglevel", "error"],
+        check=True, capture_output=True,
+    )
+    return out
+
+
+def test_upscale_image_no_args(make_ctx):
+    result = cp._cmd_upscale_image(make_ctx("upscale_image", []))
+    assert result.startswith("usage")
+
+
+def test_upscale_image_reports_missing_tool(make_ctx, tmp_path, monkeypatch):
+    monkeypatch.setattr(cp.shutil, "which", lambda name: None)
+    f = tmp_path / "in.png"
+    f.write_bytes(b"x")
+    result = cp._cmd_upscale_image(make_ctx("upscale_image", [str(f), str(tmp_path / "out.png")]))
+    assert "realesrgan-ncnn-vulkan مش متثبت" in result
+
+
+def test_upscale_image_missing_input(make_ctx, tmp_path, monkeypatch):
+    monkeypatch.setattr(cp.shutil, "which", lambda name: "/usr/bin/realesrgan-ncnn-vulkan")
+    result = cp._cmd_upscale_image(make_ctx("upscale_image", [str(tmp_path / "nope.png"), str(tmp_path / "out.png")]))
+    assert result.startswith("❌")
+
+
+def test_upscale_image_rejects_bad_scale(make_ctx, tmp_path, monkeypatch):
+    monkeypatch.setattr(cp.shutil, "which", lambda name: "/usr/bin/realesrgan-ncnn-vulkan")
+    f = tmp_path / "in.png"
+    f.write_bytes(b"x")
+    result = cp._cmd_upscale_image(make_ctx("upscale_image", [str(f), str(tmp_path / "out.png"), "5"]))
+    assert result.startswith("❌")
+    assert "scale" in result
+
+
+def test_upscale_image_rejects_bad_model(make_ctx, tmp_path, monkeypatch):
+    monkeypatch.setattr(cp.shutil, "which", lambda name: "/usr/bin/realesrgan-ncnn-vulkan")
+    f = tmp_path / "in.png"
+    f.write_bytes(b"x")
+    result = cp._cmd_upscale_image(make_ctx("upscale_image", [str(f), str(tmp_path / "out.png"), "4", "bogus-model"]))
+    assert result.startswith("❌")
+    assert "model" in result
+
+
+def test_upscale_image_detects_exit_zero_but_no_output(make_ctx, tmp_path, monkeypatch):
+    # realesrgan-ncnn-vulkan اتجرب فعليًا وبيرجع exit code صفر حتى لو
+    # فشل فعلاً — لازم نتأكد من وجود ملف الخرج فعليًا مش نثق في exit code.
+    monkeypatch.setattr(cp.shutil, "which", lambda name: "/usr/bin/realesrgan-ncnn-vulkan")
+    monkeypatch.setattr(cp.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""))
+    f = tmp_path / "in.png"
+    f.write_bytes(b"x")
+    result = cp._cmd_upscale_image(make_ctx("upscale_image", [str(f), str(tmp_path / "out.png")]))
+    assert result.startswith("❌")
+    assert "مفيش ملف خرج حقيقي" in result
+
+
+@requires_realesrgan
+def test_upscale_image_real_run_produces_larger_image(make_ctx, tiny_image, tmp_path):
+    out = tmp_path / "upscaled.png"
+    result = cp._cmd_upscale_image(make_ctx("upscale_image", [str(tiny_image), str(out), "2", "realesr-animevideov3"]))
+    assert result.startswith("✅")
+    assert out.is_file()
+    from PIL import Image
+    with Image.open(out) as img:
+        assert img.size == (16, 16)  # 8x8 مضروبة في scale=2
+
+
+def test_upscale_video_no_args(make_ctx):
+    result = cp._cmd_upscale_video(make_ctx("upscale_video", []))
+    assert result.startswith("usage")
+
+
+def test_upscale_video_reports_missing_tool(make_ctx, tmp_path, monkeypatch):
+    monkeypatch.setattr(cp.shutil, "which", lambda name: None)
+    f = tmp_path / "in.mp4"
+    f.write_bytes(b"x")
+    result = cp._cmd_upscale_video(make_ctx("upscale_video", [str(f), str(tmp_path / "out.mp4")]))
+    assert "realesrgan-ncnn-vulkan مش متثبت" in result
+
+
+def test_upscale_video_reports_missing_ffmpeg(make_ctx, tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        cp.shutil, "which",
+        lambda name: "/usr/bin/realesrgan-ncnn-vulkan" if name == "realesrgan-ncnn-vulkan" else None,
+    )
+    f = tmp_path / "in.mp4"
+    f.write_bytes(b"x")
+    result = cp._cmd_upscale_video(make_ctx("upscale_video", [str(f), str(tmp_path / "out.mp4")]))
+    assert "ffmpeg غير موجود" in result
+
+
+@requires_realesrgan
+@requires_ffmpeg
+def test_upscale_video_real_run_produces_output(make_ctx, tiny_clip, tmp_path):
+    out = tmp_path / "upscaled.mp4"
+    result = cp._cmd_upscale_video(make_ctx("upscale_video", [str(tiny_clip), str(out), "2", "realesr-animevideov3"]))
+    assert result.startswith("✅")
+    assert out.is_file()
+    assert _duration(out) > 0

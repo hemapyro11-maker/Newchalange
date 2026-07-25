@@ -20,6 +20,19 @@ PySceneDetect (اختيارية، `pip install scenedetect[opencv]`) — مفي�
 لتوليد فصول/timestamps تلقائيًا لفيديو طويل. مكتبة Python حقيقية
 (import مباشر، مش subprocess) فبتتبع نفس نمط الـ import الاختياري
 اللي faster-whisper بيستخدمه في voice_plugin.py.
+
+و`upscale_image`/`upscale_video` — تكبير بالذكاء الاصطناعي عبر
+Real-ESRGAN (ملف تنفيذي جاهز اسمه `realesrgan-ncnn-vulkan`، **مش**
+حزمة pip — بيتحمّل من https://github.com/xinntao/Real-ESRGAN/releases
+ويتحط في PATH). بيشتغل عبر Vulkan، يعني ممكن يشتغل حتى من غير NVIDIA/CUDA
+(أي GPU بيدعم Vulkan)، لكن **بطيء جدًا من غير GPU حقيقي** (اتجرب فعليًا
+على Vulkan software rendering: حوالي دقيقتين لصورة صغيرة واحدة).
+`upscale_video` بيشتغل فريم فريم: استخراج فريمات بـ ffmpeg، تكبير كل
+فريم، وتجميعهم تاني مع الصوت الأصلي — عملية تقيلة جدًا لفيديو طويل.
+ملحوظة اتجربت فعليًا وليها أهمية: الأداة دي بترجع exit code صفر **حتى
+لو فشلت فعليًا** (موديل غلط، صورة تعذر فك تشفيرها)، فـ upscale_image/
+upscale_video بيتأكدوا من وجود ملف الخرج فعليًا بدل ما يثقوا في exit
+code بس.
 """
 from __future__ import annotations
 
@@ -84,6 +97,21 @@ def _probe_duration(path: str) -> float | None:
     try:
         return float(result.stdout.strip())
     except (ValueError, AttributeError):
+        return None
+
+
+def _probe_fps(path: str) -> float | None:
+    if not shutil.which("ffprobe"):
+        return None
+    result = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=r_frame_rate",
+         "-of", "default=nw=1:nk=1", path],
+        capture_output=True, text=True, timeout=30,
+    )
+    try:
+        num, den = result.stdout.strip().split("/")
+        return float(num) / float(den)
+    except (ValueError, ZeroDivisionError):
         return None
 
 
@@ -507,6 +535,109 @@ def _cmd_detect_scenes(ctx) -> str:
     return "\n".join(lines)
 
 
+# ═══════════════════════════════════════════════════════════════════
+# تكبير بالذكاء الاصطناعي (Real-ESRGAN) — ملف تنفيذي خارجي اختياري
+# ═══════════════════════════════════════════════════════════════════
+
+_REALESRGAN_MODELS = ("realesr-animevideov3", "realesrgan-x4plus", "realesrgan-x4plus-anime", "realesrnet-x4plus")
+_REALESRGAN_MISSING_MSG = (
+    "❌ realesrgan-ncnn-vulkan مش متثبت — ملف تنفيذي جاهز (مش pip)، حمّله من:\n"
+    "   https://github.com/xinntao/Real-ESRGAN/releases\n"
+    "   وحطه في PATH. بيشتغل عبر Vulkan (بطيء جدًا من غير GPU حقيقي)."
+)
+
+
+def _validate_upscale_args(ctx) -> tuple[str, str, int, str, str | None]:
+    """يرجع (src, dst, scale, model, رسالة خطأ أو None). لو فيه خطأ،
+    القيم التانية بتبقى فاضية/افتراضية ومينفعش تتستخدم."""
+    src, dst = ctx.args[0], ctx.args[1]
+    missing = _missing_files(src)
+    if missing:
+        return "", "", 0, "", f"❌ الملف مش موجود: {missing[0]}"
+    try:
+        scale = int(ctx.args[2]) if len(ctx.args) > 2 else 4
+    except ValueError:
+        return "", "", 0, "", "❌ scale لازم يكون رقم صحيح (2 أو 3 أو 4)"
+    if scale not in (2, 3, 4):
+        return "", "", 0, "", "❌ scale لازم يكون 2 أو 3 أو 4"
+    model = ctx.args[3] if len(ctx.args) > 3 else "realesrgan-x4plus"
+    if model not in _REALESRGAN_MODELS:
+        return "", "", 0, "", f"❌ model لازم يكون واحد من: {', '.join(_REALESRGAN_MODELS)}"
+    return src, dst, scale, model, None
+
+
+def _cmd_upscale_image(ctx) -> str:
+    if len(ctx.args) < 2:
+        return "usage: upscale_image <input> <output> [scale=4] [model=realesrgan-x4plus] — تكبير صورة بالذكاء الاصطناعي (Real-ESRGAN)"
+    if not shutil.which("realesrgan-ncnn-vulkan"):
+        return _REALESRGAN_MISSING_MSG
+    src, dst, scale, model, err = _validate_upscale_args(ctx)
+    if err:
+        return err
+
+    ok, err = _run_ffmpeg(
+        ["realesrgan-ncnn-vulkan", "-i", src, "-o", dst, "-s", str(scale), "-n", model], timeout=900,
+    )
+    if not ok:
+        return f"❌ فشل: {err}"
+    # realesrgan-ncnn-vulkan بيرجع دايمًا exit code 0 حتى لو فشل فعليًا
+    # (نموذج غلط، صورة تعذر فك تشفيرها، ...) — اتجرب فعليًا، مش افتراض.
+    # الضمانة الحقيقية الوحيدة إن الملف طلع فعلاً وله حجم حقيقي.
+    dst_path = pathlib.Path(dst)
+    if not dst_path.is_file() or dst_path.stat().st_size == 0:
+        return "❌ فشل التكبير — الأداة خلصت من غير خطأ ظاهر بس مفيش ملف خرج حقيقي (تأكد من اسم الموديل)"
+    return f"✅ اتكبرت الصورة (x{scale}, {model}) في {dst}"
+
+
+def _cmd_upscale_video(ctx) -> str:
+    if len(ctx.args) < 2:
+        return "usage: upscale_video <input> <output> [scale=4] [model=realesrgan-x4plus] — تكبير فيديو فريم فريم (بطيء جدًا من غير GPU)"
+    if not shutil.which("realesrgan-ncnn-vulkan"):
+        return _REALESRGAN_MISSING_MSG
+    if not shutil.which("ffmpeg"):
+        return "❌ ffmpeg غير موجود"
+    src, dst, scale, model, err = _validate_upscale_args(ctx)
+    if err:
+        return err
+    fps = _probe_fps(src) or 25.0
+
+    with tempfile.TemporaryDirectory(prefix="nezuko_upscale_") as tmp:
+        frames_in = pathlib.Path(tmp) / "in"
+        frames_out = pathlib.Path(tmp) / "out"
+        frames_in.mkdir()
+        frames_out.mkdir()
+
+        ok, err = _run_ffmpeg(["ffmpeg", "-y", "-i", src, str(frames_in / "frame_%06d.png")], timeout=600)
+        if not ok:
+            return f"❌ فشل استخراج الفريمات: {err}"
+        if not any(frames_in.iterdir()):
+            return "❌ فشل استخراج الفريمات — مفيش فريمات اتولدت"
+
+        # فريم فريم عبر Vulkan (زي upscale_image بالظبط) — بطيء جدًا من
+        # غير GPU حقيقي، فمهلة أطول بكتير من باقي أوامر الملف ده.
+        ok, err = _run_ffmpeg(
+            ["realesrgan-ncnn-vulkan", "-i", str(frames_in), "-o", str(frames_out), "-s", str(scale), "-n", model],
+            timeout=7200,
+        )
+        if not ok:
+            return f"❌ فشل التكبير: {err}"
+        if not any(frames_out.iterdir()):
+            return "❌ فشل التكبير — الأداة خلصت من غير خطأ ظاهر بس مفيش فريمات خرج حقيقية"
+
+        ok, err = _run_ffmpeg(
+            ["ffmpeg", "-y", "-r", str(fps), "-i", str(frames_out / "frame_%06d.png"),
+             "-i", src, "-map", "0:v", "-map", "1:a?",
+             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "copy", "-shortest", dst],
+            timeout=600,
+        )
+        if not ok:
+            return f"❌ فشل تجميع الفيديو: {err}"
+
+    if not pathlib.Path(dst).is_file():
+        return "❌ فشل تجميع الفيديو النهائي"
+    return f"✅ اتكبر الفيديو (x{scale}, {model}) في {dst}"
+
+
 def register(engine):
     engine.registry.register("color_grade", _cmd_color_grade, "color_grade <in> <out> [preset] — تصحيح ألوان سينمائي")
     engine.registry.register("transition", _cmd_transition, "transition <c1> <c2> <out> [style] [dur] — انتقال احترافي بين كليبين")
@@ -519,4 +650,6 @@ def register(engine):
     engine.registry.register("denoise_audio", _cmd_denoise_audio, "denoise_audio <in> <out> — إزالة ضوضاء الصوت")
     engine.registry.register("auto_trim_silence", _cmd_auto_trim_silence, "auto_trim_silence <in> <out> [threshold=4%] — قص الصمت/اللقطات الميتة تلقائيًا (auto-editor)")
     engine.registry.register("detect_scenes", _cmd_detect_scenes, "detect_scenes <video> [threshold=27.0] — كشف تغييرات المشاهد تلقائيًا (PySceneDetect)")
+    engine.registry.register("upscale_image", _cmd_upscale_image, "upscale_image <in> <out> [scale=4] [model] — تكبير صورة بالذكاء الاصطناعي (Real-ESRGAN)")
+    engine.registry.register("upscale_video", _cmd_upscale_video, "upscale_video <in> <out> [scale=4] [model] — تكبير فيديو فريم فريم (Real-ESRGAN، بطيء جدًا من غير GPU)")
     engine.registry.register("title_card", _cmd_title_card, "title_card <text> <out> [duration] [size] — لوحة عنوان متحركة")
