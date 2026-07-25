@@ -81,6 +81,8 @@ py -m PyInstaller ^
     --hidden-import core_engine ^
     --hidden-import i18n ^
     --hidden-import version ^
+    --hidden-import brain ^
+    --hidden-import intents ^
     --collect-all CTkToolTip ^
     --collect-all mcp ^
     --collect-all capstone ^
@@ -99,6 +101,8 @@ py -m PyInstaller ^
     --collect-all keyring ^
     --add-data "core_engine.py;." ^
     --add-data "i18n.py;." ^
+    --add-data "brain.py;." ^
+    --add-data "intents.py;." ^
     --add-data "version.py;." ^
     --add-data "version.json;." ^
     --add-data "connectors.example.json;." ^

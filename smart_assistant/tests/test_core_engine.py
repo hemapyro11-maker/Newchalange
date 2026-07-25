@@ -1,5 +1,4 @@
 """اختبارات Core Engine: CommandRegistry، الـ dispatch، تحميل الإضافات، وسجل المهارات."""
-import json
 import threading
 import time
 
