@@ -22,3 +22,4 @@ smart_assistant/loadtest_results.json
 smart_assistant/.loadtest_tmp/
 smart_assistant/external_tools.json
 smart_assistant/think_memory.json
+smart_assistant/schedule.json

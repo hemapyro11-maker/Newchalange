@@ -117,6 +117,8 @@ plugin اتحملوا من غير أي خطأ (بما فيهم اللي بيعت
     تفصيلي تحت).
   - `think_plugin.py` — مساعد تفكير عميق متعدد الأدوار، بيستخدم أوامر
     نيزوكو نفسها كأدوات (شرح تفصيلي تحت).
+  - `schedule_plugin.py` — أتمتة أي أمر نيزوكو على مواعيد (زي cron
+    بصياغة أبسط: `every:`/`daily:`/`weekly:` — شرح تفصيلي تحت).
 - `connectors.example.json` — مثال لإعداد MCP Connectors (انسخه لـ
   `connectors.json` وعدّله). `connectors.json` نفسه بيتعمل تلقائياً
   أول ما التطبيق يشتغل ومش متتبع في git (ممكن يحتوي مسارات/أسرار خاصة بيك).
@@ -137,7 +139,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-629 اختبار حقيقي (مش placeholders) بتغطي كل plugin و Core Engine —
+662 اختبار حقيقي (مش placeholders) بتغطي كل plugin و Core Engine —
 تحليل ELF/PE حقيقي، معالجة فيديو حقيقية عبر FFmpeg، توليد أيقونات
 حقيقي، حلقة توليد/تصحيح plugin_forge كاملة، إلخ. الاختبارات اللي
 محتاجة أدوات اختيارية (FFmpeg, Pillow, capstone, mcp) بتتخطى تلقائياً
@@ -280,6 +282,44 @@ think_forget              # مسح كل الملاحظات الدائمة
 ollama pull deepseek-r1
 think_model deepseek-r1
 ```
+
+## أتمتة على مواعيد — `schedule_plugin.py`
+
+نقطة كانت غايبة تمامًا من نيزوكو قبل كده: تجدول أي أمر مسجّل عشان
+يتنفذ لوحده على معاد، من غير ما تكون فاتح البرنامج وتكتب بنفسك كل مرة.
+مستوحاة من ميزة الـ cron/webhook automation في أدوات مساعد شخصي زي
+Clawdbot، لكن بصياغة نصية بسيطة بدل جدول cron الكلاسيكي المعقّد.
+
+```
+schedule add daily:09:00 channel_growth_report @yourchannel
+✅ اتضاف #1 — هيتنفذ الأول: 2026-07-26 09:00
+
+schedule list
+📅 الجداول المسجّلة:
+  ✅ #1 [daily:09:00] channel_growth_report @yourchannel — الجاي: 2026-07-26T09:00:00
+```
+
+صيغ المواعيد المدعومة:
+```
+every:<N>s|m|h|d      # every:30m, every:2h, every:1d
+daily:HH:MM           # daily:09:00
+weekly:day:HH:MM      # weekly:mon:09:00  (day: mon..sun)
+```
+
+```
+schedule add <spec> <command...>    # جدول أمر جديد
+schedule list                        # عرض كل الجداول
+schedule remove <id>                 # شيل جدول
+schedule pause <id> / resume <id>     # إيقاف/تشغيل مؤقت من غير حذف
+schedule run_now <id>                # نفّذ فورًا من غير ما تستنى الموعد
+```
+
+**إزاي شغّالة تقنيًا:** thread خلفي واحد بيفحص كل 15 ثانية أي جدول
+"مستحق" ويبعته لنفس طابور التنفيذ العادي (`engine.submit`) — يعني أي
+أمر مجدول بيمشي في **نفس المسار بالظبط** اللي أي أمر مكتوب يدويًا
+بيمشي فيه (نفس الصلاحيات، نفس فحص core_engine للأوامر غير الموجودة،
+مفيش مسار تنفيذ "خاص" للجداول). الجداول محفوظة في `schedule.json`
+(محلي، خارج git، بيتصفر مع كل جهاز).
 
 ## Connectors (MCP) — زي الموجودة في Claude
 
