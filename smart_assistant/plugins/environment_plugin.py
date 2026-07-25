@@ -199,6 +199,9 @@ def _install_command_for_current_os(key: str) -> str | None:
     """بيرجع أمر التثبيت المضبوط لنظام تشغيلك الفعلي، أو None لو مفيش
     طريقة معروفة (زي gcc على ويندوز — محتاج MSYS2/MinGW يدوي)."""
     spec = TOOLS[key]
+    if "same_as" in spec:
+        # ffprobe/ffplay مالهومش باكدج منفصل — بييجوا مع تثبيت ffmpeg
+        spec = TOOLS[spec["same_as"]]
     os_name = _current_os()
     if spec["kind"] == "python":
         return f"{sys.executable} -m pip install {spec['pip']}"

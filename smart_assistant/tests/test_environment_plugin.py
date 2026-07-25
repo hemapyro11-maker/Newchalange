@@ -78,6 +78,16 @@ def test_install_command_linux_uses_detected_manager(monkeypatch):
     assert cmd == "sudo apt install -y ffmpeg"
 
 
+def test_install_command_same_as_alias_resolves_to_target_tool(monkeypatch):
+    # ffprobe/ffplay مالهومش باكدج منفصل في TOOLS (same_as: "ffmpeg") —
+    # قبل الإصلاح كانت الدالة بترجع None ليهم دايمًا بدل ما تدلّك على
+    # تثبيت ffmpeg اللي بيجيبهم معاه.
+    monkeypatch.setattr(ep, "_current_os", lambda: "linux")
+    monkeypatch.setattr(ep, "_linux_pkg_manager", lambda: "apt")
+    assert ep._install_command_for_current_os("ffprobe") == "sudo apt install -y ffmpeg"
+    assert ep._install_command_for_current_os("ffplay") == "sudo apt install -y ffmpeg"
+
+
 def test_install_command_macos_uses_brew(monkeypatch):
     monkeypatch.setattr(ep, "_current_os", lambda: "macos")
     cmd = ep._install_command_for_current_os("ffmpeg")
