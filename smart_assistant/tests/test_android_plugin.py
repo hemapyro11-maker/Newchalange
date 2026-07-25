@@ -45,6 +45,23 @@ def test_extract_device_none_when_absent():
     assert device is None
 
 
+def test_extract_device_ignores_literal_device_equals_mid_command():
+    # راجع: android_shell بياخد <command...> حر — لو كانت الأداة بتدور
+    # على device= في أي مكان، أمر shell شرعي زي "setprop device=foo"
+    # كان هيتقطع منه device=foo غلط ويتفسر كـ adb -s device selector
+    # بدل ما يتبعت كجزء من الأمر نفسه. دلوقتي بنقبل device= بس لو
+    # آخر توكن، زي ما موضح في كل usage strings.
+    remaining, device = ap._extract_device(["setprop", "device=foo", "1"])
+    assert remaining == ["setprop", "device=foo", "1"]
+    assert device is None
+
+
+def test_extract_device_still_works_as_trailing_flag_on_shell_command():
+    remaining, device = ap._extract_device(["input", "tap", "500", "800", "device=emulator-5554"])
+    assert remaining == ["input", "tap", "500", "800"]
+    assert device == "emulator-5554"
+
+
 def test_adb_prefix_includes_device_flag():
     assert ap._adb_prefix("emulator-5554") == ["adb", "-s", "emulator-5554"]
     assert ap._adb_prefix(None) == ["adb"]

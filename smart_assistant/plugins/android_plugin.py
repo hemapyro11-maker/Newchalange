@@ -33,14 +33,13 @@ def _require_adb() -> str | None:
 
 
 def _extract_device(args: list[str]) -> tuple[list[str], str | None]:
-    device = None
-    remaining = []
-    for a in args:
-        if a.startswith("device="):
-            device = a[len("device="):]
-        else:
-            remaining.append(a)
-    return remaining, device
+    """بتشيل [device=<id>] بس لو هو آخر توكن (زي ما موضح في كل usage
+    strings — الفلاج ده دايمًا في الآخر). لو كنا بنفحص كل التوكنز، أي
+    أمر android_shell بيحتوي على "device=" كنص حرفي جوه أوامره
+    (مش كفلاج) كان هيتشال غلط ويتفسر كـ device selector."""
+    if args and args[-1].startswith("device="):
+        return list(args[:-1]), args[-1][len("device="):]
+    return list(args), None
 
 
 def _adb_prefix(device: str | None) -> list[str]:
