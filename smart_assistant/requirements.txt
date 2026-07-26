@@ -12,6 +12,10 @@ sounddevice>=0.4.6
 faster-whisper>=0.10.0
 openai-whisper>=20231117
 vosk>=0.3.45
+# silero-vad: stops `listen` recording as soon as you go quiet instead of
+# always waiting a fixed 5s. ~2MB model, MIT, works on Arabic and English.
+# Optional — without it `listen` falls back to the fixed duration.
+silero-vad>=5.1
 scenedetect[opencv]>=0.6.4
 python-telegram-bot>=21.0
 discord.py>=2.3.0

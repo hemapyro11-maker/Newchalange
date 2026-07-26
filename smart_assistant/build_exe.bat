@@ -69,6 +69,14 @@ echo ====================================
 :: بس لو نيزوكو شغّال من السورس (python main_gui.py) مع تثبيت
 :: pyannote.audio/TTS يدويًا في نفس بيئة بايثون — مش متاحين في
 :: Nezuko.exe الجاهز. ده قيد معماري صريح ومقصود، مش نسيان.
+::
+:: silero-vad بيتبع نفس المنطق ده بالظبط: النموذج نفسه 2 ميجا بس،
+:: لكنه محتاج PyTorch عشان يشتغل — وهو السبب اللي خلانا نستبعد
+:: pyannote/TTS فوق. فمش هنا ولا في collect-all. النتيجة: في
+:: Nezuko.exe أمر listen بيسجّل المدة الثابتة (5 ثواني)، ومن السورس
+:: مع `pip install silero-vad` بيقف لوحده لما تسكت. الكود بيتعامل مع
+:: الحالتين — `_record_until_silence` بترجع (None, False) لو النموذج
+:: مش متثبت والنداء اللي فوقها بيرجع للمدة الثابتة، فمفيش أي كسر.
 :: ═══════════════════════════════════════════════════════════════
 py -m pip install customtkinter CTkToolTip pyinstaller mcp typer capstone Pillow pandas matplotlib edge-tts piper-tts sounddevice faster-whisper vosk scenedetect[opencv] python-telegram-bot discord.py keyring --quiet
 

@@ -5,7 +5,9 @@ import shutil
 import subprocess
 import sys
 import types
+import wave
 
+import numpy as _np
 import pytest
 import voice_plugin as vp
 
@@ -597,33 +599,42 @@ def test_listen_invalid_seconds_shows_usage(make_ctx):
     assert result.startswith("usage")
 
 
+def _fixed_recording(monkeypatch, captured):
+    """يخلي التسجيل بالمدة الثابتة ينجح من غير مايك حقيقي، ويسجّل المدة."""
+    def fake_record(seconds, out_path):
+        captured["seconds"] = seconds
+        return None
+    monkeypatch.setattr(vp, "_record_audio", fake_record)
+    monkeypatch.setattr(vp, "_record_until_silence", lambda out, mx: (None, False))
+
+
 def test_listen_clamps_seconds_to_max(monkeypatch, make_ctx):
     captured = {}
-
-    def fake_listen_and_transcribe(seconds):
-        captured["seconds"] = seconds
-        return "تمام", None
-
-    monkeypatch.setattr(vp, "_listen_and_transcribe", fake_listen_and_transcribe)
+    _fixed_recording(monkeypatch, captured)
+    monkeypatch.setattr(vp, "_transcribe", lambda wav: ("تمام", None))
     vp._cmd_listen(make_ctx("listen 999", ["999"]))
     assert captured["seconds"] == vp._LISTEN_MAX_SECONDS
 
 
 def test_listen_returns_transcribed_text_without_executing(monkeypatch, make_ctx, bare_engine):
-    monkeypatch.setattr(vp, "_listen_and_transcribe", lambda seconds: ("افتح الاعدادات", None))
+    _fixed_recording(monkeypatch, {})
+    monkeypatch.setattr(vp, "_transcribe", lambda wav: ("افتح الاعدادات", None))
     result = vp._cmd_listen(make_ctx("listen", [], engine=bare_engine))
     assert "افتح الاعدادات" in result
     assert bare_engine._queue.empty()
 
 
 def test_listen_propagates_recording_error(monkeypatch, make_ctx):
-    monkeypatch.setattr(vp, "_listen_and_transcribe", lambda seconds: (None, "❌ تعذر التسجيل"))
+    monkeypatch.setattr(vp, "_record_until_silence", lambda out, mx: (None, False))
+    monkeypatch.setattr(vp, "_record_audio", lambda s, out: "no microphone")
     result = vp._cmd_listen(make_ctx("listen", []))
     assert result.startswith("❌")
+    assert "no microphone" in result
 
 
 def test_listen_run_submits_transcribed_text(monkeypatch, make_ctx, bare_engine):
-    monkeypatch.setattr(vp, "_listen_and_transcribe", lambda seconds: ("echo hi", None))
+    _fixed_recording(monkeypatch, {})
+    monkeypatch.setattr(vp, "_transcribe", lambda wav: ("echo hi", None))
     result = vp._cmd_listen_run(make_ctx("listen_run", [], engine=bare_engine))
     assert "▶️" in result
     text, _fn = bare_engine._queue.get_nowait()
@@ -631,10 +642,155 @@ def test_listen_run_submits_transcribed_text(monkeypatch, make_ctx, bare_engine)
 
 
 def test_listen_run_does_not_submit_on_error(monkeypatch, make_ctx, bare_engine):
-    monkeypatch.setattr(vp, "_listen_and_transcribe", lambda seconds: (None, "🔇 مسمعتش حاجة"))
+    _fixed_recording(monkeypatch, {})
+    monkeypatch.setattr(vp, "_transcribe", lambda wav: (None, "🔇 heard nothing"))
     result = vp._cmd_listen_run(make_ctx("listen_run", [], engine=bare_engine))
     assert result.startswith("🔇")
     assert bare_engine._queue.empty()
+
+
+# ── VAD: يقف لما تسكت بدل المدة الثابتة ──────────────────────────────
+
+def test_listen_uses_vad_when_no_duration_given(monkeypatch, make_ctx):
+    """من غير وسائط: نستنى لحد ما تسكت، من غير ما نلمس المدة الثابتة."""
+    calls = []
+    monkeypatch.setattr(vp, "_record_until_silence",
+                        lambda out, mx: (calls.append(("vad", mx)), (None, True))[1])
+    monkeypatch.setattr(vp, "_record_audio",
+                        lambda s, out: calls.append(("fixed", s)))
+    monkeypatch.setattr(vp, "_transcribe", lambda wav: ("ok", None))
+    vp._cmd_listen(make_ctx("listen", []))
+    assert calls == [("vad", vp._LISTEN_MAX_SECONDS)]
+
+
+def test_explicit_seconds_bypasses_vad(monkeypatch, make_ctx):
+    """لو قلت `listen 3` يبقى إنت عايز 3 ثواني بالظبط، مش لحد ما تسكت."""
+    calls = []
+    monkeypatch.setattr(vp, "_record_until_silence",
+                        lambda out, mx: (calls.append("vad"), (None, True))[1])
+    monkeypatch.setattr(vp, "_record_audio",
+                        lambda s, out: (calls.append(("fixed", s)), None)[1])
+    monkeypatch.setattr(vp, "_transcribe", lambda wav: ("ok", None))
+    vp._cmd_listen(make_ctx("listen 3", ["3"]))
+    assert calls == [("fixed", 3)]
+
+
+def test_falls_back_to_fixed_duration_when_vad_not_installed(monkeypatch, make_ctx):
+    """silero اختياري بالكامل — من غيره الأمر لازم يفضل شغال."""
+    calls = []
+    monkeypatch.setattr(vp, "_record_until_silence", lambda out, mx: (None, False))
+    monkeypatch.setattr(vp, "_record_audio",
+                        lambda s, out: (calls.append(s), None)[1])
+    monkeypatch.setattr(vp, "_transcribe", lambda wav: ("ok", None))
+    vp._cmd_listen(make_ctx("listen", []))
+    assert calls == [vp._LISTEN_DEFAULT_SECONDS]
+
+
+def test_vad_unavailable_reports_not_used(monkeypatch, tmp_path):
+    monkeypatch.setattr(vp, "sd", object())
+    monkeypatch.setattr(vp, "_load_vad", lambda: None)
+    err, used = vp._record_until_silence(tmp_path / "out.wav", 10)
+    assert err is None
+    assert used is False
+
+
+def test_vad_needs_sounddevice(monkeypatch, tmp_path):
+    monkeypatch.setattr(vp, "sd", None)
+    err, used = vp._record_until_silence(tmp_path / "out.wav", 10)
+    assert "sounddevice" in err
+    assert used is False
+
+
+class _FakeStream:
+    """مايك مزيّف: بيرجع شرائح جاهزة واحدة ورا التانية."""
+
+    def __init__(self, chunks):
+        self._chunks = list(chunks)
+        self.reads = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self, n):
+        self.reads += 1
+        if self._chunks:
+            return self._chunks.pop(0), False
+        return _np.zeros((n, 1), dtype=_np.int16), False
+
+
+def _fake_sd(stream):
+    class FakeSD:
+        @staticmethod
+        def InputStream(**kwargs):
+            return stream
+    return FakeSD
+
+
+def _wire_vad(monkeypatch, probs, chunks):
+    """نموذج VAD مزيّف بيرجع احتمالات مكتوبة بالترتيب — من غير torch."""
+    stream = _FakeStream(chunks)
+    monkeypatch.setattr(vp, "sd", _fake_sd(stream))
+    monkeypatch.setattr(vp, "_load_vad", lambda: object())
+    seq = list(probs)
+    monkeypatch.setattr(vp, "_vad_prob",
+                        lambda model, mono: seq.pop(0) if seq else 0.0)
+    return stream
+
+
+def _chunk(value=1000, n=None):
+    n = n or vp._VAD_CHUNK
+    return _np.full((n, 1), value, dtype=_np.int16)
+
+
+def test_vad_stops_after_silence(monkeypatch, tmp_path):
+    """الفايدة الأساسية: التسجيل بيقف بعد السكوت، مش بيكمّل للنهاية."""
+    monkeypatch.setattr(vp, "_VAD_MIN_SPEECH_MS", 0)
+    silence_chunks = (vp._VAD_SILENCE_MS * vp._SAMPLE_RATE) // (1000 * vp._VAD_CHUNK)
+    probs = [0.9] * 5 + [0.0] * (silence_chunks + 5)
+    stream = _wire_vad(monkeypatch, probs, [_chunk() for _ in probs])
+
+    out = tmp_path / "out.wav"
+    err, used = vp._record_until_silence(out, 60)
+
+    assert err is None
+    assert used is True
+    # وقف بعد السكوت بدل ما يكمّل الـ 60 ثانية
+    assert stream.reads < (60 * vp._SAMPLE_RATE) // vp._VAD_CHUNK
+    assert stream.reads == 5 + silence_chunks
+    assert out.is_file()
+
+
+def test_vad_rejects_noise_shorter_than_min_speech(monkeypatch, tmp_path):
+    """خبطة واحدة على الترابيزة مش جملة — منبعتش صوت شبه فاضي للتفريغ."""
+    probs = [0.9, 0.0] + [0.0] * 200
+    _wire_vad(monkeypatch, probs, [_chunk() for _ in probs])
+    err, used = vp._record_until_silence(tmp_path / "out.wav", 5)
+    assert used is True
+    assert "clear speech" in err
+
+
+def test_vad_keeps_pre_roll_before_first_word(monkeypatch, tmp_path):
+    """أول حرف في الجملة بيتقال قبل ما الـ VAD يقرر إن ده كلام — لو
+    رمينا اللي قبله، التفريغ بيضيّع بداية الكلمة."""
+    monkeypatch.setattr(vp, "_VAD_MIN_SPEECH_MS", 0)
+    silence_chunks = (vp._VAD_SILENCE_MS * vp._SAMPLE_RATE) // (1000 * vp._VAD_CHUNK)
+    quiet_before = 3
+    probs = [0.0] * quiet_before + [0.9] * 4 + [0.0] * (silence_chunks + 2)
+    chunks = ([_chunk(7) for _ in range(quiet_before)]
+              + [_chunk(1000) for _ in range(4 + silence_chunks + 2)])
+    _wire_vad(monkeypatch, probs, chunks)
+
+    out = tmp_path / "out.wav"
+    err, _used = vp._record_until_silence(out, 60)
+    assert err is None
+
+    with wave.open(str(out), "rb") as wf:
+        frames = wf.getnframes()
+    # الشرايح الهادية اللي قبل أول كلمة اتحفظت مع الكلام
+    assert frames == (quiet_before + 4 + silence_chunks) * vp._VAD_CHUNK
 
 
 def test_stt_status_reports_missing(make_ctx, monkeypatch, tmp_path):

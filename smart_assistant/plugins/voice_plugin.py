@@ -435,12 +435,12 @@ def _cmd_voice_status(ctx) -> str:
 def _record_audio(seconds: int, out_path: pathlib.Path) -> str | None:
     """يسجل من المايك الافتراضي، يرجع None لو نجح أو رسالة خطأ لو فشل."""
     if sd is None:
-        return "مكتبة sounddevice مش متثبتة — pip install sounddevice"
+        return "sounddevice is not installed — pip install sounddevice"
     try:
         audio = sd.rec(int(seconds * _SAMPLE_RATE), samplerate=_SAMPLE_RATE, channels=1, dtype="int16")
         sd.wait()
     except Exception as e:
-        return f"تعذر التسجيل من المايك: {e}"
+        return f"could not record from the microphone: {e}"
     try:
         with wave.open(str(out_path), "wb") as wf:
             wf.setnchannels(1)
@@ -448,8 +448,131 @@ def _record_audio(seconds: int, out_path: pathlib.Path) -> str | None:
             wf.setframerate(_SAMPLE_RATE)
             wf.writeframes(audio.tobytes())
     except OSError as e:
-        return f"تعذر حفظ التسجيل: {e}"
+        return f"could not save the recording: {e}"
     return None
+
+
+# ── كشف نشاط الصوت (VAD) — يوقف التسجيل لما تسكت ────────────────────
+# المشكلة اللي بيحلها: `sd.rec(seconds)` بتسجّل مدة ثابتة مهما حصل.
+# لو خلصت كلامك في ثانيتين بتستنى الباقي بالعافية، ولو محتاج تمن ثواني
+# بتتقطع في نص الجملة. VAD بتخلي التسجيل يقف لوحده لما تسكت.
+#
+# silero-vad: نموذج 2 ميجا، رخصة MIT، أقل من 1ms للشريحة على معالج
+# عادي، ومدرّب على أكتر من 6000 لغة — فبيشتغل على العربي والإنجليزي
+# من غير أي تظبيط. اختياري بالكامل: لو مش متثبت، بنرجع للمدة الثابتة.
+
+_VAD_CHUNK = 512               # عينات لكل شريحة (المقاس اللي silero بيتوقعه)
+_VAD_SPEECH_PROB = 0.5         # فوق كده = فيه كلام
+_VAD_SILENCE_MS = 800          # سكوت بالمدة دي = خلصت كلام
+_VAD_MIN_SPEECH_MS = 300       # أقل من كده = ضوضاء مش كلام
+_VAD_PRE_ROLL_MS = 300         # بنحتفظ باللي قبل أول كلمة عشان متتقصّش
+
+_vad_model = None
+
+
+def _load_vad():
+    """بيحمّل نموذج silero مرة واحدة. بيرجع None لو مش متثبت.
+
+    بنستخدم حزمة `silero-vad` من PyPI مش `torch.hub.load` — الحزمة
+    جايبة ملف النموذج جوّاها، فمفيش أي تنزيل من الشبكة ولا وقت انتظار
+    أول مرة، ولا فحص الحالة بيلمس النت.
+    """
+    global _vad_model
+    if _vad_model is not None:
+        return _vad_model
+    try:
+        from silero_vad import load_silero_vad
+    except ImportError:
+        return None
+    try:
+        _vad_model = load_silero_vad()
+    except Exception:  # noqa: BLE001 - أي فشل = مفيش VAD، نرجع للمدة الثابتة
+        return None
+    return _vad_model
+
+
+def vad_available() -> bool:
+    return _load_vad() is not None
+
+
+def _vad_prob(model, mono) -> float:
+    """احتمال إن الشريحة دي فيها كلام (0..1).
+
+    متفصولة في دالة لوحدها عشان الاختبارات تقدر تستبدلها من غير ما
+    torch يكون متثبت أصلاً على الجهاز اللي بيشغّل الاختبارات.
+    """
+    import numpy as np
+    import torch
+
+    tensor = torch.from_numpy(mono.astype(np.float32) / 32768.0)
+    return float(model(tensor, _SAMPLE_RATE).item())
+
+
+def _record_until_silence(out_path: pathlib.Path, max_seconds: int
+                          ) -> tuple[str | None, bool]:
+    """بيسجّل لحد ما تسكت. بيرجع (رسالة خطأ أو None، هل VAD اتستخدم).
+
+    لو silero مش متثبت بيرجع (None, False) من غير ما يسجّل، والنداء
+    اللي فوق بيرجع للمدة الثابتة.
+    """
+    if sd is None:
+        return "sounddevice is not installed — pip install sounddevice", False
+    model = _load_vad()
+    if model is None:
+        return None, False
+
+    kept: list = []
+    pre_roll: list = []
+    pre_roll_max = max(1, (_VAD_PRE_ROLL_MS * _SAMPLE_RATE) // (1000 * _VAD_CHUNK))
+    speech_chunks = 0
+    silence_chunks = 0
+    started = False
+    silence_limit = max(1, (_VAD_SILENCE_MS * _SAMPLE_RATE) // (1000 * _VAD_CHUNK))
+    min_speech = max(1, (_VAD_MIN_SPEECH_MS * _SAMPLE_RATE) // (1000 * _VAD_CHUNK))
+    max_chunks = (max_seconds * _SAMPLE_RATE) // _VAD_CHUNK
+
+    try:
+        with sd.InputStream(samplerate=_SAMPLE_RATE, channels=1, dtype="int16",
+                            blocksize=_VAD_CHUNK) as stream:
+            for _ in range(int(max_chunks)):
+                block, _overflow = stream.read(_VAD_CHUNK)
+                mono = block[:, 0]
+                prob = _vad_prob(model, mono)
+
+                if prob >= _VAD_SPEECH_PROB:
+                    if not started:
+                        # نضم اللي قبل أول كلمة عشان مبدأ الجملة ميتقصّش
+                        kept.extend(pre_roll)
+                        started = True
+                    kept.append(mono.copy())
+                    speech_chunks += 1
+                    silence_chunks = 0
+                elif started:
+                    kept.append(mono.copy())
+                    silence_chunks += 1
+                    if silence_chunks >= silence_limit and speech_chunks >= min_speech:
+                        break
+                else:
+                    pre_roll.append(mono.copy())
+                    if len(pre_roll) > pre_roll_max:
+                        pre_roll.pop(0)
+    except Exception as e:  # noqa: BLE001
+        return f"could not record from the microphone: {e}", True
+
+    if speech_chunks < min_speech:
+        return "did not hear clear speech — try again, closer to the mic", True
+
+    try:
+        import numpy as np
+        audio = np.concatenate(kept)
+        with wave.open(str(out_path), "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(_SAMPLE_RATE)
+            wf.writeframes(audio.tobytes())
+    except (OSError, ValueError) as e:
+        return f"could not save the recording: {e}", True
+    return None, True
 
 
 _faster_whisper_models: dict[str, object] = {}
@@ -534,11 +657,11 @@ def _transcribe_vosk(wav_path: pathlib.Path) -> tuple[str | None, bool]:
 
 
 _STT_MISSING_MSG = (
-    "❌ مفيش أي محرك تفريغ صوتي متثبت — ثبّت واحد على الأقل:\n"
-    "   pip install faster-whisper   (الأفضل — أدق وأخف وأسرع)\n"
+    "❌ No speech-to-text engine installed — install at least one:\n"
+    "   pip install faster-whisper   (best — most accurate, lightest, fastest)\n"
     "   pip install openai-whisper\n"
-    "   أو حمّل نموذج Vosk صغير: https://alphacephei.com/vosk/models\n"
-    "     وفكه في voice_cache/vosk-model/ (أو اضبط NEZUKO_VOSK_MODEL)"
+    "   or download a small Vosk model: https://alphacephei.com/vosk/models\n"
+    "     and unpack it into voice_cache/vosk-model/ (or set NEZUKO_VOSK_MODEL)"
 )
 
 
@@ -558,7 +681,7 @@ def _transcribe(wav_path: pathlib.Path, model: str = WHISPER_MODEL) -> tuple[str
             return text, None
     if not any_available:
         return None, _STT_MISSING_MSG
-    return None, "🔇 مسمعتش أي كلام واضح"
+    return None, "🔇 did not hear any clear speech"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -785,41 +908,55 @@ def _parse_listen_seconds(ctx) -> tuple[int, str | None]:
     return max(1, min(seconds, _LISTEN_MAX_SECONDS)), None
 
 
-def _listen_and_transcribe(seconds: int) -> tuple[str | None, str | None]:
+def _listen_smart(ctx) -> tuple[str | None, str | None]:
+    """بيسجّل ويفرّغ. من غير وسائط بيستنى لحد ما تسكت (VAD)؛ بعدد
+    ثواني صريح بيسجّل المدة دي بالظبط.
+
+    بيرجع (النص، رسالة الخطأ).
+    """
+    explicit = bool(ctx.args)
+    seconds, err = _parse_listen_seconds(ctx)
+    if err:
+        return None, err
+
     with tempfile.TemporaryDirectory(prefix="nezuko_listen_") as tmp:
         wav_path = pathlib.Path(tmp) / "input.wav"
-        err = _record_audio(seconds, wav_path)
-        if err:
-            return None, f"❌ {err}"
+        if not explicit:
+            err, used_vad = _record_until_silence(wav_path, _LISTEN_MAX_SECONDS)
+            if err:
+                return None, f"❌ {err}"
+            if not used_vad:
+                # silero مش متثبت — نرجع للمدة الثابتة زي الأول
+                err = _record_audio(seconds, wav_path)
+                if err:
+                    return None, f"❌ {err}"
+        else:
+            err = _record_audio(seconds, wav_path)
+            if err:
+                return None, f"❌ {err}"
         return _transcribe(wav_path)
 
 
 def _cmd_listen(ctx) -> str:
-    seconds, err = _parse_listen_seconds(ctx)
+    text, err = _listen_smart(ctx)
     if err:
         return err
-    text, err = _listen_and_transcribe(seconds)
-    if err:
-        return err
-    return f"🎤 سمعت: {text}"
+    return f"🎤 heard: {text}"
 
 
 def _cmd_listen_run(ctx) -> str:
-    seconds, err = _parse_listen_seconds(ctx)
-    if err:
-        return err
-    text, err = _listen_and_transcribe(seconds)
+    text, err = _listen_smart(ctx)
     if err:
         return err
     ctx.engine.submit(text)
-    return f"🎤 سمعت: {text}\n▶️ اتبعت للتنفيذ"
+    return f"🎤 heard: {text}\n▶️ sent it off to run"
 
 
 def _cmd_stt_status(ctx) -> str:
-    lines = ["🎤 حالة الاستماع الصوتي (نيزوكو):"]
+    lines = ["🎤 Listening (speech-to-text) status:"]
     mic_ok = sd is not None
     lines.append(
-        f"  {'✅' if mic_ok else '❌'} sounddevice (تسجيل من المايك)"
+        f"  {'✅' if mic_ok else '❌'} sounddevice (records from the mic)"
         + ("" if mic_ok else " — pip install sounddevice")
     )
 
@@ -829,13 +966,13 @@ def _cmd_stt_status(ctx) -> str:
     except ImportError:
         faster_ok = False
     lines.append(
-        f"  {'✅' if faster_ok else '❌'} faster-whisper (الأفضل — أدق وأخف، نموذج: {WHISPER_MODEL})"
+        f"  {'✅' if faster_ok else '❌'} faster-whisper (best — most accurate and lightest, model: {WHISPER_MODEL})"
         + ("" if faster_ok else " — pip install faster-whisper")
     )
 
     whisper_ok = shutil.which("whisper") is not None
     lines.append(
-        f"  {'✅' if whisper_ok else '❌'} whisper CLI (احتياطي، نموذج: {WHISPER_MODEL})"
+        f"  {'✅' if whisper_ok else '❌'} whisper CLI (fallback, model: {WHISPER_MODEL})"
         + ("" if whisper_ok else " — pip install openai-whisper")
     )
 
@@ -850,21 +987,32 @@ def _cmd_stt_status(ctx) -> str:
     if not vosk_pkg_ok:
         vosk_note = " — pip install vosk"
     elif not vosk_dir_ok:
-        vosk_note = f" — حمّل نموذج في {_vosk_model_dir()} (https://alphacephei.com/vosk/models)"
-    lines.append(f"  {'✅' if vosk_ok else '❌'} Vosk (الضمانة الأخيرة، offline بالكامل){vosk_note}")
+        vosk_note = f" — download a model into {_vosk_model_dir()} (https://alphacephei.com/vosk/models)"
+    lines.append(f"  {'✅' if vosk_ok else '❌'} Vosk (last resort, fully offline){vosk_note}")
+
+    vad_ok = vad_available()
+    lines.append(
+        f"  {'✅' if vad_ok else '⬜'} silero-vad (stops recording when you stop talking)"
+        + ("" if vad_ok else " — pip install silero-vad torch  ·  optional")
+    )
 
     stt_engine_ok = faster_ok or whisper_ok or vosk_ok
     if not mic_ok or not stt_engine_ok:
-        lines.append("\n⚠️ لازم sounddevice + محرك تفريغ واحد على الأقل عشان listen/listen_run يشتغلوا.")
+        lines.append("\n⚠️ listen / listen_run need sounddevice plus at least one transcription engine.")
+    elif not vad_ok:
+        lines.append(
+            f"\n💡 Without silero-vad, `listen` records a fixed {_LISTEN_DEFAULT_SECONDS}s."
+            " With it, it stops as soon as you go quiet."
+        )
     return "\n".join(lines)
 
 
 def register(engine):
     engine.registry.register("speak", _cmd_speak, "speak <نص> — نطق نص بصوت نيزوكو (edge-tts أنثوي مصري → Piper محلي → espeak-ng احتياطي)")
     engine.registry.register("voice_status", _cmd_voice_status, "voice_status — عرض حالة محركات النطق المتاحة")
-    engine.registry.register("listen", _cmd_listen, "listen [seconds] — سجل من المايك وفرّغ الكلام لنص (بدون تنفيذ)")
-    engine.registry.register("listen_run", _cmd_listen_run, "listen_run [seconds] — زي listen لكن ينفذ النص المسموع كأمر فورًا")
-    engine.registry.register("stt_status", _cmd_stt_status, "stt_status — حالة أدوات الاستماع الصوتي المتاحة (sounddevice + whisper)")
+    engine.registry.register("listen", _cmd_listen, "listen [seconds] — record from the mic and transcribe it (does not run anything)")
+    engine.registry.register("listen_run", _cmd_listen_run, "listen_run [seconds] — like listen, but runs what you said as a command")
+    engine.registry.register("stt_status", _cmd_stt_status, "stt_status — which listening engines are available")
     engine.registry.register("separate_vocals", _cmd_separate_vocals, "separate_vocals <audio> <out_dir> [mode=all|vocals] — فصل المسارات الصوتية (Demucs)")
     engine.registry.register("diarize_set_token", _cmd_diarize_set_token, "diarize_set_token <hf_token> — تسجيل توكن Hugging Face لتحديد المتكلمين")
     engine.registry.register("diarize_key_status", _cmd_diarize_key_status, "diarize_key_status — هل فيه توكن Hugging Face متظبط؟")
