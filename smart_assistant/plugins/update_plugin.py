@@ -26,27 +26,27 @@ def _cmd_check_update(ctx) -> str:
         with urllib.request.urlopen(VERSION_URL, timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
-        return f"⚠  ملف الإصدار مش موجود على السيرفر بعد (HTTP {e.code})"
+        return f"⚠  no version file on the server yet (HTTP {e.code})"
     except (urllib.error.URLError, TimeoutError):
-        return "⚠  تعذر الاتصال بالسيرفر للتحقق من التحديثات (تأكد من الإنترنت)"
+        return "⚠  could not reach the server to check for updates (check your internet)"
     except Exception as e:
-        return f"❌ خطأ أثناء التحقق من التحديث: {e}"
+        return f"❌ error while checking for an update: {e}"
 
     if not isinstance(data, dict):
-        return "❌ شكل ملف الإصدار على السيرفر مش متوقع"
+        return "❌ the version file on the server is not in the expected shape"
 
     latest = data.get("version", "unknown")
     notes = data.get("notes", "")
     if latest != current:
         return (
-            f"🆕 فيه إصدار أحدث: {latest} (الحالي: {current})\n{notes}\n"
-            f"حمّله يدوياً من: {data.get('url', '')}"
+            f"🆕 a newer version is out: {latest} (you have: {current})\n{notes}\n"
+            f"Download it yourself from: {data.get('url', '')}"
         )
-    return f"✅ إنت على آخر إصدار ({current})"
+    return f"✅ you are on the latest version ({current})"
 
 
 def register(engine):
     engine.registry.register(
         "check_update", _cmd_check_update,
-        "يتحقق من وجود إصدار أحدث للتطبيق (بدون تحديث تلقائي)",
+        "check_update — see whether a newer version exists (never updates on its own)",
     )

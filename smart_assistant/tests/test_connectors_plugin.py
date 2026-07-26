@@ -88,7 +88,7 @@ def test_status_text_no_connectors_configured(tmp_path, monkeypatch, bare_engine
     monkeypatch.setattr(cp, "_config_path", lambda: config_path)
     mgr = _make_manager(bare_engine)
     result = mgr.status_text()
-    assert "مفيش" in result
+    assert "No connectors configured" in result
 
 
 def test_format_result_extracts_text_content():

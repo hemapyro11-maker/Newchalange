@@ -488,7 +488,7 @@ def test_upscale_video_reports_missing_ffmpeg(make_ctx, tmp_path, monkeypatch):
     f = tmp_path / "in.mp4"
     f.write_bytes(b"x")
     result = cp._cmd_upscale_video(make_ctx("upscale_video", [str(f), str(tmp_path / "out.mp4")]))
-    assert "ffmpeg غير موجود" in result
+    assert "ffmpeg not found" in result
 
 
 def test_upscale_video_detects_partial_frame_output(make_ctx, tmp_path, monkeypatch):

@@ -31,24 +31,24 @@ def _load() -> list[dict]:
 
 
 def _save(items: list[dict]) -> str | None:
-    """يحفظ ويرجع None لو نجح، أو رسالة خطأ لو فشل."""
+    """بيحفظ. بيرجع None لو نجح، أو رسالة خطأ لو فشل."""
     try:
         _todo_path().write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError as e:
-        return f"❌ تعذر حفظ القائمة: {e}"
+        return f"❌ could not save the list: {e}"
     return None
 
 
 def _format(items: list[dict]) -> str:
     if not items:
-        return "القائمة فاضية 🎉"
+        return "Nothing on the list 🎉"
     lines = []
     for item in items:
         if not isinstance(item, dict) or "id" not in item:
             continue
         mark = "✅" if item.get("done") else "◻️"
         lines.append(f"{mark} #{item['id']}  {item.get('text', '')}")
-    return "\n".join(lines) if lines else "القائمة فاضية 🎉"
+    return "\n".join(lines) if lines else "Nothing on the list 🎉"
 
 
 def _cmd_todo(ctx) -> str:
@@ -64,7 +64,7 @@ def _cmd_todo(ctx) -> str:
         next_id = max((i.get("id", 0) for i in items if isinstance(i, dict)), default=0) + 1
         items.append({"id": next_id, "text": text, "done": False})
         err = _save(items)
-        return err or f"➕ اتضافت مهمة #{next_id}"
+        return err or f"➕ added task #{next_id}"
 
     if action == "done":
         if len(ctx.args) < 2 or not ctx.args[1].isdigit():
@@ -74,12 +74,12 @@ def _cmd_todo(ctx) -> str:
             if isinstance(item, dict) and item.get("id") == task_id:
                 item["done"] = True
                 err = _save(items)
-                return err or f"✅ خلصت مهمة #{task_id}"
-        return f"❌ مفيش مهمة رقم #{task_id}"
+                return err or f"✅ finished task #{task_id}"
+        return f"❌ no task numbered #{task_id}"
 
     if action == "clear":
         err = _save([])
-        return err or "🗑 اتمسحت كل المهام"
+        return err or "🗑 cleared every task"
 
     return "usage: todo [list|add <text>|done <id>|clear]"
 

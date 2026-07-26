@@ -83,7 +83,7 @@ def test_archive_list_zip(make_ctx, tmp_path):
     result = ip._cmd_archive_list(_ctx(make_ctx, "archive_list", [str(z)]))
     assert "readme.txt" in result
     assert "dir/nested.txt" in result
-    assert "2 عنصر" in result
+    assert "2 entries" in result
 
 
 def test_archive_list_not_an_archive(make_ctx, tmp_path):

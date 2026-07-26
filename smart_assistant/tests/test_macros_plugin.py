@@ -24,7 +24,7 @@ def test_macro_colliding_with_builtin_is_skipped(bare_engine, tmp_path, monkeypa
     mp.load_macros(bare_engine)
     # builtin help must remain untouched
     assert bare_engine.registry.get("help").description == "عرض كل الأوامر المتاحة"
-    assert any("يصطدم" in msg for _, msg in warnings)
+    assert any("collides with a built-in" in msg for _, msg in warnings)
 
 
 def test_self_referential_macro_is_skipped(bare_engine, tmp_path, monkeypatch):
@@ -34,7 +34,7 @@ def test_self_referential_macro_is_skipped(bare_engine, tmp_path, monkeypatch):
     bare_engine._log = lambda msg, level="info": warnings.append((level, msg))
     mp.load_macros(bare_engine)
     assert bare_engine.registry.get("loop") is None
-    assert any("نفسه" in msg for _, msg in warnings)
+    assert any("it calls itself" in msg for _, msg in warnings)
 
 
 def test_mutually_recursive_macros_are_both_skipped(bare_engine, tmp_path, monkeypatch):
@@ -50,7 +50,7 @@ def test_mutually_recursive_macros_are_both_skipped(bare_engine, tmp_path, monke
     mp.load_macros(bare_engine)
     assert bare_engine.registry.get("ping") is None
     assert bare_engine.registry.get("pong") is None
-    assert any("دورة استدعاء متبادلة" in msg for _, msg in warnings)
+    assert any("part of a call cycle" in msg for _, msg in warnings)
 
 
 def test_indirect_three_way_recursion_is_detected(bare_engine, tmp_path, monkeypatch):
@@ -93,4 +93,4 @@ def test_macros_command_lists_available(make_ctx, tmp_path, monkeypatch):
 def test_macros_command_empty(make_ctx, tmp_path, monkeypatch):
     monkeypatch.setattr(mp, "_commands_dir", lambda: tmp_path)
     result = mp._cmd_macros(make_ctx("macros", []))
-    assert "مفيش" in result
+    assert "No macros yet" in result

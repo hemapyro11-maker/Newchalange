@@ -41,7 +41,7 @@ def _find_font(size: int):
 
 def _require_pil() -> str | None:
     if not PIL_AVAILABLE:
-        return "❌ باكدج Pillow مش متثبت — ثبّته بـ: pip install Pillow"
+        return "❌ Pillow is not installed — pip install Pillow"
     return None
 
 
@@ -139,7 +139,7 @@ def _cmd_thumbnail_analyze(ctx) -> str:
         return "usage: thumbnail_analyze <image_path>"
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
-        return f"❌ الملف مش موجود: {path}"
+        return f"❌ file not found: {path}"
     try:
         result = _analyze_image(path)
     except Exception as e:
@@ -180,7 +180,7 @@ def _cmd_thumbnail_generate(ctx) -> str:
     title = ctx.args[1]
     out_path = pathlib.Path(ctx.args[2])
     if not bg_path.is_file():
-        return f"❌ الملف مش موجود: {bg_path}"
+        return f"❌ file not found: {bg_path}"
     if not title.strip():
         return "❌ النص فاضي"
 
@@ -241,9 +241,9 @@ def _cmd_thumbnail_ab_compare(ctx) -> str:
         return "usage: thumbnail_ab_compare <image_a> <image_b>"
     path_a, path_b = pathlib.Path(ctx.args[0]), pathlib.Path(ctx.args[1])
     if not path_a.is_file():
-        return f"❌ الملف مش موجود: {path_a}"
+        return f"❌ file not found: {path_a}"
     if not path_b.is_file():
-        return f"❌ الملف مش موجود: {path_b}"
+        return f"❌ file not found: {path_b}"
 
     try:
         a = _analyze_image(path_a)

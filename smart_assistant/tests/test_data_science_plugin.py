@@ -21,8 +21,8 @@ def sample_csv(tmp_path):
 @requires_pandas
 def test_csv_describe_reports_shape_and_stats(make_ctx, sample_csv):
     result = dsp._cmd_csv_describe(make_ctx("csv_describe", [str(sample_csv)]))
-    assert "21 صف" in result
-    assert "3 عمود" in result
+    assert "21 rows" in result
+    assert "3 columns" in result
     assert "name" in result and "age" in result and "salary" in result
 
 
@@ -44,7 +44,7 @@ def test_csv_describe_empty_file(make_ctx, tmp_path):
     f = tmp_path / "empty.csv"
     f.write_text("a,b,c\n", encoding="utf-8")
     result = dsp._cmd_csv_describe(make_ctx("csv_describe", [str(f)]))
-    assert "فاضي" in result
+    assert "empty" in result
 
 
 @requires_pandas

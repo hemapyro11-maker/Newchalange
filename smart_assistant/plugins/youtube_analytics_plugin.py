@@ -92,13 +92,13 @@ def _yt_get(endpoint: str, params: dict) -> dict:
             msg = json.loads(body).get("error", {}).get("message", str(e))
         except json.JSONDecodeError:
             msg = str(e)
-        raise YouTubeAPIError(f"HTTP {e.code} من يوتيوب: {msg}") from e
+        raise YouTubeAPIError(f"HTTP {e.code} from YouTube: {msg}") from e
     except urllib.error.URLError as e:
-        raise YouTubeAPIError(f"تعذر الوصول لـ YouTube API: {e.reason}") from e
+        raise YouTubeAPIError(f"could not reach the YouTube API: {e.reason}") from e
     try:
         return json.loads(raw)
     except json.JSONDecodeError as e:
-        raise YouTubeAPIError(f"رد غير متوقع من يوتيوب: {e}") from e
+        raise YouTubeAPIError(f"unexpected response from YouTube: {e}") from e
 
 
 def _fetch_channel(identifier: str) -> dict | None:
@@ -187,7 +187,7 @@ def _cmd_channel_growth_report(ctx) -> str:
     try:
         channel = _fetch_channel(identifier)
         if channel is None:
-            return f"❌ مفيش قناة بالمعرف/الاسم ده: {identifier}"
+            return f"❌ no channel with that id or name: {identifier}"
         videos = _fetch_recent_video_stats(channel)
     except YouTubeAPIError as e:
         return f"❌ {e}"
@@ -301,7 +301,7 @@ def _cmd_report_export(ctx) -> str:
     try:
         channel = _fetch_channel(identifier)
         if channel is None:
-            return f"❌ مفيش قناة بالمعرف/الاسم ده: {identifier}"
+            return f"❌ no channel with that id or name: {identifier}"
         videos = _fetch_recent_video_stats(channel, max_results=50)
     except YouTubeAPIError as e:
         return f"❌ {e}"

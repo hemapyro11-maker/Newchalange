@@ -77,7 +77,7 @@ def _cmd_android_install(ctx) -> str:
         return "usage: android_install <apk_path> [device=<id>]"
     apk_path = pathlib.Path(args[0])
     if not apk_path.is_file():
-        return f"❌ الملف مش موجود: {apk_path}"
+        return f"❌ file not found: {apk_path}"
     if apk_path.suffix.lower() != ".apk":
         return "❌ الملف لازم يكون .apk"
 
@@ -89,7 +89,7 @@ def _cmd_android_install(ctx) -> str:
     except subprocess.TimeoutExpired:
         return "⏱ التثبيت أخد وقت طويل جدًا (120s) واتوقف"
     except OSError as e:
-        return f"❌ خطأ: {e}"
+        return f"❌ error: {e}"
 
     out = ((result.stdout or "") + (result.stderr or "")).strip()
     if "Success" in out:
@@ -114,7 +114,7 @@ def _cmd_android_uninstall(ctx) -> str:
     except subprocess.TimeoutExpired:
         return "⏱ timeout (30s)"
     except OSError as e:
-        return f"❌ خطأ: {e}"
+        return f"❌ error: {e}"
 
     out = ((result.stdout or "") + (result.stderr or "")).strip()
     if "Success" in out:
@@ -140,7 +140,7 @@ def _cmd_android_launch(ctx) -> str:
     except subprocess.TimeoutExpired:
         return "⏱ timeout (20s)"
     except OSError as e:
-        return f"❌ خطأ: {e}"
+        return f"❌ error: {e}"
 
     out = ((result.stdout or "") + (result.stderr or "")).strip()
     if "No activities found" in out or "Error" in out or "aborting" in out:
@@ -164,7 +164,7 @@ def _cmd_android_shell(ctx) -> str:
     except subprocess.TimeoutExpired:
         return "⏱ timeout (30s)"
     except OSError as e:
-        return f"❌ خطأ: {e}"
+        return f"❌ error: {e}"
 
     out = ((result.stdout or "") + (result.stderr or "")).strip()
     return out or f"(exit code {result.returncode})"
@@ -189,7 +189,7 @@ def _cmd_android_screenshot(ctx) -> str:
     except subprocess.TimeoutExpired:
         return "⏱ timeout (20s)"
     except OSError as e:
-        return f"❌ خطأ: {e}"
+        return f"❌ error: {e}"
 
     if result.returncode != 0 or not result.stdout:
         stderr = result.stderr.decode("utf-8", errors="replace") if result.stderr else "مفيش جهاز متصل؟"

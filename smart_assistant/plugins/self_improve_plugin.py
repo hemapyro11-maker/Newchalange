@@ -30,7 +30,7 @@ def _cmd_self_improve(ctx) -> str:
     engine = ctx.engine
     recent = list(engine.log_history)[-40:]
     if not recent:
-        return "مفيش سجل كافي للتحليل لسه — شغّل شوية أوامر الأول"
+        return "Not enough history to analyse yet — run a few commands first"
     transcript = "\n".join(f"[{lvl}] {msg}" for lvl, msg in recent)
     prompt = (
         "You are reviewing the recent activity log of a local desktop assistant app. "
@@ -42,20 +42,20 @@ def _cmd_self_improve(ctx) -> str:
         suggestion = _ask_ollama(prompt)
     except (urllib.error.URLError, ConnectionError, TimeoutError):
         return (
-            "⚠  مفيش نموذج محلي شغال (Ollama) عشان أقترح تحسينات.\n"
-            "ده مجاني بالكامل — نزّله من https://ollama.com وشغّل:\n"
+            "⚠  No local model running (Ollama) to suggest improvements.\n"
+            "It is completely free — get it from https://ollama.com then run:\n"
             f"   ollama pull {DEFAULT_MODEL}\n"
-            "وبعدين جرب الأمر ده تاني."
+            "Then try this command again."
         )
     except Exception as e:
-        return f"❌ خطأ أثناء طلب الاقتراحات: {e}"
+        return f"❌ error while asking for suggestions: {e}"
     if not suggestion:
-        return "⚠  النموذج المحلي رجّع رد فاضي — جرب موديل تاني أو تأكد إنه شغال صح"
-    return "💡 اقتراحات تحسين (راجعها إنت وطبّق اللي يعجبك يدوياً):\n" + suggestion
+        return "⚠  The local model returned nothing — try another model or check it is running"
+    return "💡 Suggested improvements (review them and apply what you like, by hand):\n" + suggestion
 
 
 def register(engine):
     engine.registry.register(
         "self_improve", _cmd_self_improve,
-        "يحلل السجل الأخير ويقترح تحسينات عبر نموذج محلي مجاني (Ollama) — بدون تعديل تلقائي",
+        "self_improve — read the recent log and suggest improvements via a free local model (Ollama); changes nothing on its own",
     )

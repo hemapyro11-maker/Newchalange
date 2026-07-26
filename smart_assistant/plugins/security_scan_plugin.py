@@ -342,7 +342,7 @@ def _cmd_code_scan(ctx) -> str:
         return "usage: code_scan <path> [--fix]"
     root = pathlib.Path(path_args[0])
     if not root.exists():
-        return f"❌ المسار مش موجود: {root}"
+        return f"❌ path not found: {root}"
     if root.is_file() and root.stat().st_size > MAX_FILE_SIZE_FOR_SCAN:
         return _oversized_single_file_message(root, "code_scan")
 
@@ -466,7 +466,7 @@ def _cmd_vuln_scan(ctx) -> str:
         return "usage: vuln_scan <path>"
     root = pathlib.Path(ctx.args[0])
     if not root.exists():
-        return f"❌ المسار مش موجود: {root}"
+        return f"❌ path not found: {root}"
 
     lines = [f"🛡️ فحص ثغرات: {root}"]
 
@@ -590,7 +590,7 @@ def _cmd_quarantine_file(ctx) -> str:
         return "usage: quarantine_file <path> [سبب]"
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
-        return f"❌ الملف مش موجود: {path}"
+        return f"❌ file not found: {path}"
     reason = " ".join(ctx.args[1:]) or "quarantine يدوي"
     entry = _quarantine_move(path, reason)
     return f"🔒 اتنقل للحجر الصحي: {entry['id']}\nالمسار الأصلي: {entry['original_path']}\nلاستعادته: quarantine_restore {entry['id']}"
@@ -646,7 +646,7 @@ def _cmd_virus_scan(ctx) -> str:
         return "usage: virus_scan <path> [--no-quarantine]"
     root = pathlib.Path(path_args[0])
     if not root.exists():
-        return f"❌ المسار مش موجود: {root}"
+        return f"❌ path not found: {root}"
 
     clamscan = shutil.which("clamscan") or shutil.which("clamdscan")
     if not clamscan:
@@ -719,7 +719,7 @@ def _cmd_security_report(ctx) -> str:
         return "usage: security_report <path>"
     root = pathlib.Path(ctx.args[0])
     if not root.exists():
-        return f"❌ المسار مش موجود: {root}"
+        return f"❌ path not found: {root}"
 
     sections = [f"📋 تقرير أمان شامل: {root}", "=" * 50]
 

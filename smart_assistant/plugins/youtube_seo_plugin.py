@@ -208,9 +208,9 @@ def _cmd_seo_tags_suggest(ctx) -> str:
         return "usage: seo_tags_suggest <title.txt> <description.txt>"
     title_path, desc_path = pathlib.Path(ctx.args[0]), pathlib.Path(ctx.args[1])
     if not title_path.is_file():
-        return f"❌ الملف مش موجود: {title_path}"
+        return f"❌ file not found: {title_path}"
     if not desc_path.is_file():
-        return f"❌ الملف مش موجود: {desc_path}"
+        return f"❌ file not found: {desc_path}"
     try:
         title = title_path.read_text(encoding="utf-8")
         description = desc_path.read_text(encoding="utf-8")
@@ -289,9 +289,9 @@ def _cmd_seo_full_audit(ctx) -> str:
         return "usage: seo_full_audit <title.txt> <description.txt> <tag1,tag2,...>"
     title_path, desc_path = pathlib.Path(ctx.args[0]), pathlib.Path(ctx.args[1])
     if not title_path.is_file():
-        return f"❌ الملف مش موجود: {title_path}"
+        return f"❌ file not found: {title_path}"
     if not desc_path.is_file():
-        return f"❌ الملف مش موجود: {desc_path}"
+        return f"❌ file not found: {desc_path}"
     try:
         title = title_path.read_text(encoding="utf-8").strip()
         description = desc_path.read_text(encoding="utf-8")

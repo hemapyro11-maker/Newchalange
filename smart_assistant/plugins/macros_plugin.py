@@ -29,7 +29,7 @@ def _make_macro_handler(lines: list[str]):
                 continue
             ctx.engine.submit(expanded)
             outputs.append(f"→ {expanded}")
-        return "\n".join(outputs) if outputs else "(macro فاضي)"
+        return "\n".join(outputs) if outputs else "(empty macro)"
     return handler
 
 
@@ -38,16 +38,16 @@ def _cmd_macros(ctx) -> str:
     directory.mkdir(parents=True, exist_ok=True)
     files = sorted(p.stem for p in directory.glob("*.txt"))
     if not files:
-        return f"مفيش macros لسه — حط ملف .txt في {directory}"
-    return "macros متاحة: " + ", ".join(files)
+        return f"No macros yet — drop a .txt file in {directory}"
+    return "Available macros: " + ", ".join(files)
 
 
 def _cmd_reload_macros(ctx) -> str:
     load_macros(ctx.engine)
-    return "تم إعادة تحميل الـ macros"
+    return "Macros reloaded"
 
 
-_MACRO_MARKER = "macro (من "
+_MACRO_MARKER = "macro (from "
 
 
 def _macro_calls(lines: list[str], known_names: set[str]) -> set[str]:
@@ -100,7 +100,7 @@ def load_macros(engine):
         try:
             macro_lines[path.stem] = path.read_text(encoding="utf-8").splitlines()
         except OSError as e:
-            engine._log(f"❌ تعذرت قراءة macro {path.name}: {e}", "error")
+            engine._log(f"❌ could not read macro {path.name}: {e}", "error")
 
     cycles = _detect_macro_cycles(macro_lines)
 
@@ -110,15 +110,15 @@ def load_macros(engine):
             continue
         existing = engine.registry.get(name)
         if existing is not None and not existing.description.startswith(_MACRO_MARKER):
-            engine._log(f"⚠  اتجاهل macro '{name}' لأنه بيصطدم مع أمر مدمج بنفس الاسم", "warn")
+            engine._log(f"⚠  ignoring macro '{name}' — it collides with a built-in command of the same name", "warn")
             continue
         if name in cycles:
             cycle = cycles[name]
             if len(cycle) <= 2 and cycle[0] == cycle[-1]:
-                engine._log(f"⚠  اتجاهل macro '{name}' لأنه بينادي نفسه (self-reference)", "warn")
+                engine._log(f"⚠  ignoring macro '{name}' — it calls itself", "warn")
             else:
                 chain = " → ".join(cycle)
-                engine._log(f"⚠  اتجاهل macro '{name}' لأنه جزء من دورة استدعاء متبادلة: {chain}", "warn")
+                engine._log(f"⚠  ignoring macro '{name}' — it is part of a call cycle: {chain}", "warn")
             continue
         engine.registry.register(name, _make_macro_handler(macro_lines[name]), f"{_MACRO_MARKER}{path.name})")
 

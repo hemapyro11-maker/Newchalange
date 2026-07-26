@@ -27,7 +27,7 @@ def _run_ffmpeg(args: list[str], timeout: int) -> tuple[bool, str]:
     try:
         result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
-        return False, f"⏱ انتهت المهلة ({timeout}s) — الملف كبير أوي أو ffmpeg علّق"
+        return False, f"⏱ timed out after ({timeout}s) — الملف كبير أوي أو ffmpeg علّق"
     except OSError as e:
         return False, f"❌ تعذر تشغيل {args[0]}: {e}"
     if result.returncode != 0:
@@ -42,7 +42,7 @@ def _cmd_probe(ctx) -> str:
         return "❌ ffprobe غير موجود — ثبّت FFmpeg وضيفه للـ PATH (ffmpeg.org/download.html)"
     path = ctx.args[0]
     if not pathlib.Path(path).is_file():
-        return f"❌ الملف مش موجود: {path}"
+        return f"❌ file not found: {path}"
     ok, output = _run_ffmpeg(
         ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", path],
         timeout=30,
@@ -86,11 +86,11 @@ def _cmd_convert(ctx) -> str:
     if len(ctx.args) < 2:
         return "usage: convert <input> <output>"
     if not shutil.which("ffmpeg"):
-        return "❌ ffmpeg غير موجود — ثبّته من ffmpeg.org"
+        return "❌ ffmpeg not found — ثبّته من ffmpeg.org"
     src, dst = ctx.args[0], ctx.args[1]
     missing = _missing_files(src)
     if missing:
-        return f"❌ الملف مش موجود: {missing[0]}"
+        return f"❌ file not found: {missing[0]}"
     ok, err = _run_ffmpeg(["ffmpeg", "-y", "-i", src, dst], timeout=300)
     if not ok:
         return f"❌ فشل التحويل:\n{err}"
@@ -101,11 +101,11 @@ def _cmd_trim(ctx) -> str:
     if len(ctx.args) < 4:
         return "usage: trim <input> <start_sec> <duration_sec> <output>"
     if not shutil.which("ffmpeg"):
-        return "❌ ffmpeg غير موجود"
+        return "❌ ffmpeg not found"
     src, start, duration, dst = ctx.args[0], ctx.args[1], ctx.args[2], ctx.args[3]
     missing = _missing_files(src)
     if missing:
-        return f"❌ الملف مش موجود: {missing[0]}"
+        return f"❌ file not found: {missing[0]}"
     ok, err = _run_ffmpeg(
         ["ffmpeg", "-y", "-ss", start, "-i", src, "-t", duration, "-c", "copy", dst], timeout=120,
     )
@@ -118,11 +118,11 @@ def _cmd_merge_av(ctx) -> str:
     if len(ctx.args) < 3:
         return "usage: merge_av <video> <audio> <output>"
     if not shutil.which("ffmpeg"):
-        return "❌ ffmpeg غير موجود"
+        return "❌ ffmpeg not found"
     video, audio, dst = ctx.args[0], ctx.args[1], ctx.args[2]
     missing = _missing_files(video, audio)
     if missing:
-        return f"❌ الملف مش موجود: {missing[0]}"
+        return f"❌ file not found: {missing[0]}"
     ok, err = _run_ffmpeg(
         ["ffmpeg", "-y", "-i", video, "-i", audio, "-c:v", "copy", "-c:a", "aac", "-shortest", dst],
         timeout=300,
@@ -136,11 +136,11 @@ def _cmd_concat(ctx) -> str:
     if len(ctx.args) < 3:
         return "usage: concat <output> <file1> <file2> [file3 ...]"
     if not shutil.which("ffmpeg"):
-        return "❌ ffmpeg غير موجود"
+        return "❌ ffmpeg not found"
     dst, *files = ctx.args
     missing = _missing_files(*files)
     if missing:
-        return f"❌ الملف مش موجود: {missing[0]}"
+        return f"❌ file not found: {missing[0]}"
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as f:
         for path in files:
             # ffmpeg concat demuxer syntax: quote paths with ' and escape
@@ -165,11 +165,11 @@ def _cmd_extract_audio(ctx) -> str:
     if len(ctx.args) < 2:
         return "usage: extract_audio <video> <output.mp3>"
     if not shutil.which("ffmpeg"):
-        return "❌ ffmpeg غير موجود"
+        return "❌ ffmpeg not found"
     src, dst = ctx.args[0], ctx.args[1]
     missing = _missing_files(src)
     if missing:
-        return f"❌ الملف مش موجود: {missing[0]}"
+        return f"❌ file not found: {missing[0]}"
     ok, err = _run_ffmpeg(
         ["ffmpeg", "-y", "-i", src, "-vn", "-acodec", "libmp3lame", dst], timeout=180,
     )
@@ -182,14 +182,14 @@ def _cmd_thumbnail(ctx) -> str:
     if len(ctx.args) < 3:
         return "usage: thumbnail <video> <timestamp_sec> <output.jpg>"
     if not shutil.which("ffmpeg"):
-        return "❌ ffmpeg غير موجود"
+        return "❌ ffmpeg not found"
     src, ts, dst = ctx.args[0], ctx.args[1], ctx.args[2]
     missing = _missing_files(src)
     if missing:
-        return f"❌ الملف مش موجود: {missing[0]}"
+        return f"❌ file not found: {missing[0]}"
     ok, err = _run_ffmpeg(["ffmpeg", "-y", "-ss", ts, "-i", src, "-frames:v", "1", dst], timeout=60)
     if not ok:
-        return f"❌ فشل: {err}"
+        return f"❌ failed: {err}"
     return f"✅ اتحفظت الصورة في {dst}"
 
 
@@ -197,11 +197,11 @@ def _cmd_overlay_text(ctx) -> str:
     if len(ctx.args) < 3:
         return "usage: overlay_text <video> <text> <output>"
     if not shutil.which("ffmpeg"):
-        return "❌ ffmpeg غير موجود"
+        return "❌ ffmpeg not found"
     src, text, dst = ctx.args[0], ctx.args[1], ctx.args[2]
     missing = _missing_files(src)
     if missing:
-        return f"❌ الملف مش موجود: {missing[0]}"
+        return f"❌ file not found: {missing[0]}"
     escaped = text.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
     vf = (
         f"drawtext=text='{escaped}':fontcolor=white:fontsize=32:"

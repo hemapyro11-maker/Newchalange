@@ -76,7 +76,7 @@ class ConnectorManager:
     def connect(self, name: str):
         config = self.load_config()
         if name not in config:
-            self.engine._log(f"❌ connector '{name}' غير موجود في connectors.json", "error")
+            self.engine._log(f"❌ connector '{name}' is not in connectors.json", "error")
             return
         if self.servers.get(name, {}).get("status") in ("connected", "connecting"):
             return
@@ -88,14 +88,14 @@ class ConnectorManager:
             self._run(self._async_connect(name, cfg), timeout=90)
         except Exception as e:
             self.servers[name] = {"status": f"error: {e}", "tools": []}
-            self.engine._log(f"❌ connector '{name}' فشل الاتصال: {e}", "error")
+            self.engine._log(f"❌ connector '{name}' failed to connect: {e}", "error")
 
     async def _async_connect(self, name, cfg):
         from mcp import ClientSession, StdioServerParameters
         from mcp.client.stdio import stdio_client
 
         if "command" not in cfg:
-            raise ValueError(f"connectors.json['{name}'] ناقصه 'command'")
+            raise ValueError(f"connectors.json['{name}'] is missing 'command'")
 
         stack = contextlib.AsyncExitStack()
         params = StdioServerParameters(
@@ -115,7 +115,7 @@ class ConnectorManager:
             tool_names.append(tool.name)
         self.servers[name] = {"status": "connected", "tools": tool_names}
         self.engine._log(
-            f"🔌 connector '{name}' متصل — {len(tool_names)} أداة: {', '.join(tool_names)}", "ok"
+            f"🔌 connector '{name}' connected — {len(tool_names)} tools: {', '.join(tool_names)}", "ok"
         )
 
     def disconnect(self, name: str):
@@ -146,7 +146,7 @@ class ConnectorManager:
             try:
                 result = self._run(self._async_call(server_name, tool_name, arguments))
             except Exception as e:
-                return f"❌ فشل تنفيذ الأداة: {e}"
+                return f"❌ the tool failed: {e}"
             return self._format_result(result)
 
         self.engine.registry.register(
@@ -156,7 +156,7 @@ class ConnectorManager:
     async def _async_call(self, server_name: str, tool_name: str, arguments: dict):
         session = self._sessions.get(server_name)
         if session is None:
-            raise RuntimeError(f"connector '{server_name}' مش متصل")
+            raise RuntimeError(f"connector '{server_name}' is not connected")
         return await session.call_tool(tool_name, arguments)
 
     @staticmethod
@@ -173,8 +173,8 @@ class ConnectorManager:
         config = self.load_config()
         if not config:
             return (
-                "مفيش أي connector متظبط. عدّل connectors.json (زي connectors.example.json) "
-                "وشغّل: connectors connect <name>"
+                "No connectors configured. Edit connectors.json (see connectors.example.json) "
+                "then run: connectors connect <name>"
             )
         lines = []
         for name in config:
@@ -189,7 +189,7 @@ def register(engine):
         import mcp  # noqa: F401
     except ImportError:
         def _cmd_missing(ctx):
-            return "❌ باكدج mcp مش متثبت — ثبّته بـ: pip install mcp"
+            return "❌ the mcp package is not installed — pip install mcp"
         engine.registry.register("connectors", _cmd_missing, "MCP connectors (needs: pip install mcp)")
         return
 
@@ -203,10 +203,10 @@ def register(engine):
     def _cmd_connectors(ctx):
         if len(ctx.args) >= 2 and ctx.args[0] == "connect":
             manager.connect(ctx.args[1])
-            return f"⏳ بحاول أتصل بـ {ctx.args[1]}... (تابع اللوج)"
+            return f"⏳ connecting to {ctx.args[1]}... (watch the log)"
         if len(ctx.args) >= 2 and ctx.args[0] == "disconnect":
             manager.disconnect(ctx.args[1])
-            return f"🔌 اتقطع الاتصال مع {ctx.args[1]}"
+            return f"🔌 disconnected from {ctx.args[1]}"
         return manager.status_text()
 
     engine.registry.register(

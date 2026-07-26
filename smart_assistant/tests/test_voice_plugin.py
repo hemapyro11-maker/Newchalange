@@ -1107,7 +1107,7 @@ def test_diarize_missing_input_file(make_ctx, tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "pyannote.audio", fake_module)
     result = vp._cmd_diarize(make_ctx("diarize", [str(tmp_path / "nope.wav")]))
     assert result.startswith("❌")
-    assert "مش موجود" in result
+    assert "file not found" in result
 
 
 def test_diarize_no_token(make_ctx, tmp_path, monkeypatch, isolated_diarize_config):
@@ -1230,7 +1230,7 @@ def test_separate_vocals_missing_input(make_ctx, tmp_path, monkeypatch):
     monkeypatch.setattr(vp.shutil, "which", lambda name: "/usr/bin/demucs" if name == "demucs" else None)
     result = vp._cmd_separate_vocals(make_ctx("separate_vocals", [str(tmp_path / "nope.wav"), str(tmp_path / "out")]))
     assert result.startswith("❌")
-    assert "مش موجود" in result
+    assert "file not found" in result
 
 
 def test_separate_vocals_rejects_bad_mode(make_ctx, tmp_path, monkeypatch):
@@ -1369,7 +1369,7 @@ def test_clone_voice_missing_reference_file(make_ctx, tmp_path, monkeypatch, iso
     monkeypatch.setitem(sys.modules, "TTS.api", fake_module)
     result = vp._cmd_clone_voice(make_ctx("clone_voice", [str(tmp_path / "nope.wav"), "hello", str(tmp_path / "out.wav")]))
     assert result.startswith("❌")
-    assert "مش موجود" in result
+    assert "file not found" in result
 
 
 def test_clone_voice_empty_text(make_ctx, tmp_path, monkeypatch, isolated_clone_config):

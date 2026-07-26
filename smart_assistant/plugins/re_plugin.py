@@ -42,7 +42,7 @@ def _cmd_entropy(ctx) -> str:
         return "usage: entropy <file> [chunk_size=4096]"
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
-        return f"❌ الملف مش موجود: {path}"
+        return f"❌ file not found: {path}"
     try:
         chunk_size = int(ctx.args[1]) if len(ctx.args) > 1 else 4096
     except ValueError:
@@ -52,7 +52,7 @@ def _cmd_entropy(ctx) -> str:
     try:
         data = path.read_bytes()
     except OSError as e:
-        return f"❌ تعذرت قراءة الملف: {e}"
+        return f"❌ could not read the file: {e}"
     overall = _shannon_entropy(data)
     lines = [f"📊 entropy إجمالي: {overall:.2f} / 8.0 bits/byte  (حجم: {len(data)} bytes)"]
     if overall > 7.5:
@@ -156,11 +156,11 @@ def _cmd_elf_info(ctx) -> str:
         return "usage: elf_info <file>"
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
-        return f"❌ الملف مش موجود: {path}"
+        return f"❌ file not found: {path}"
     try:
         data = path.read_bytes()
     except OSError as e:
-        return f"❌ تعذرت قراءة الملف: {e}"
+        return f"❌ could not read the file: {e}"
     try:
         info = _parse_elf(data)
     except (ValueError, struct.error, IndexError) as e:
@@ -295,11 +295,11 @@ def _cmd_pe_info(ctx) -> str:
         return "usage: pe_info <file>"
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
-        return f"❌ الملف مش موجود: {path}"
+        return f"❌ file not found: {path}"
     try:
         data = path.read_bytes()
     except OSError as e:
-        return f"❌ تعذرت قراءة الملف: {e}"
+        return f"❌ could not read the file: {e}"
     try:
         info = _parse_pe(data)
     except (ValueError, struct.error, IndexError) as e:
@@ -382,11 +382,11 @@ def _cmd_disasm(ctx) -> str:
         return "usage: disasm <file> [offset] [length=128] [arch=x86|x64|arm|arm64]"
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
-        return f"❌ الملف مش موجود: {path}"
+        return f"❌ file not found: {path}"
     try:
         data = path.read_bytes()
     except OSError as e:
-        return f"❌ تعذرت قراءة الملف: {e}"
+        return f"❌ could not read the file: {e}"
 
     offset = None
     arch = "x64"
@@ -414,7 +414,7 @@ def _cmd_disasm(ctx) -> str:
             offset = 0
 
     if arch not in _ARCH_MAP:
-        return f"❌ arch غير مدعوم: {arch} (المتاح: {', '.join(_ARCH_MAP)})"
+        return f"❌ arch غير مدعوم: {arch} (available: {', '.join(_ARCH_MAP)})"
 
     chunk = data[offset:offset + length]
     cs_arch, cs_mode = _ARCH_MAP[arch]

@@ -29,7 +29,7 @@ def test_probe_missing_ffprobe_message_when_absent(make_ctx, tmp_path, monkeypat
 def test_convert_missing_input_file_fast_fails(make_ctx, tmp_path):
     result = mm._cmd_convert(make_ctx("convert", [str(tmp_path / "nope.mp4"), str(tmp_path / "out.avi")]))
     assert result.startswith("❌")
-    assert "مش موجود" in result
+    assert "file not found" in result
 
 
 @requires_ffmpeg

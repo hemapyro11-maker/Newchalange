@@ -59,28 +59,28 @@ def _cmd_fountain_stats(ctx) -> str:
         return "usage: fountain_stats <file.fountain>"
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
-        return f"❌ الملف مش موجود: {path}"
+        return f"❌ file not found: {path}"
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as e:
-        return f"❌ تعذرت قراءة الملف: {e}"
+        return f"❌ could not read the file: {e}"
     if not text.strip():
-        return "⚠  الملف فاضي"
+        return "⚠  the file is empty"
 
     stats = _parse_fountain(text)
     total_lines = len([l for l in text.splitlines() if l.strip()])
     est_pages = max(1, round(total_lines / _LINES_PER_PAGE))
 
     lines_out = [
-        f"🎬 {len(stats['scenes'])} مشهد",
-        f"🗣  {len(stats['characters'])} شخصية: {', '.join(stats['characters']) or '(مفيش)'}",
-        f"💬 {stats['dialogue_lines']} سطر حوار",
-        f"📝 {stats['action_lines']} سطر وصف/أكشن",
-        f"📄 تقدير عدد الصفحات: ~{est_pages} (تقريبي، ~{_LINES_PER_PAGE} سطر/صفحة)",
+        f"🎬 {len(stats['scenes'])} scenes",
+        f"🗣  {len(stats['characters'])} characters: {', '.join(stats['characters']) or '(none)'}",
+        f"💬 {stats['dialogue_lines']} lines of dialogue",
+        f"📝 {stats['action_lines']} lines of action and description",
+        f"📄 estimated pages: ~{est_pages} (rough, ~{_LINES_PER_PAGE} lines per page)",
     ]
     if stats["scenes"]:
         lines_out.append("")
-        lines_out.append("المشاهد:")
+        lines_out.append("Scenes:")
         lines_out.extend(f"  {i}. {s}" for i, s in enumerate(stats["scenes"], 1))
     return "\n".join(lines_out)
 
@@ -88,5 +88,5 @@ def _cmd_fountain_stats(ctx) -> str:
 def register(engine):
     engine.registry.register(
         "fountain_stats", _cmd_fountain_stats,
-        "fountain_stats <file.fountain> — تحليل سيناريو: مشاهد، شخصيات، حوار، تقدير صفحات",
+        "fountain_stats <file.fountain> — screenplay breakdown: scenes, characters, dialogue, page estimate",
     )

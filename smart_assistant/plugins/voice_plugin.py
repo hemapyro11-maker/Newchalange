@@ -856,7 +856,7 @@ def _cmd_separate_vocals(ctx) -> str:
         return "❌ demucs مش متثبت — نزّله بـ: pip install demucs (مجاني ومفتوح المصدر، أول استخدام بيحمّل نموذجه ~80MB)"
     src, out_dir = ctx.args[0], ctx.args[1]
     if not pathlib.Path(src).is_file():
-        return f"❌ الملف مش موجود: {src}"
+        return f"❌ file not found: {src}"
     mode = ctx.args[2] if len(ctx.args) > 2 else "all"
     if mode not in ("all", "vocals"):
         return "❌ mode لازم يكون all أو vocals"
@@ -868,9 +868,9 @@ def _cmd_separate_vocals(ctx) -> str:
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_SEPARATE_TIMEOUT)
     except subprocess.TimeoutExpired:
-        return f"⏱ انتهت المهلة ({_SEPARATE_TIMEOUT}s) — الفصل الصوتي بطيء على CPU، جرب ملف أقصر أو جهاز فيه GPU"
+        return f"⏱ timed out after ({_SEPARATE_TIMEOUT}s) — الفصل الصوتي بطيء على CPU، جرب ملف أقصر أو جهاز فيه GPU"
     if proc.returncode != 0:
-        return f"❌ فشل: {proc.stderr.strip()[-600:]}"
+        return f"❌ failed: {proc.stderr.strip()[-600:]}"
     if not any(pathlib.Path(out_dir).rglob("*.wav")):
         return "❌ فشل الفصل — demucs خلص من غير خطأ ظاهر بس مفيش ملفات صوت خرج حقيقية"
     stems = "vocals + no_vocals" if mode == "vocals" else "vocals + drums + bass + other"
@@ -945,7 +945,7 @@ def _cmd_diarize(ctx) -> str:
         return "❌ pyannote.audio مش متثبت — نزّله بـ: pip install pyannote.audio (مجاني ومفتوح المصدر)"
     src = ctx.args[0]
     if not pathlib.Path(src).is_file():
-        return f"❌ الملف مش موجود: {src}"
+        return f"❌ file not found: {src}"
     token = _hf_token()
     if not token:
         return "❌ محتاج توكن Hugging Face الأول — استخدم diarize_set_token <token> (تفاصيل: diarize_key_status)"
@@ -1029,7 +1029,7 @@ def _cmd_clone_voice(ctx) -> str:
 
     reference, text, output = ctx.args[0], ctx.args[1], ctx.args[2]
     if not pathlib.Path(reference).is_file():
-        return f"❌ ملف الصوت المرجعي مش موجود: {reference}"
+        return f"❌ reference audio file not found: {reference}"
     if not text.strip():
         return "❌ النص فاضي"
     language = ctx.args[3] if len(ctx.args) > 3 else "ar"

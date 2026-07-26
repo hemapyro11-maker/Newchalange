@@ -23,7 +23,7 @@ def _cmd_fetch(ctx) -> str:
     elif urllib.parse.urlsplit(url).scheme not in ("http", "https"):
         # نمنع عمداً أي scheme غير http/https (زي file:// أو ftp://) — أداة
         # "تحميل صفحة ويب" ميفترضش تقرأ ملفات محلية أو بروتوكولات تانية.
-        return "❌ fetch بيدعم http/https بس"
+        return "❌ fetch only supports http and https"
     req = urllib.request.Request(url, headers={"User-Agent": "SmartAssistant/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
@@ -32,13 +32,13 @@ def _cmd_fetch(ctx) -> str:
     except urllib.error.HTTPError as e:
         return f"❌ HTTP {e.code}: {e.reason}"
     except urllib.error.URLError as e:
-        return f"❌ تعذر الوصول للرابط: {e.reason}"
+        return f"❌ could not reach that URL: {e.reason}"
     except Exception as e:
-        return f"❌ خطأ: {e}"
+        return f"❌ error: {e}"
 
     text = raw.decode("utf-8", errors="replace")
     truncated = text[:MAX_CHARS]
-    suffix = "\n... (مقصوص)" if len(text) > MAX_CHARS else ""
+    suffix = "\n... (truncated)" if len(text) > MAX_CHARS else ""
     return f"📄 {url}  [{content_type}]\n\n{truncated}{suffix}"
 
 

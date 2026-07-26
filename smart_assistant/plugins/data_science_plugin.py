@@ -28,25 +28,25 @@ def _load_csv(path: pathlib.Path):
     try:
         return pd.read_csv(path), None
     except Exception as e:
-        return None, f"❌ تعذرت قراءة CSV: {e}"
+        return None, f"❌ could not read the CSV: {e}"
 
 
 def _cmd_csv_describe(ctx) -> str:
     if not PANDAS_AVAILABLE:
-        return "❌ باكدج pandas مش متثبت — ثبّته بـ: pip install pandas"
+        return "❌ pandas is not installed — pip install pandas"
     if not ctx.args:
         return "usage: csv_describe <file.csv>"
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
-        return f"❌ الملف مش موجود: {path}"
+        return f"❌ file not found: {path}"
     df, err = _load_csv(path)
     if err:
         return err
     if df.empty:
-        return "⚠  الملف فاضي (مفيش صفوف)"
+        return "⚠  the file is empty (no rows)"
 
-    lines = [f"📊 {df.shape[0]} صف × {df.shape[1]} عمود"]
-    lines.append(f"الأعمدة: {', '.join(df.columns)}")
+    lines = [f"📊 {df.shape[0]} rows × {df.shape[1]} columns"]
+    lines.append(f"Columns: {', '.join(df.columns)}")
     numeric = df.select_dtypes(include="number")
     if not numeric.empty:
         lines.append("")
@@ -55,7 +55,7 @@ def _cmd_csv_describe(ctx) -> str:
     missing = missing[missing > 0]
     if not missing.empty:
         lines.append("")
-        lines.append("⚠  قيم فاضية (missing):")
+        lines.append("⚠  missing values:")
         for col, count in missing.items():
             lines.append(f"  {col}: {count}")
     return "\n".join(lines)
@@ -63,24 +63,24 @@ def _cmd_csv_describe(ctx) -> str:
 
 def _cmd_csv_plot(ctx) -> str:
     if not PANDAS_AVAILABLE:
-        return "❌ باكدج pandas مش متثبت — ثبّته بـ: pip install pandas"
+        return "❌ pandas is not installed — pip install pandas"
     if not MATPLOTLIB_AVAILABLE:
-        return "❌ باكدج matplotlib مش متثبت — ثبّته بـ: pip install matplotlib"
+        return "❌ matplotlib is not installed — pip install matplotlib"
     if len(ctx.args) < 3:
         return "usage: csv_plot <file.csv> <column> <output.png> [kind=hist]"
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
-        return f"❌ الملف مش موجود: {path}"
+        return f"❌ file not found: {path}"
     column, output = ctx.args[1], ctx.args[2]
     kind = ctx.args[3] if len(ctx.args) > 3 else "hist"
     if kind not in ("hist", "line", "bar", "box"):
-        return f"❌ kind غير معروف: {kind} (المتاح: hist, line, bar, box)"
+        return f"❌ unknown kind: {kind} (available: hist, line, bar, box)"
 
     df, err = _load_csv(path)
     if err:
         return err
     if column not in df.columns:
-        return f"❌ العمود {column} مش موجود (المتاح: {', '.join(df.columns)})"
+        return f"❌ no such column: {column} (available: {', '.join(df.columns)})"
 
     try:
         fig, ax = plt.subplots(figsize=(8, 5))
@@ -98,29 +98,29 @@ def _cmd_csv_plot(ctx) -> str:
         fig.savefig(out_path, dpi=100, bbox_inches="tight")
         plt.close(fig)
     except Exception as e:
-        return f"❌ فشل الرسم: {e}"
-    return f"✅ اتعمل الرسم ({kind}) في {out_path}"
+        return f"❌ plotting failed: {e}"
+    return f"✅ {kind} plot written to {out_path}"
 
 
 def _cmd_csv_correlate(ctx) -> str:
     if not PANDAS_AVAILABLE:
-        return "❌ باكدج pandas مش متثبت — ثبّته بـ: pip install pandas"
+        return "❌ pandas is not installed — pip install pandas"
     if not ctx.args:
         return "usage: csv_correlate <file.csv> [output.png]"
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
-        return f"❌ الملف مش موجود: {path}"
+        return f"❌ file not found: {path}"
     df, err = _load_csv(path)
     if err:
         return err
     numeric = df.select_dtypes(include="number")
     if numeric.shape[1] < 2:
-        return "❌ محتاج عمودين رقميين على الأقل عشان نحسب correlation"
+        return "❌ need at least two numeric columns to compute a correlation"
     corr = numeric.corr().round(3)
 
     if len(ctx.args) > 1:
         if not MATPLOTLIB_AVAILABLE:
-            return "❌ باكدج matplotlib مش متثبت — ثبّته بـ: pip install matplotlib"
+            return "❌ matplotlib is not installed — pip install matplotlib"
         try:
             fig, ax = plt.subplots(figsize=(7, 6))
             im = ax.imshow(corr, cmap="coolwarm", vmin=-1, vmax=1)
@@ -134,8 +134,8 @@ def _cmd_csv_correlate(ctx) -> str:
             fig.savefig(out_path, dpi=100, bbox_inches="tight")
             plt.close(fig)
         except OSError as e:
-            return f"❌ فشل الحفظ: {e}"
-        return f"✅ correlation heatmap في {out_path}\n\n{corr.to_string()}"
+            return f"❌ could not save: {e}"
+        return f"✅ correlation heatmap written to {out_path}\n\n{corr.to_string()}"
     return corr.to_string()
 
 

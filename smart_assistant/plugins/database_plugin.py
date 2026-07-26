@@ -32,7 +32,7 @@ def _cmd_db_schema(ctx) -> str:
         return "usage: db_schema <sqlite_file>"
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
-        return f"❌ الملف مش موجود: {path}"
+        return f"❌ file not found: {path}"
     try:
         conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         cur = conn.cursor()
@@ -51,7 +51,7 @@ def _cmd_db_schema(ctx) -> str:
             lines.append(f"  🗂  {table} ({col_desc})")
         return "\n".join(lines)
     except sqlite3.Error as e:
-        return f"❌ خطأ SQLite: {e}"
+        return f"❌ SQLite error: {e}"
     finally:
         try:
             conn.close()
@@ -64,7 +64,7 @@ def _cmd_db_query(ctx) -> str:
         return "usage: db_query <sqlite_file> <SQL...>"
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
-        return f"❌ الملف مش موجود: {path}"
+        return f"❌ file not found: {path}"
     # نفس منطق connectors_plugin: الـ SQL بيتاخد من ctx.raw مش ctx.args
     # عشان shlex.split ممكن يبلع quotes/علامات جوه الجملة نفسها
     head_and_rest = ctx.raw.split(maxsplit=2)
@@ -88,7 +88,7 @@ def _cmd_db_query(ctx) -> str:
         suffix = "\n... (النتائج مقصوصة عند 200 صف)" if len(rows) == 200 else ""
         return "\n".join(lines) + suffix
     except sqlite3.Error as e:
-        return f"❌ خطأ SQLite: {e}"
+        return f"❌ SQLite error: {e}"
     finally:
         try:
             conn.close()
@@ -101,7 +101,7 @@ def _cmd_db_export_csv(ctx) -> str:
         return "usage: db_export_csv <sqlite_file> <table> <output.csv>"
     path, table, output = pathlib.Path(ctx.args[0]), ctx.args[1], ctx.args[2]
     if not path.is_file():
-        return f"❌ الملف مش موجود: {path}"
+        return f"❌ file not found: {path}"
     quoted = _quote_identifier(table)
     if quoted is None:
         return f"❌ اسم جدول غير صالح: {table}"
@@ -113,7 +113,7 @@ def _cmd_db_export_csv(ctx) -> str:
         columns = [d[0] for d in cur.description]
         rows = cur.fetchall()
     except sqlite3.Error as e:
-        return f"❌ خطأ SQLite: {e}"
+        return f"❌ SQLite error: {e}"
     finally:
         try:
             conn.close()
@@ -171,7 +171,7 @@ def _cmd_db_migration_status(ctx) -> str:
             for row in conn.execute(f'SELECT filename, checksum, applied_at FROM "{_MIGRATIONS_TABLE}"')
         }
     except sqlite3.Error as e:
-        return f"❌ خطأ SQLite: {e}"
+        return f"❌ SQLite error: {e}"
     finally:
         try:
             conn.close()
@@ -245,7 +245,7 @@ def _cmd_db_migrate(ctx) -> str:
             conn.commit()
             applied_now.append(f.name)
     except sqlite3.Error as e:
-        return f"❌ خطأ SQLite: {e}"
+        return f"❌ SQLite error: {e}"
     finally:
         try:
             conn.close()
@@ -262,7 +262,7 @@ def _cmd_db_indexes(ctx) -> str:
         return "usage: db_indexes <sqlite_file> [table]"
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
-        return f"❌ الملف مش موجود: {path}"
+        return f"❌ file not found: {path}"
 
     try:
         conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
@@ -314,7 +314,7 @@ def _cmd_db_indexes(ctx) -> str:
                     lines.append(f"    ⚠️ عمود {from_col} (foreign key لـ {ref_table}) من غير index — ممكن يبطّئ الـ JOINs")
         return "\n".join(lines)
     except sqlite3.Error as e:
-        return f"❌ خطأ SQLite: {e}"
+        return f"❌ SQLite error: {e}"
     finally:
         try:
             conn.close()

@@ -26,7 +26,7 @@ def _cmd_hash_file(ctx) -> str:
         return "usage: hash_file <file> [algo=sha256]"
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
-        return f"❌ الملف مش موجود: {path}"
+        return f"❌ file not found: {path}"
     algo = ctx.args[1] if len(ctx.args) > 1 else "sha256"
     try:
         h = hashlib.new(algo)
@@ -37,7 +37,7 @@ def _cmd_hash_file(ctx) -> str:
             for chunk in iter(lambda: f.read(65536), b""):
                 h.update(chunk)
     except OSError as e:
-        return f"❌ تعذرت قراءة الملف: {e}"
+        return f"❌ could not read the file: {e}"
     return f"{algo}({path.name}) = {h.hexdigest()}"
 
 
@@ -166,7 +166,7 @@ def _cmd_file_perms(ctx) -> str:
         return "usage: file_perms <path>"
     root = pathlib.Path(ctx.args[0])
     if not root.exists():
-        return f"❌ المسار مش موجود: {root}"
+        return f"❌ path not found: {root}"
 
     targets: list[pathlib.Path] = []
     if root.is_file():

@@ -54,7 +54,7 @@ def _run_ffmpeg(args: list[str], timeout: int) -> tuple[bool, str]:
     try:
         result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
-        return False, f"⏱ انتهت المهلة ({timeout}s)"
+        return False, f"⏱ timed out after ({timeout}s)"
     except OSError as e:
         return False, f"❌ تعذر تشغيل {args[0]}: {e}"
     if result.returncode != 0:
@@ -162,14 +162,14 @@ def _cmd_color_grade(ctx) -> str:
         presets = ", ".join(_COLOR_PRESETS)
         return f"usage: color_grade <input> <output> [preset=cinematic]\npresets: {presets}"
     if not shutil.which("ffmpeg"):
-        return "❌ ffmpeg غير موجود"
+        return "❌ ffmpeg not found"
     src, dst = ctx.args[0], ctx.args[1]
     preset = ctx.args[2] if len(ctx.args) > 2 else "cinematic"
     missing = _missing_files(src)
     if missing:
-        return f"❌ الملف مش موجود: {missing[0]}"
+        return f"❌ file not found: {missing[0]}"
     if preset not in _COLOR_PRESETS:
-        return f"❌ preset غير معروف: {preset} (المتاح: {', '.join(_COLOR_PRESETS)})"
+        return f"❌ preset غير معروف: {preset} (available: {', '.join(_COLOR_PRESETS)})"
     ok, err = _run_ffmpeg(
         ["ffmpeg", "-y", "-i", src, "-vf", _COLOR_PRESETS[preset], "-c:a", "copy", dst], timeout=300,
     )
@@ -193,7 +193,7 @@ def _cmd_transition(ctx) -> str:
     if len(ctx.args) < 3:
         return f"usage: transition <clip1> <clip2> <output> [style=fade] [duration=1]\nstyles: {', '.join(sorted(_TRANSITIONS))}"
     if not shutil.which("ffmpeg"):
-        return "❌ ffmpeg غير موجود"
+        return "❌ ffmpeg not found"
     clip1, clip2, dst = ctx.args[0], ctx.args[1], ctx.args[2]
     style = ctx.args[3] if len(ctx.args) > 3 else "fade"
     try:
@@ -202,9 +202,9 @@ def _cmd_transition(ctx) -> str:
         return "❌ duration لازم يكون رقم"
     missing = _missing_files(clip1, clip2)
     if missing:
-        return f"❌ الملف مش موجود: {missing[0]}"
+        return f"❌ file not found: {missing[0]}"
     if style not in _TRANSITIONS:
-        return f"❌ style غير معروف: {style} (المتاح: {', '.join(sorted(_TRANSITIONS))})"
+        return f"❌ style غير معروف: {style} (available: {', '.join(sorted(_TRANSITIONS))})"
 
     clip1_duration = _probe_duration(clip1)
     if clip1_duration is None:
@@ -244,11 +244,11 @@ def _cmd_letterbox(ctx) -> str:
     if len(ctx.args) < 2:
         return "usage: letterbox <input> <output> [ratio=2.39]"
     if not shutil.which("ffmpeg"):
-        return "❌ ffmpeg غير موجود"
+        return "❌ ffmpeg not found"
     src, dst = ctx.args[0], ctx.args[1]
     missing = _missing_files(src)
     if missing:
-        return f"❌ الملف مش موجود: {missing[0]}"
+        return f"❌ file not found: {missing[0]}"
     try:
         ratio = float(ctx.args[2]) if len(ctx.args) > 2 else 2.39
     except ValueError:
@@ -267,7 +267,7 @@ def _cmd_letterbox(ctx) -> str:
     vf = f"drawbox=x=0:y=0:w=iw:h={bar_height}:color=black:t=fill,drawbox=x=0:y=ih-{bar_height}:w=iw:h={bar_height}:color=black:t=fill"
     ok, err = _run_ffmpeg(["ffmpeg", "-y", "-i", src, "-vf", vf, "-c:a", "copy", dst], timeout=300)
     if not ok:
-        return f"❌ فشل: {err}"
+        return f"❌ failed: {err}"
     return f"✅ اتعمل letterbox ({ratio}:1) في {dst}"
 
 
@@ -279,11 +279,11 @@ def _cmd_stabilize(ctx) -> str:
     if len(ctx.args) < 2:
         return "usage: stabilize <input> <output>"
     if not shutil.which("ffmpeg"):
-        return "❌ ffmpeg غير موجود"
+        return "❌ ffmpeg not found"
     src, dst = ctx.args[0], ctx.args[1]
     missing = _missing_files(src)
     if missing:
-        return f"❌ الملف مش موجود: {missing[0]}"
+        return f"❌ file not found: {missing[0]}"
 
     with tempfile.TemporaryDirectory() as tmp:
         transforms = str(pathlib.Path(tmp) / "transforms.trf")
@@ -312,11 +312,11 @@ def _cmd_speed_ramp(ctx) -> str:
     if len(ctx.args) < 3:
         return "usage: speed_ramp <input> <output> <factor>  (0.5=نص سرعة/بطيء، 2=ضعف السرعة)"
     if not shutil.which("ffmpeg"):
-        return "❌ ffmpeg غير موجود"
+        return "❌ ffmpeg not found"
     src, dst, factor_arg = ctx.args[0], ctx.args[1], ctx.args[2]
     missing = _missing_files(src)
     if missing:
-        return f"❌ الملف مش موجود: {missing[0]}"
+        return f"❌ file not found: {missing[0]}"
     try:
         factor = float(factor_arg)
     except ValueError:
@@ -331,7 +331,7 @@ def _cmd_speed_ramp(ctx) -> str:
         # ملفات من غير صوت — نجرب فيديو بس
         ok, err = _run_ffmpeg(["ffmpeg", "-y", "-i", src, "-vf", vf, "-an", dst], timeout=300)
         if not ok:
-            return f"❌ فشل: {err}"
+            return f"❌ failed: {err}"
         return f"✅ اتغيرت السرعة (×{factor}) في {dst} (بدون صوت)"
     return f"✅ اتغيرت السرعة (×{factor}) في {dst}"
 
@@ -353,12 +353,12 @@ def _cmd_pip(ctx) -> str:
     if len(ctx.args) < 3:
         return f"usage: pip <background> <overlay> <output> [position=bottom-right] [scale=0.3]\npositions: {', '.join(_PIP_POSITIONS)}"
     if not shutil.which("ffmpeg"):
-        return "❌ ffmpeg غير موجود"
+        return "❌ ffmpeg not found"
     bg, overlay, dst = ctx.args[0], ctx.args[1], ctx.args[2]
     position = ctx.args[3] if len(ctx.args) > 3 else "bottom-right"
     missing = _missing_files(bg, overlay)
     if missing:
-        return f"❌ الملف مش موجود: {missing[0]}"
+        return f"❌ file not found: {missing[0]}"
     try:
         scale = float(ctx.args[4]) if len(ctx.args) > 4 else 0.3
     except ValueError:
@@ -366,7 +366,7 @@ def _cmd_pip(ctx) -> str:
     if not (0 < scale <= 1):
         return "❌ scale لازم يكون بين 0 و1"
     if position not in _PIP_POSITIONS:
-        return f"❌ position غير معروف: {position} (المتاح: {', '.join(_PIP_POSITIONS)})"
+        return f"❌ position غير معروف: {position} (available: {', '.join(_PIP_POSITIONS)})"
 
     filter_complex = f"[1:v]scale=iw*{scale}:ih*{scale}[ov];[0:v][ov]overlay={_PIP_POSITIONS[position]}"
     ok, err = _run_ffmpeg(
@@ -375,7 +375,7 @@ def _cmd_pip(ctx) -> str:
         timeout=300,
     )
     if not ok:
-        return f"❌ فشل: {err}"
+        return f"❌ failed: {err}"
     return f"✅ اتعمل Picture-in-Picture ({position}) في {dst}"
 
 
@@ -387,12 +387,12 @@ def _cmd_chroma_key(ctx) -> str:
     if len(ctx.args) < 3:
         return "usage: chroma_key <foreground> <background> <output> [color=0x00FF00] [similarity=0.3]"
     if not shutil.which("ffmpeg"):
-        return "❌ ffmpeg غير موجود"
+        return "❌ ffmpeg not found"
     fg, bg, dst = ctx.args[0], ctx.args[1], ctx.args[2]
     color = ctx.args[3] if len(ctx.args) > 3 else "0x00FF00"
     missing = _missing_files(fg, bg)
     if missing:
-        return f"❌ الملف مش موجود: {missing[0]}"
+        return f"❌ file not found: {missing[0]}"
     try:
         similarity = float(ctx.args[4]) if len(ctx.args) > 4 else 0.3
     except ValueError:
@@ -406,7 +406,7 @@ def _cmd_chroma_key(ctx) -> str:
         timeout=300,
     )
     if not ok:
-        return f"❌ فشل: {err}"
+        return f"❌ failed: {err}"
     return f"✅ اتعمل دمج الخلفية (chroma key) في {dst}"
 
 
@@ -418,11 +418,11 @@ def _cmd_master_audio(ctx) -> str:
     if len(ctx.args) < 2:
         return "usage: master_audio <input> <output> [target_lufs=-16]  (-16 ستريمنج، -23 بث EBU R128)"
     if not shutil.which("ffmpeg"):
-        return "❌ ffmpeg غير موجود"
+        return "❌ ffmpeg not found"
     src, dst = ctx.args[0], ctx.args[1]
     missing = _missing_files(src)
     if missing:
-        return f"❌ الملف مش موجود: {missing[0]}"
+        return f"❌ file not found: {missing[0]}"
     try:
         target = float(ctx.args[2]) if len(ctx.args) > 2 else -16.0
     except ValueError:
@@ -434,7 +434,7 @@ def _cmd_master_audio(ctx) -> str:
         ["ffmpeg", "-y", "-i", src, "-af", f"loudnorm=I={target}:TP=-1.5:LRA=11", dst], timeout=300,
     )
     if not ok:
-        return f"❌ فشل: {err}"
+        return f"❌ failed: {err}"
     return f"✅ اتعمل audio mastering (target: {target} LUFS) في {dst}"
 
 
@@ -442,14 +442,14 @@ def _cmd_denoise_audio(ctx) -> str:
     if len(ctx.args) < 2:
         return "usage: denoise_audio <input> <output>"
     if not shutil.which("ffmpeg"):
-        return "❌ ffmpeg غير موجود"
+        return "❌ ffmpeg not found"
     src, dst = ctx.args[0], ctx.args[1]
     missing = _missing_files(src)
     if missing:
-        return f"❌ الملف مش موجود: {missing[0]}"
+        return f"❌ file not found: {missing[0]}"
     ok, err = _run_ffmpeg(["ffmpeg", "-y", "-i", src, "-af", "afftdn", dst], timeout=300)
     if not ok:
-        return f"❌ فشل: {err}"
+        return f"❌ failed: {err}"
     return f"✅ اتشال الضوضاء من الصوت في {dst}"
 
 
@@ -461,7 +461,7 @@ def _cmd_title_card(ctx) -> str:
     if len(ctx.args) < 2:
         return "usage: title_card <text> <output> [duration=3] [size=1920x1080]"
     if not shutil.which("ffmpeg"):
-        return "❌ ffmpeg غير موجود"
+        return "❌ ffmpeg not found"
     text, dst = ctx.args[0], ctx.args[1]
     try:
         duration = float(ctx.args[2]) if len(ctx.args) > 2 else 3.0
@@ -484,7 +484,7 @@ def _cmd_title_card(ctx) -> str:
         timeout=120,
     )
     if not ok:
-        return f"❌ فشل: {err}"
+        return f"❌ failed: {err}"
     return f"✅ اتعمل title card في {dst}"
 
 
@@ -500,14 +500,14 @@ def _cmd_auto_trim_silence(ctx) -> str:
     src, dst = ctx.args[0], ctx.args[1]
     missing = _missing_files(src)
     if missing:
-        return f"❌ الملف مش موجود: {missing[0]}"
+        return f"❌ file not found: {missing[0]}"
     threshold = ctx.args[2] if len(ctx.args) > 2 else "4%"
     ok, err = _run_ffmpeg(
         ["auto-editor", src, "--edit", f"audio:threshold={threshold}", "-o", dst, "--no-open", "--quiet"],
         timeout=900,  # ملفات المونتاج الطويلة بتاخد وقت أطول من فلاتر ffmpeg العادية
     )
     if not ok:
-        return f"❌ فشل: {err}"
+        return f"❌ failed: {err}"
     dst_path = pathlib.Path(dst)
     if not dst_path.is_file() or dst_path.stat().st_size == 0:
         return "❌ فشل القص — auto-editor خلص من غير خطأ ظاهر بس مفيش ملف خرج حقيقي"
@@ -526,7 +526,7 @@ def _cmd_detect_scenes(ctx) -> str:
     src = ctx.args[0]
     missing = _missing_files(src)
     if missing:
-        return f"❌ الملف مش موجود: {missing[0]}"
+        return f"❌ file not found: {missing[0]}"
     try:
         threshold = float(ctx.args[1]) if len(ctx.args) > 1 else 27.0
     except ValueError:
@@ -564,7 +564,7 @@ def _validate_upscale_args(ctx) -> tuple[str, str, int, str, str | None]:
     src, dst = ctx.args[0], ctx.args[1]
     missing = _missing_files(src)
     if missing:
-        return "", "", 0, "", f"❌ الملف مش موجود: {missing[0]}"
+        return "", "", 0, "", f"❌ file not found: {missing[0]}"
     try:
         scale = int(ctx.args[2]) if len(ctx.args) > 2 else 4
     except ValueError:
@@ -590,7 +590,7 @@ def _cmd_upscale_image(ctx) -> str:
         ["realesrgan-ncnn-vulkan", "-i", src, "-o", dst, "-s", str(scale), "-n", model], timeout=900,
     )
     if not ok:
-        return f"❌ فشل: {err}"
+        return f"❌ failed: {err}"
     # realesrgan-ncnn-vulkan بيرجع دايمًا exit code 0 حتى لو فشل فعليًا
     # (نموذج غلط، صورة تعذر فك تشفيرها، ...) — اتجرب فعليًا، مش افتراض.
     # الضمانة الحقيقية الوحيدة إن الملف طلع فعلاً وله حجم حقيقي.
@@ -606,7 +606,7 @@ def _cmd_upscale_video(ctx) -> str:
     if not shutil.which("realesrgan-ncnn-vulkan"):
         return _REALESRGAN_MISSING_MSG
     if not shutil.which("ffmpeg"):
-        return "❌ ffmpeg غير موجود"
+        return "❌ ffmpeg not found"
     src, dst, scale, model, err = _validate_upscale_args(ctx)
     if err:
         return err

@@ -57,15 +57,15 @@ def _cmd_identify(ctx) -> str:
         return "usage: identify <file>"
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
-        return f"❌ الملف مش موجود: {path}"
+        return f"❌ file not found: {path}"
     try:
         with path.open("rb") as f:
             data = f.read(4096)
         size = path.stat().st_size
     except OSError as e:
-        return f"❌ تعذرت قراءة الملف: {e}"
+        return f"❌ could not read the file: {e}"
     kind = _identify(data)
-    return f"📄 {path.name}\n🔎 النوع المكتشف: {kind}\n📦 الحجم: {size} bytes"
+    return f"📄 {path.name}\n🔎 detected type: {kind}\n📦 size: {size} bytes"
 
 
 MAX_HEXDUMP_LENGTH = 65536
@@ -76,29 +76,29 @@ def _cmd_hexdump(ctx) -> str:
         return "usage: hexdump <file> [offset] [length]"
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
-        return f"❌ الملف مش موجود: {path}"
+        return f"❌ file not found: {path}"
     try:
         offset = int(ctx.args[1]) if len(ctx.args) > 1 else 0
         length = int(ctx.args[2]) if len(ctx.args) > 2 else 256
     except ValueError:
-        return "❌ offset و length لازم يكونوا أرقام صحيحة"
+        return "❌ offset and length must be whole numbers"
     if offset < 0:
-        return "❌ offset مينفعش يكون سالب"
+        return "❌ offset cannot be negative"
     if not (0 < length <= MAX_HEXDUMP_LENGTH):
-        return f"❌ length لازم يكون بين 1 و{MAX_HEXDUMP_LENGTH}"
+        return f"❌ length must be between 1 and {MAX_HEXDUMP_LENGTH}"
     try:
         with path.open("rb") as f:
             f.seek(offset)
             chunk = f.read(length)
     except OSError as e:
-        return f"❌ تعذرت قراءة الملف: {e}"
+        return f"❌ could not read the file: {e}"
     lines = []
     for i in range(0, len(chunk), 16):
         row = chunk[i:i + 16]
         hex_part = " ".join(f"{b:02x}" for b in row)
         ascii_part = "".join(chr(b) if 32 <= b < 127 else "." for b in row)
         lines.append(f"{offset + i:08x}  {hex_part:<47}  {ascii_part}")
-    return "\n".join(lines) or "(فاضي)"
+    return "\n".join(lines) or "(empty)"
 
 
 def _cmd_strings(ctx) -> str:
@@ -106,23 +106,23 @@ def _cmd_strings(ctx) -> str:
         return "usage: strings <file> [min_length=4]"
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
-        return f"❌ الملف مش موجود: {path}"
+        return f"❌ file not found: {path}"
     try:
         min_len = int(ctx.args[1]) if len(ctx.args) > 1 else 4
     except ValueError:
-        return "❌ min_length لازم يكون رقم صحيح"
+        return "❌ min_length must be a whole number"
     if min_len < 1:
-        return "❌ min_length لازم يكون 1 على الأقل"
+        return "❌ min_length must be at least 1"
     try:
         data = path.read_bytes()
     except OSError as e:
-        return f"❌ تعذرت قراءة الملف: {e}"
+        return f"❌ could not read the file: {e}"
     pattern = re.compile(rb"[\x20-\x7e]{%d,}" % min_len)
     found = [m.group().decode("ascii") for m in pattern.finditer(data)]
     if not found:
-        return "مفيش نصوص واضحة اتلاقت"
+        return "No readable text found"
     preview = found[:200]
-    suffix = f"\n... ({len(found) - 200} نتيجة إضافية)" if len(found) > 200 else ""
+    suffix = f"\n... ({len(found) - 200} more results)" if len(found) > 200 else ""
     return "\n".join(preview) + suffix
 
 
@@ -131,7 +131,7 @@ def _cmd_archive_list(ctx) -> str:
         return "usage: archive_list <file>"
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
-        return f"❌ الملف مش موجود: {path}"
+        return f"❌ file not found: {path}"
     try:
         if zipfile.is_zipfile(path):
             with zipfile.ZipFile(path) as zf:
@@ -140,12 +140,12 @@ def _cmd_archive_list(ctx) -> str:
             with tarfile.open(path) as tf:
                 names = tf.getnames()
         else:
-            return "❌ مش ملف zip/tar معروف"
+            return "❌ not a recognised zip or tar file"
     except Exception as e:
-        return f"❌ تعذرت قراءة الأرشيف: {e}"
+        return f"❌ could not read the archive: {e}"
     preview = names[:200]
-    suffix = f"\n... ({len(names) - 200} ملف إضافي)" if len(names) > 200 else ""
-    return f"📦 {len(names)} عنصر:\n" + "\n".join(preview) + suffix
+    suffix = f"\n... ({len(names) - 200} more files)" if len(names) > 200 else ""
+    return f"📦 {len(names)} entries:\n" + "\n".join(preview) + suffix
 
 
 def register(engine):

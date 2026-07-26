@@ -1632,7 +1632,7 @@ def _cmd_scaffold(ctx) -> str:
         return f"usage: scaffold <type> <project_name> [output_dir]\nالأنواع المتاحة:\n{types}"
     kind, name = ctx.args[0], ctx.args[1]
     if kind not in _SCAFFOLDS:
-        return f"❌ نوع غير معروف: {kind} (المتاح: {', '.join(_SCAFFOLDS)})"
+        return f"❌ نوع غير معروف: {kind} (available: {', '.join(_SCAFFOLDS)})"
     name_error = _validate_name(name)
     if name_error:
         return name_error
