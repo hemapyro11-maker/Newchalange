@@ -524,7 +524,7 @@ def test_deep_mode_uses_deep_chat(bare_engine, monkeypatch):
 def test_split_tool_call_extracts_command_and_args():
     body, tool, _q = AssistantEngine._split_directives("شرح كده.\nTOOL: probe /a/b.mp4")
     assert body == "شرح كده."
-    assert tool == ("probe", ["/a/b.mp4"])
+    assert tool[:2] == ("probe", ["/a/b.mp4"])
 
 
 def test_split_tool_call_returns_none_when_absent():
@@ -535,7 +535,7 @@ def test_split_tool_call_returns_none_when_absent():
 
 def test_split_tool_call_handles_quoted_args():
     _b, tool, _q = AssistantEngine._split_directives('TOOL: probe "C:/My Files/a.mp4"')
-    assert tool == ("probe", ["C:/My Files/a.mp4"])
+    assert tool[:2] == ("probe", ["C:/My Files/a.mp4"])
 
 
 def test_split_tool_call_survives_bad_quoting():
@@ -545,7 +545,7 @@ def test_split_tool_call_survives_bad_quoting():
 
 def test_split_tool_call_takes_only_the_first_tool_line():
     _b, tool, _q = AssistantEngine._split_directives("TOOL: echo one\nTOOL: echo two")
-    assert tool == ("echo", ["one"])
+    assert tool[:2] == ("echo", ["one"])
 
 
 def test_split_extracts_a_question():
@@ -1101,3 +1101,50 @@ def test_cancel_works_in_both_languages(bare_engine, monkeypatch):
         assert bare_engine._pending_args is not None
         bare_engine._dispatch(word)
         assert bare_engine._pending_args is None
+
+
+# ── نداء الأداة بيوصل كامل (متعدد الأسطر) ────────────────────────────
+
+def test_a_multi_line_tool_call_keeps_its_body():
+    """`edit_file` بتقرا كتلة SEARCH/REPLACE من ctx.raw — لو قصّينا
+    عند سطر TOOL، الكتلة كانت هتضيع وميوصلش غير اسم الملف."""
+    reply = (
+        "Fixing the divide-by-zero.\n"
+        "TOOL: edit_file calc.py\n"
+        "<<<<<<< SEARCH\n"
+        "    return a / b\n"
+        "=======\n"
+        "    if b == 0:\n"
+        "        raise ValueError\n"
+        "    return a / b\n"
+        ">>>>>>> REPLACE"
+    )
+    _body, tool, _q = AssistantEngine._split_directives(reply)
+    name, args, raw = tool
+    assert name == "edit_file"
+    assert args == ["calc.py"]
+    assert "<<<<<<< SEARCH" in raw
+    assert ">>>>>>> REPLACE" in raw
+
+
+def test_the_tool_body_is_what_reaches_the_command(bare_engine, monkeypatch):
+    """الأمر لازم يشوف نداء الأداة زي ما المخ كتبه، مش رسالة المستخدم."""
+    _fake_brain(
+        monkeypatch,
+        "Here.\nTOOL: rawspy x\n<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE",
+    )
+    seen = {}
+    bare_engine.registry.register("rawspy", lambda ctx: seen.setdefault("raw", ctx.raw))
+    bare_engine._converse("please fix the thing")
+    bare_engine._dispatch("y")
+    assert "SEARCH" in seen["raw"]
+    assert "please fix the thing" not in seen["raw"]
+
+
+def test_a_single_line_tool_call_still_works(bare_engine, monkeypatch):
+    _fake_brain(monkeypatch, "Sure.\nTOOL: echo hello")
+    seen = {}
+    bare_engine.registry.register("echo", lambda ctx: seen.setdefault("raw", ctx.raw))
+    bare_engine._converse("say hello")
+    bare_engine._dispatch("y")
+    assert seen["raw"] == "echo hello"

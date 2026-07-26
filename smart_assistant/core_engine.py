@@ -121,6 +121,16 @@ _SYSTEM_PROMPT = (
     "answer.\n"
     "- After a tool runs you are shown its output. If the task needs another "
     "step, propose the next TOOL. If it is done, say so plainly.\n"
+    "- To change code: read_file first, then edit_file. Never edit text you "
+    "have not just read — the search text must match the file exactly, "
+    "including indentation:\n"
+    "TOOL: edit_file path/to/file.py\n"
+    "<<<<<<< SEARCH\n"
+    "the exact existing lines\n"
+    "=======\n"
+    "the replacement lines\n"
+    ">>>>>>> REPLACE\n"
+    "  Include enough surrounding lines that the search matches exactly once.\n"
     "- The TOOL line goes last, with one short line above it saying why.\n"
     "- Never claim you ran something. The user confirms first.\n"
 )
@@ -262,6 +272,9 @@ class AssistantEngine:
         # الخطوة الحالية في سلسلة أوامر اقترحها المخ. None = الأمر ده مش
         # جاي من سلسلة، فمفيش متابعة بعد تنفيذه.
         self._chain_step: int | None = None
+        # نداء الأداة زي ما المخ كتبه (بما فيه أي كتلة متعددة الأسطر)
+        # — بيتبعت كـ ctx.raw بدل رسالة المستخدم.
+        self._pending_tool_raw: str | None = None
         # محادثة المخ. أول رسالة ممكن تكون ملخص (role=system) للجزء
         # القديم اللي اتضغط — بتتحفظ على القرص مع باقي المحادثة.
         self.chat_history: list[dict] = []
@@ -466,6 +479,7 @@ class AssistantEngine:
         if self._pending_intent is not None:
             pending, self._pending_intent = self._pending_intent, None
             step, self._chain_step = self._chain_step, None
+            tool_raw, self._pending_tool_raw = self._pending_tool_raw, None
             reply = text.lower()
             if reply in _CONFIRM_ALWAYS:
                 pending_name, pending_args, pending_raw = pending
@@ -473,7 +487,8 @@ class AssistantEngine:
                 self._log(message, "ok" if ok else "warn")
                 if ok:
                     intents.remember(pending_raw, pending_name)
-                    result = self._execute(pending_name, pending_args, pending_raw)
+                    result = self._execute(
+                        pending_name, pending_args, tool_raw or pending_raw)
                     if step is not None:
                         self._continue_chain(pending_name, result, step)
                 return
@@ -489,7 +504,8 @@ class AssistantEngine:
                 # بتقرا ctx.raw مباشرة (مش ctx.args) عشان تتفادى مشاكل
                 # shlex.split مع نصوص فيها JSON/SQL، فلو بعتنا "y" هنا
                 # كانت هتشتغل على نص فاضي بدل الأمر اللي المستخدم أكّده فعلاً.
-                result = self._execute(pending_name, pending_args, pending_raw)
+                result = self._execute(
+                    pending_name, pending_args, tool_raw or pending_raw)
                 if step is not None:
                     self._continue_chain(pending_name, result, step)
                 return
@@ -827,7 +843,7 @@ class AssistantEngine:
             self._log(f"{body}\n\n— {badge}", "info")
             return
 
-        tool_name, tool_args = tool
+        tool_name, tool_args, tool_raw = tool
         if self.registry.get(tool_name) is None:
             # النموذج هلوس اسم أمر مش موجود — منعرضهوش أصلاً
             self._log(f"{body}\n\n— {badge}", "info")
@@ -841,11 +857,15 @@ class AssistantEngine:
         if permissions.is_allowed(tool_name):
             intents.remember(text, tool_name)
             self._log(f"{body}\n\n↪ {shown}{step_note}\n— {badge}", "info")
-            result = self._execute(tool_name, tool_args, text)
+            result = self._execute(tool_name, tool_args, tool_raw)
             self._continue_chain(tool_name, result, step)
             return
 
         self._chain_step = step
+        # `ctx.raw` للأمر ده لازم يكون نداء الأداة زي ما النموذج كتبه،
+        # مش رسالة المستخدم — أوامر بتقرا raw (edit_file, db_query)
+        # كانت هتشوف كلام المستخدم بدل وسائطها الفعلية.
+        self._pending_tool_raw = tool_raw
         self._pending_intent = (tool_name, tool_args, text)
         self._log(
             f"{body}\n\n🔧 محتاجة أشغّل: {shown}{step_note}\n"
@@ -894,18 +914,29 @@ class AssistantEngine:
         tool = None
         question = None
         kept: list[str] = []
-        for line in reply.splitlines():
+        lines = reply.splitlines()
+        for i, line in enumerate(lines):
             ask = re.match(r"^\s*ASK:\s*(.+)$", line)
             if ask and question is None:
                 question = ask.group(1).strip()
                 continue
             m = re.match(r"^\s*TOOL:\s*(\S+)(.*)$", line)
             if m and tool is None:
+                name, rest = m.group(1), m.group(2).strip()
                 try:
-                    tool = (m.group(1), shlex.split(m.group(2).strip()))
+                    args = shlex.split(rest)
                 except ValueError:
-                    tool = (m.group(1), m.group(2).split())
-                continue
+                    args = rest.split()
+                # كل اللي بعد سطر TOOL جزء من نداء الأداة نفسها. ده
+                # مهم لأوامر بتاخد نص متعدد الأسطر — `edit_file` بتقرا
+                # كتلة SEARCH/REPLACE من `ctx.raw`، ولو قصّينا عند
+                # السطر كانت الكتلة هتضيع وميوصلش للأمر غير اسم الملف.
+                body = "\n".join(lines[i + 1:]).rstrip()
+                raw = f"{name} {rest}".strip()
+                if body:
+                    raw = f"{raw}\n{body}"
+                tool = (name, args, raw)
+                break
             kept.append(line)
         if question is not None:
             tool = None

@@ -30,9 +30,13 @@ _lock = threading.Lock()
 #   android_shell — نفس منطق run بس على الموبايل
 #   db_query      — SQL حر (DROP/DELETE)
 #   external_add  — بيسجّل برنامج خارجي كأمر دائم
+#   edit_file     — بيكتب محتوى حر على القرص؛ تعديل ملف .py = كود
+#                   هيتنفذ بعدين، فده تنفيذ مؤجل مش مجرد كتابة
+#   create_file   — نفس السبب
 _NEVER = frozenset({
     "run", "create_plugin", "fix_plugin", "approve_plugin",
     "android_shell", "db_query", "external_add", "quarantine_restore",
+    "edit_file", "create_file",
 })
 
 
