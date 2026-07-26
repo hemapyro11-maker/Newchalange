@@ -428,11 +428,16 @@ class Brain:
                 ),
             )
 
-        last_error = ""
+        # بنجمّع خطأ كل مزوّد اتحاول، مش آخر واحد بس — لو Gemini فشل
+        # بسبب حقيقي (quota) وبعده Ollama فشل لأنه مش شغال، الرسالة
+        # القديمة كانت بتوريك "connection refused" بس وتخبي quota
+        # خالص، فالمستخدم يفتكر المشكلة في Ollama مع إنها في Gemini.
+        errors: list[str] = []
         for prov in candidates:
             now = time.time()
             with _lock:
                 if not self._available(prov, cfg, now):
+                    errors.append(f"{prov.label}: cooling down")
                     continue
             model = cfg.get("models", {}).get(prov.name, prov.model)
             fitted = _fit_to_context(messages, prov.context)
@@ -441,17 +446,17 @@ class Brain:
             except _RateLimited as e:
                 with _lock:
                     self._note_failure(prov.name, now, rate_limited=True)
-                last_error = f"{prov.label}: تعدّيت الحد ({e})"
+                errors.append(f"{prov.label}: rate limited ({e})")
                 continue
             except Exception as e:  # noqa: BLE001 - أي فشل = جرّب اللي بعده
                 with _lock:
                     self._note_failure(prov.name, now, rate_limited=False)
-                last_error = f"{prov.label}: {e}"
+                errors.append(f"{prov.label}: {e}")
                 continue
             if not text.strip():
                 with _lock:
                     self._note_failure(prov.name, now, rate_limited=False)
-                last_error = f"{prov.label}: رد فاضي"
+                errors.append(f"{prov.label}: empty reply")
                 continue
             with _lock:
                 self._note_success(prov.name, now)
@@ -460,7 +465,9 @@ class Brain:
                 is_local=prov.name in LOCAL_PROVIDERS,
             )
 
-        return BrainReply(text="", error=last_error or "كل المزوّدين مش متاحين دلوقتي")
+        return BrainReply(
+            text="", error="\n".join(errors) or "no provider is available right now"
+        )
 
     # ── الوضع العميق (Mixture-of-Agents مبسّط) ───────────────────
     def deep_chat(self, messages: list[dict], *, proposers: int = 3) -> BrainReply:

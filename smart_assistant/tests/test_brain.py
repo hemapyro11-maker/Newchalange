@@ -309,6 +309,28 @@ def test_chat_reports_error_when_all_providers_fail(monkeypatch):
     assert "مقفول" in reply.error
 
 
+def test_chat_error_mentions_every_provider_that_failed(monkeypatch):
+    """راجع: لو Gemini فشل بسبب حقيقي (quota) وبعده Ollama فشل لأنه
+    مش شغال، الرسالة القديمة كانت بتوريك آخر مزوّد بس وتخبي السبب
+    الحقيقي — المستخدم كان يفتكر المشكلة في Ollama."""
+    _key("gemini")
+    cfg = brain.load_config()
+    cfg["enabled"] = ["gemini", "ollama"]
+    brain.save_config(cfg)
+
+    def fake_call(prov, *a, **k):
+        if prov.name == "gemini":
+            raise brain._RateLimited("quota exceeded")
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(brain, "_call_provider", fake_call)
+    reply = brain.get_brain().chat([{"role": "user", "content": "hi"}])
+    assert not reply
+    assert "quota exceeded" in reply.error
+    assert "connection refused" in reply.error
+    assert "Gemini" in reply.error and "Ollama" in reply.error
+
+
 def test_chat_marks_local_provider_as_local(monkeypatch):
     monkeypatch.setattr(brain, "_call_provider", lambda *a, **k: "رد محلي")
     cfg = brain.load_config()
