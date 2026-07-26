@@ -8,7 +8,6 @@ import re
 import time
 import threading
 from collections import Counter
-from playwright.async_api import async_playwright
 
 log = logging.getLogger("bot")
 
@@ -27,26 +26,59 @@ UI_NOISE = {
 # لكن مش كلمات زي "Fine"/"Maybe"/"for" اللي بتبدأ أو فيها نفس الحرف
 _GENDER_TOKEN = re.compile(r"^\d{0,3}[fm]\d{0,3}$")
 _STRIP_CHARS  = ".,!?؟،:؛-_()[]{}\"'*"
+_QUESTION_MARKS = "?؟"
+
+# كلمات صريحة بتحدد الجنس. متعمد إننا مانحطش كلمات بتستخدم كنداء
+# ("man", "bro", "dude", "guys") عشان "hey man" مش تعريف بالجنس.
+_FEMALE_WORDS = {
+    "f", "fem", "female", "girl", "girls", "woman", "women", "lady", "ladies",
+    "بنت", "بنوتة", "انثى", "أنثى", "فتاة",
+}
+_MALE_WORDS = {
+    "m", "male", "boy", "boys",
+    "ذكر", "ولد", "راجل", "رجل",
+}
+_GENDER_WORDS = _FEMALE_WORDS | _MALE_WORDS
 
 def is_noise(text: str) -> bool:
     t = text.strip().lower()
     if t in UI_NOISE:
         return True
-    if len(t) <= 3 and t.isalpha() and t not in ("m","f"):
+    if len(t) <= 3 and t.isalpha() and t not in _GENDER_WORDS:
         return True
     if any(kw in t for kw in ["seconds","minutes","hours","ago","just now","level","reached"]):
         return True
     return False
 
 def classify(text: str) -> str:
-    t = text.strip().lower()
+    """
+    بيرجّع "stay" (بنت) أو "skip" (شاب) أو "unknown".
+
+    مهم: أي سطر بيسأل ("m or f?" / "r u f?") بيرجع unknown، لأنه سؤال منهم
+    مش تعريف بنفسهم — ولو السطر فيه الجنسين مع بعض فهو غامض برضه، فنكمل
+    استنى الرد الحقيقي بدل ما نتخطى بنت بالغلط.
+    """
+    t = text.strip()
     if not t:
         return "unknown"
-    for tok in t.split():
+    if t[-1] in _QUESTION_MARKS:
+        return "unknown"
+
+    found = set()
+    for tok in t.lower().split():
         tok = tok.strip(_STRIP_CHARS)
-        if tok and _GENDER_TOKEN.match(tok):
-            return "stay" if "f" in tok else "skip"
-    return "unknown"
+        if not tok:
+            continue
+        if tok in _FEMALE_WORDS:
+            found.add("f")
+        elif tok in _MALE_WORDS:
+            found.add("m")
+        elif _GENDER_TOKEN.match(tok):
+            found.add("f" if "f" in tok else "m")
+
+    if len(found) != 1:
+        return "unknown"
+    return "stay" if "f" in found else "skip"
 
 
 class Y99Bot:
@@ -86,6 +118,15 @@ class Y99Bot:
 
     async def _main(self):
         self.on_status("starting")
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            self.on_log("❌  Playwright مش متثبّت. شغّل:", "red")
+            self.on_log("    pip install playwright", "red")
+            self.on_log("    python -m playwright install chromium", "red")
+            self.on_status("error")
+            return
+
         self.on_log("🌐  بفتح المتصفح...", "cyan")
         had_error = False
         try:
@@ -156,6 +197,10 @@ class Y99Bot:
                             self._next_requested = False
                             break
                     self._awaiting_next = False
+                    # لو الإيقاف اتطلب وإحنا مستنيين، نخرج من غير ما نرجّع
+                    # الحالة "running" ونلخبط الواجهة
+                    if self._stop_flag.is_set():
+                        break
                     await self._next(page)
                     self.on_status("running")
                 else:
@@ -243,11 +288,14 @@ class Y99Bot:
                     if ignore_budget > 0 and l.lower() == ignore:
                         ignore_budget -= 1
                         continue
+                    # الترتيب مهم: نصنّف الأول، عشان رد زي "fem" ما يقعش
+                    # في فلتر الضوضاء (كلمة قصيرة) قبل ما نقراه كتعريف بالجنس
+                    if classify(l) != "unknown":
+                        self.on_log(f"📋  نص جديد: {l!r}", "lightblue")
+                        return l
                     if is_noise(l):
                         continue
                     self.on_log(f"📋  نص جديد: {l!r}", "lightblue")
-                    if classify(l) != "unknown":
-                        return l
             await asyncio.sleep(0.6)
         return None
 

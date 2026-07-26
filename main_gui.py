@@ -376,6 +376,12 @@ class App(ctk.CTk):
         self.status_label.configure(text=text, text_color=color)
 
     def _play_found_sound(self, times_left=3):
+        # لو الشباك اتقفل والنغمة لسه متجدولة، نسيبها في حالها
+        try:
+            if not self.winfo_exists():
+                return
+        except Exception:
+            return
         if not self.sound_var.get():
             return
         try:
@@ -386,7 +392,10 @@ class App(ctk.CTk):
         except Exception:
             pass
         if times_left > 1:
-            self.after(350, lambda: self._play_found_sound(times_left - 1))
+            try:
+                self.after(350, lambda: self._play_found_sound(times_left - 1))
+            except Exception:
+                pass
 
 
 # ── Entry ───────────────────────────────────────────────────────────────
