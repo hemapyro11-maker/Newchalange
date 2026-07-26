@@ -50,7 +50,7 @@ def test_code_scan_clean_file_reports_ok(make_ctx, tmp_path):
 def test_code_scan_no_py_files(make_ctx, tmp_path):
     (tmp_path / "readme.txt").write_text("hi")
     result = ssp._cmd_code_scan(make_ctx("code_scan", [str(tmp_path)]))
-    assert "مفيش ملفات .py" in result
+    assert "No .py files" in result
 
 
 def test_code_scan_reports_syntax_error(make_ctx, tmp_path):
@@ -102,7 +102,7 @@ def test_code_scan_detects_sql_injection_fstring_and_concat(make_ctx, tmp_path):
     result = ssp._cmd_code_scan(make_ctx("code_scan", [str(f)]))
     assert result.count("SQL injection") >= 1
     assert "f-string" in result
-    assert "+ أو %" in result
+    assert "with + or %" in result
 
 
 def test_code_scan_does_not_flag_parameterized_query(make_ctx, tmp_path):
@@ -156,7 +156,7 @@ def test_code_scan_reports_bandit_missing_when_unavailable(make_ctx, tmp_path, m
     f = tmp_path / "clean.py"
     f.write_text("def add(a, b):\n    return a + b\n")
     result = ssp._cmd_code_scan(make_ctx("code_scan", [str(f)]))
-    assert "bandit مش متثبت" in result
+    assert "bandit is not installed" in result
     assert "pip install bandit" in result
 
 
@@ -174,7 +174,7 @@ def test_code_scan_bandit_clean_file_reports_ok(make_ctx, tmp_path):
     f = tmp_path / "clean.py"
     f.write_text("def add(a, b):\n    return a + b\n")
     result = ssp._cmd_code_scan(make_ctx("code_scan", [str(f)]))
-    assert "bandit: مفيش ملاحظات إضافية" in result
+    assert "bandit: nothing further to report" in result
 
 
 def test_code_scan_bandit_section_present_even_when_ast_scan_is_clean(make_ctx, tmp_path, monkeypatch):
@@ -185,7 +185,7 @@ def test_code_scan_bandit_section_present_even_when_ast_scan_is_clean(make_ctx, 
     f.write_text("def add(a, b):\n    return a + b\n")
     result = ssp._cmd_code_scan(make_ctx("code_scan", [str(f)]))
     assert result.startswith("✅")
-    assert "فحص إضافي بـ bandit" in result
+    assert "Extra pass with bandit" in result
 
 
 # ── code_scan --fix ───────────────────────────────────────────────────
@@ -194,7 +194,7 @@ def test_code_scan_fix_rewrites_yaml_load_without_loader(make_ctx, tmp_path):
     f = tmp_path / "d.py"
     f.write_text("import yaml\nconfig = yaml.load(open('c.yml'))\n")
     result = ssp._cmd_code_scan(make_ctx("code_scan", [str(f), "--fix"]))
-    assert "اتصلح 1" in result
+    assert "1 fixed" in result
     fixed = f.read_text(encoding="utf-8")
     assert "yaml.safe_load(open('c.yml'))" in fixed
     subprocess.run(["python3", "-m", "py_compile", str(f)], check=True)
@@ -265,7 +265,7 @@ def test_vuln_scan_env_dotfile_is_actually_scanned(make_ctx, tmp_path):
     # كان بيتفوت بصمت من فلتر الامتدادات لو مش متعامل معاه صراحةً.
     (tmp_path / ".env").write_text("SECRET_TOKEN=realvalue123456\n")
     result = ssp._cmd_vuln_scan(make_ctx("vuln_scan", [str(tmp_path)]))
-    assert "1 ملف اتفحص" in result or "أسرار مكشوفة" in result
+    assert "1 files scanned" in result or "Exposed secrets" in result
     assert "❌" not in result.split("📌")[0]
 
 
@@ -284,20 +284,20 @@ def test_vuln_scan_detects_bare_secret_variable_name(make_ctx, tmp_path):
 def test_vuln_scan_ignores_placeholder_in_env(make_ctx, tmp_path):
     (tmp_path / ".env").write_text("SECRET_TOKEN=changeme\n")
     result = ssp._cmd_vuln_scan(make_ctx("vuln_scan", [str(tmp_path)]))
-    assert "أسرار مكشوفة (1 ملف اتفحص):\n  ✅ مفيش" in result
+    assert "Exposed secrets (1 files scanned):\n  ✅ none" in result
 
 
 def test_vuln_scan_no_deps_message_when_no_manifest(make_ctx, tmp_path):
     (tmp_path / "readme.txt").write_text("hi")
     result = ssp._cmd_vuln_scan(make_ctx("vuln_scan", [str(tmp_path)]))
-    assert "مفيش requirements.txt ولا package.json" in result
+    assert "no requirements.txt or package.json" in result
 
 
 def test_vuln_scan_reports_pip_audit_missing_when_unavailable(make_ctx, tmp_path, monkeypatch):
     monkeypatch.setattr(ssp.shutil, "which", lambda name: None if name == "pip-audit" else shutil.which(name))
     (tmp_path / "requirements.txt").write_text("requests==2.6.0\n")
     result = ssp._cmd_vuln_scan(make_ctx("vuln_scan", [str(tmp_path)]))
-    assert "pip-audit مش متثبت" in result
+    assert "pip-audit is not installed" in result
 
 
 @requires_pip_audit
@@ -325,7 +325,7 @@ def test_vuln_scan_composes_file_perms_via_registry(tmp_path):
     f.chmod(0o666)
     ctx = CommandContext(raw="vuln_scan", args=[str(tmp_path)], engine=engine)
     result = engine.registry.get("vuln_scan").handler(ctx)
-    assert "صلاحيات ملفات" in result
+    assert "File permissions" in result
     assert "world-writable" in result
 
 
@@ -334,7 +334,7 @@ def test_vuln_scan_gracefully_skips_file_perms_when_security_plugin_not_loaded(m
     # يشتغل عادي من غير AttributeError.
     (tmp_path / "readme.txt").write_text("hi")
     result = ssp._cmd_vuln_scan(make_ctx("vuln_scan", [str(tmp_path)]))
-    assert "صلاحيات ملفات" not in result
+    assert "File permissions" not in result
 
 
 # ── quarantine ─────────────────────────────────────────────────────────
@@ -365,7 +365,7 @@ def test_quarantine_file_moves_and_neutralizes_permissions(make_ctx, tmp_path):
 
 
 def test_quarantine_list_empty(make_ctx):
-    assert "فاضي" in ssp._cmd_quarantine_list(make_ctx("quarantine_list", []))
+    assert "Quarantine is empty" in ssp._cmd_quarantine_list(make_ctx("quarantine_list", []))
 
 
 def test_quarantine_list_shows_entries(make_ctx, tmp_path):
@@ -434,7 +434,7 @@ def test_virus_scan_clean_directory_reports_ok_or_missing_db(make_ctx, tmp_path)
     result = ssp._cmd_virus_scan(make_ctx("virus_scan", [str(tmp_path)]))
     # لو قاعدة الفيروسات مش موجودة في البيئة اللي بيشتغل فيها الاختبار
     # (زي أي بيئة CI بدون freshclam) بيرجع رسالة واضحة، مش استثناء خام.
-    assert result.startswith("✅") or "قاعدة التوقيعات" in result
+    assert result.startswith("✅") or "signature database" in result
 
 
 def _make_custom_hdb_signature(clamav_db_dir, content: bytes, sig_name: str):
@@ -462,7 +462,7 @@ def test_virus_scan_reports_partial_quarantine_honestly(make_ctx, tmp_path, monk
     result = ssp._cmd_virus_scan(make_ctx("virus_scan", [str(tmp_path)]))
     assert "⚠️" in result
     assert "اتنقلوا كلهم" not in result
-    assert "1 بس من 2" in result
+    assert "only 1 of 2 infected files" in result
     assert vanished_path in result
     assert not real_infected.exists()  # اللي كان ملف حقيقي فعلاً اتنقل
 
@@ -479,7 +479,7 @@ def test_virus_scan_reports_all_skipped_when_none_are_real_files(make_ctx, tmp_p
     result = ssp._cmd_virus_scan(make_ctx("virus_scan", [str(tmp_path)]))
     assert "⚠️" in result
     assert "اتنقلوا كلهم" not in result
-    assert "محدش من الـ 1 ملف المصاب اتنقل" in result
+    assert "none of the 1 infected files were quarantined" in result
 
 
 def test_virus_scan_reports_success_when_all_real_files_quarantined(make_ctx, tmp_path, monkeypatch):
@@ -495,7 +495,7 @@ def test_virus_scan_reports_success_when_all_real_files_quarantined(make_ctx, tm
     )
 
     result = ssp._cmd_virus_scan(make_ctx("virus_scan", [str(tmp_path)]))
-    assert "اتنقلوا كلهم للحجر الصحي تلقائيًا (2 ملف)" in result
+    assert "all moved to quarantine automatically (2 files)" in result
     assert "⚠️" not in result
     assert not infected1.exists()
     assert not infected2.exists()
@@ -575,12 +575,12 @@ def test_security_report_missing_path(make_ctx, tmp_path):
 def test_security_report_combines_code_and_vuln_sections(make_ctx, tmp_path):
     (tmp_path / "app.py").write_text('API_KEY = "sk_live_abcdef1234567890"\n')
     result = ssp._cmd_security_report(make_ctx("security_report", [str(tmp_path)]))
-    assert "### فحص كود بايثون" in result
-    assert "### فحص ثغرات" in result
+    assert "### Python code scan" in result
+    assert "### Vulnerability scan" in result
     assert "API_KEY" in result
 
 
 def test_security_report_notes_no_python_files(make_ctx, tmp_path):
     (tmp_path / "readme.txt").write_text("hi")
     result = ssp._cmd_security_report(make_ctx("security_report", [str(tmp_path)]))
-    assert "مفيش ملفات .py" in result
+    assert "no .py files" in result.lower()

@@ -78,15 +78,15 @@ _PLACEHOLDER_VALUE = re.compile(
 )
 
 _DANGEROUS_CALLS = {
-    ("", "eval"): ("critical", "eval() بينفذ أي كود بايثون جاي كنص — لو المصدر مش موثوق ده تنفيذ كود عن بُعد"),
-    ("", "exec"): ("critical", "exec() بينفذ أي كود بايثون جاي كنص — نفس خطورة eval()"),
-    ("os", "system"): ("high", "os.system() بيمرّر الأمر لـ shell مباشرة — استخدم subprocess.run(..., shell=False)"),
-    ("pickle", "load"): ("high", "pickle.load() ممكن ينفذ كود عشوائي وقت فك تسلسل بيانات غير موثوقة"),
-    ("pickle", "loads"): ("high", "pickle.loads() نفس خطورة pickle.load()"),
-    ("marshal", "load"): ("high", "marshal.load() ممكن يسبب سلوك غير آمن مع بيانات غير موثوقة"),
-    ("marshal", "loads"): ("high", "marshal.loads() نفس خطورة marshal.load()"),
-    ("hashlib", "md5"): ("low", "MD5 ضعيف تشفيريًا — متستخدمهوش لباسورد أو توقيع أمني (كويس بس لـ checksum عادي)"),
-    ("hashlib", "sha1"): ("low", "SHA1 ضعيف تشفيريًا — متستخدمهوش لباسورد أو توقيع أمني"),
+    ("", "eval"): ("critical", "eval() executes any Python passed as text — with an untrusted source that is remote code execution"),
+    ("", "exec"): ("critical", "exec() executes any Python passed as text — as dangerous as eval()"),
+    ("os", "system"): ("high", "os.system() hands the command straight to a shell — use subprocess.run(..., shell=False)"),
+    ("pickle", "load"): ("high", "pickle.load() can execute arbitrary code when unpickling untrusted data"),
+    ("pickle", "loads"): ("high", "pickle.loads() is as dangerous as pickle.load()"),
+    ("marshal", "load"): ("high", "marshal.load() is unsafe with untrusted data"),
+    ("marshal", "loads"): ("high", "marshal.loads() is as dangerous as marshal.load()"),
+    ("hashlib", "md5"): ("low", "MD5 is cryptographically weak — never for passwords or signatures (fine for a plain checksum)"),
+    ("hashlib", "sha1"): ("low", "SHA1 is cryptographically weak — never for passwords or signatures"),
 }
 
 
@@ -128,10 +128,10 @@ def _iter_scan_files(root: pathlib.Path, extensions: set[str] | None = None) -> 
 def _oversized_single_file_message(path: pathlib.Path, other_cmd: str) -> str:
     size_mb = path.stat().st_size / (1024 * 1024)
     return (
-        f"⚠️ {path} حجمه {size_mb:.1f}MB — أكبر من الحد الأقصى لفحص المحتوى النصي "
-        f"({MAX_FILE_SIZE_FOR_SCAN // (1024 * 1024)}MB) عشان مانحملوش كامل في الذاكرة.\n"
-        f"لو الملف ده تنفيذي/أرشيف/وسائط، استخدم virus_scan بدل {other_cmd} — "
-        "ClamAV بيفحصه بالستريمنج من غير ما يتحمّل في ذاكرة بايثون خالص."
+        f"⚠️ {path} is {size_mb:.1f}MB — over the limit for scanning text content "
+        f"({MAX_FILE_SIZE_FOR_SCAN // (1024 * 1024)}MB), so it is not loaded whole into memory.\n"
+        f"If it is an executable, archive or media file, use virus_scan instead of {other_cmd} — "
+        "ClamAV streams it without loading it into Python memory at all."
     )
 
 
@@ -191,7 +191,7 @@ class _DangerVisitor(ast.NodeVisitor):
                 if kw.arg == "shell" and isinstance(kw.value, ast.Constant) and kw.value.value is True:
                     self.findings.append((
                         node.lineno, "high", "dangerous-call",
-                        f"{name[0]}.{name[1]}(..., shell=True): تنفيذ عبر shell — خطر command injection لو أي جزء من الأمر جاي من مدخل مستخدم",
+                        f"{name[0]}.{name[1]}(..., shell=True): runs through a shell — command injection risk if any part comes from user input",
                     ))
 
         # yaml.load(x) بدون Loader، أو Loader=yaml.Loader/FullLoader/UnsafeLoader
@@ -200,7 +200,7 @@ class _DangerVisitor(ast.NodeVisitor):
             if loader_kw is None:
                 self.findings.append((
                     node.lineno, "high", "unsafe-deserialization",
-                    "yaml.load() من غير Loader بيقدر ينفذ كود بايثون عشوائي من محتوى YAML غير موثوق — استخدم yaml.safe_load()",
+                    "yaml.load() without a Loader can execute arbitrary Python from untrusted YAML — use yaml.safe_load()",
                 ))
             elif (
                 isinstance(loader_kw.value, ast.Attribute)
@@ -210,7 +210,7 @@ class _DangerVisitor(ast.NodeVisitor):
             ):
                 self.findings.append((
                     node.lineno, "high", "unsafe-deserialization",
-                    f"yaml.load(..., Loader=yaml.{loader_kw.value.attr}) غير آمن — استخدم Loader=yaml.SafeLoader أو yaml.safe_load()",
+                    f"yaml.load(..., Loader=yaml.{loader_kw.value.attr}) is unsafe — use Loader=yaml.SafeLoader or yaml.safe_load()",
                 ))
 
         # .execute(f"..." أو "..." + ...) — بناء SQL بـ string formatting بدل parameterized query
@@ -219,12 +219,12 @@ class _DangerVisitor(ast.NodeVisitor):
             if isinstance(arg, ast.JoinedStr):
                 self.findings.append((
                     node.lineno, "critical", "sql-injection",
-                    ".execute() باستخدام f-string — استخدم placeholders (?) ومرّر القيم كـ parameters لتفادي SQL injection",
+                    ".execute() with an f-string — use placeholders (?) and pass values as parameters to avoid SQL injection",
                 ))
             elif isinstance(arg, ast.BinOp) and isinstance(arg.op, (ast.Add, ast.Mod)):
                 self.findings.append((
                     node.lineno, "critical", "sql-injection",
-                    ".execute() باستخدام + أو % لبناء الاستعلام — استخدم placeholders (?) وparameters بدل string building",
+                    ".execute() building the query with + or % — use placeholders (?) and parameters instead of string building",
                 ))
 
         self.generic_visit(node)
@@ -310,18 +310,18 @@ def _run_bandit(root: pathlib.Path) -> str | None:
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     except subprocess.TimeoutExpired:
-        return "  ⚠️ bandit استغرق وقت أطول من المتوقع (timeout)"
+        return "  ⚠️ bandit took longer than expected (timed out)"
     if proc.returncode not in (0, 1):  # 1 = فيه ملاحظات (متوقع)، أي حاجة تانية خطأ حقيقي
-        return f"  ⚠️ bandit فشل: {proc.stderr.strip()[:300]}"
+        return f"  ⚠️ bandit failed: {proc.stderr.strip()[:300]}"
     try:
         data = json.loads(proc.stdout)
     except json.JSONDecodeError:
-        return "  ⚠️ تعذر تفسير مخرجات bandit"
+        return "  ⚠️ could not parse bandit output"
     results = data.get("results", [])
     if not results:
-        return "  ✅ bandit: مفيش ملاحظات إضافية"
+        return "  ✅ bandit: nothing further to report"
     sev_icon = {"HIGH": "🛑", "MEDIUM": "⚠️", "LOW": "ℹ️"}
-    out = [f"  🔍 bandit: {len(results)} ملاحظة إضافية:"]
+    out = [f"  🔍 bandit: {len(results)} additional findings:"]
     for r in results[:30]:
         icon = sev_icon.get(str(r.get("issue_severity", "")).upper(), "•")
         out.append(
@@ -329,7 +329,7 @@ def _run_bandit(root: pathlib.Path) -> str | None:
             f"[{r.get('test_id')}] {str(r.get('issue_text', '')).strip()}"
         )
     if len(results) > 30:
-        out.append(f"    ... و{len(results) - 30} أخرى")
+        out.append(f"    ... and {len(results) - 30} more")
     return "\n".join(out)
 
 
@@ -348,9 +348,9 @@ def _cmd_code_scan(ctx) -> str:
 
     files = _iter_scan_files(root, {".py"})
     if not files:
-        return f"مفيش ملفات .py في {root}"
+        return f"No .py files in {root}"
 
-    lines = [f"🔎 فحص كود: {len(files)} ملف .py"]
+    lines = [f"🔎 Code scan: {len(files)} .py files"]
     total_findings = 0
     total_fixed = 0
     severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
@@ -359,7 +359,7 @@ def _cmd_code_scan(ctx) -> str:
         try:
             source = f.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as e:
-            lines.append(f"  ⚠️ {f}: تعذرت القراءة ({e})")
+            lines.append(f"  ⚠️ {f}: could not read it ({e})")
             continue
 
         try:
@@ -392,29 +392,29 @@ def _cmd_code_scan(ctx) -> str:
 
         file_findings.sort(key=lambda x: severity_order.get(x[1], 9))
         total_findings += len(file_findings)
-        lines.append(f"  📄 {f} ({len(file_findings)} ملاحظة{'، اتصلح ' + str(fixed_count) + ' منها' if fixed_count else ''}):")
+        lines.append(f"  📄 {f} ({len(file_findings)} findings{', ' + str(fixed_count) + ' fixed' if fixed_count else ''}):")
         icon = {"critical": "🛑", "high": "⚠️", "medium": "🟡", "low": "ℹ️"}
         for ln, sev, _cat, msg in file_findings:
-            lines.append(f"    {icon.get(sev, '•')} سطر {ln} [{sev}] {msg}")
+            lines.append(f"    {icon.get(sev, '•')} line {ln} [{sev}] {msg}")
 
     # len(lines) == 1 يعني مفيش حاجة اتضافت غير سطر العنوان — يعني مفيش
     # syntax errors ولا findings ولا fixes خالص. متعتمدش على total_findings
     # لوحده لأنه بيرجع 0 برضو لو الملف كان فيه مشكلة واحدة بس اتصلحت تلقائيًا
     # (يبقى مفيش findings متبقية، لكن فيه حاجة حصلت فعلاً لازم تتقال).
     if len(lines) == 1:
-        lines = [f"✅ فحصت {len(files)} ملف .py — مفيش ملاحظات أمنية/جودة كود ظاهرة من الفحص الأساسي"]
+        lines = [f"✅ scanned {len(files)} .py files — the base scan found no security or quality issues"]
     else:
-        summary = f"لقيت {total_findings} ملاحظة" if total_findings else "مفيش ملاحظات متبقية"
+        summary = f"found {total_findings} issues" if total_findings else "no issues left"
         if total_fixed:
-            summary += f" — اتصلح {total_fixed} تلقائيًا (yaml.load→safe_load)"
+            summary += f" — {total_fixed} fixed automatically (yaml.load→safe_load)"
         lines.insert(1, summary)
 
     lines.append(
-        "\n🔍 فحص إضافي بـ bandit (تغطية أوسع: assert بكود إنتاجي، "
-        "tarfile.extractall غير آمن، XML/SSL ضعيف، إلخ):"
+        "\n🔍 Extra pass with bandit (wider coverage: assert in production code, "
+        "unsafe tarfile.extractall, weak XML/SSL, and so on):"
     )
     bandit_result = _run_bandit(root)
-    lines.append(bandit_result if bandit_result else "  ℹ️ bandit مش متثبت — نزّله بـ: pip install bandit (مجاني ومفتوح المصدر)")
+    lines.append(bandit_result if bandit_result else "  ℹ️ bandit is not installed — pip install bandit (free and open source)")
 
     return "\n".join(lines)
 
@@ -427,16 +427,16 @@ def _run_pip_audit(req_file: pathlib.Path) -> str | None:
         capture_output=True, text=True, timeout=120,
     )
     if proc.returncode not in (0, 1):  # 1 = فيه ثغرات (متوقع)، أي حاجة تانية خطأ حقيقي
-        return f"  ⚠️ pip-audit فشل: {proc.stderr.strip()[:300]}"
+        return f"  ⚠️ pip-audit failed: {proc.stderr.strip()[:300]}"
     try:
         data = json.loads(proc.stdout)
     except json.JSONDecodeError:
-        return "  ⚠️ تعذر تفسير مخرجات pip-audit"
+        return "  ⚠️ could not parse pip-audit output"
     deps = data.get("dependencies", data if isinstance(data, list) else [])
     vulnerable = [d for d in deps if d.get("vulns")]
     if not vulnerable:
-        return "  ✅ pip-audit: مفيش ثغرات معروفة في المكتبات"
-    out = [f"  🛑 pip-audit: {len(vulnerable)} مكتبة فيها ثغرات معروفة:"]
+        return "  ✅ pip-audit: no known vulnerabilities in your dependencies"
+    out = [f"  🛑 pip-audit: {len(vulnerable)} dependencies with known vulnerabilities:"]
     for d in vulnerable[:20]:
         vuln_ids = ", ".join(v.get("id", "?") for v in d.get("vulns", [])[:5])
         out.append(f"    - {d.get('name')} {d.get('version')}: {vuln_ids}")
@@ -452,13 +452,13 @@ def _run_npm_audit(pkg_dir: pathlib.Path) -> str | None:
     try:
         data = json.loads(proc.stdout)
     except json.JSONDecodeError:
-        return "  ⚠️ تعذر تفسير مخرجات npm audit"
+        return "  ⚠️ could not parse npm audit output"
     meta = data.get("metadata", {}).get("vulnerabilities", {})
     total = sum(meta.get(k, 0) for k in ("critical", "high", "moderate", "low"))
     if total == 0:
-        return "  ✅ npm audit: مفيش ثغرات معروفة في الحزم"
+        return "  ✅ npm audit: no known vulnerabilities in your packages"
     parts = ", ".join(f"{k}: {meta[k]}" for k in ("critical", "high", "moderate", "low") if meta.get(k))
-    return f"  🛑 npm audit: {total} ثغرة معروفة ({parts})"
+    return f"  🛑 npm audit: {total} known vulnerabilities ({parts})"
 
 
 def _cmd_vuln_scan(ctx) -> str:
@@ -468,11 +468,11 @@ def _cmd_vuln_scan(ctx) -> str:
     if not root.exists():
         return f"❌ path not found: {root}"
 
-    lines = [f"🛡️ فحص ثغرات: {root}"]
+    lines = [f"🛡️ Vulnerability scan: {root}"]
 
     skipped_for_size = root.is_file() and root.stat().st_size > MAX_FILE_SIZE_FOR_SCAN
     if skipped_for_size:
-        lines.append(f"\n📌 أسرار مكشوفة:\n  {_oversized_single_file_message(root, 'vuln_scan')}")
+        lines.append(f"\n📌 Exposed secrets:\n  {_oversized_single_file_message(root, 'vuln_scan')}")
     else:
         _unquoted_exts = {".env", ".ini", ".cfg", ".conf", ".properties"}
         files = _iter_scan_files(root, _TEXT_EXTENSIONS)
@@ -486,33 +486,33 @@ def _cmd_vuln_scan(ctx) -> str:
             for ln, label, snippet in _scan_secrets_text(text, allow_unquoted=allow_unquoted):
                 secret_hits.append((f, ln, label, snippet))
 
-        lines.append(f"\n📌 أسرار مكشوفة ({len(files)} ملف اتفحص):")
+        lines.append(f"\n📌 Exposed secrets ({len(files)} files scanned):")
         if secret_hits:
             for f, ln, label, snippet in secret_hits[:50]:
                 lines.append(f"  🛑 {f}:{ln} [{label}] {snippet}")
             if len(secret_hits) > 50:
-                lines.append(f"  ... و{len(secret_hits) - 50} أخرى")
+                lines.append(f"  ... and {len(secret_hits) - 50} more")
         else:
-            lines.append("  ✅ مفيش")
+            lines.append("  ✅ none")
 
-    lines.append("\n📦 ثغرات مكتبات معروفة:")
+    lines.append("\n📦 Known dependency vulnerabilities:")
     dep_reports = []
     req_file = root / "requirements.txt" if root.is_dir() else (root if root.name == "requirements.txt" else None)
     if req_file and req_file.is_file():
         result = _run_pip_audit(req_file)
-        dep_reports.append(result if result else "  ℹ️ pip-audit مش متثبت — نزّله بـ: pip install pip-audit (مجاني ومفتوح المصدر)")
+        dep_reports.append(result if result else "  ℹ️ pip-audit is not installed — pip install pip-audit (free and open source)")
     pkg_dir = root if root.is_dir() and (root / "package.json").is_file() else None
     if pkg_dir:
         result = _run_npm_audit(pkg_dir)
-        dep_reports.append(result if result else "  ℹ️ npm مش متاح لفحص package.json")
+        dep_reports.append(result if result else "  ℹ️ npm is not available to check package.json")
     if not dep_reports:
-        dep_reports.append("  ℹ️ مفيش requirements.txt ولا package.json في المسار ده")
+        dep_reports.append("  ℹ️ no requirements.txt or package.json at this path")
     lines.extend(dep_reports)
 
     if root.is_dir():
         perms_cmd = ctx.engine.registry.get("file_perms") if ctx.engine else None
         if perms_cmd:
-            lines.append("\n🔐 صلاحيات ملفات:")
+            lines.append("\n🔐 File permissions:")
             perms_result = perms_cmd.handler(_SubCtx(f"file_perms {root}", [str(root)], ctx.engine))
             lines.append("  " + perms_result.replace("\n", "\n  "))
 
@@ -587,41 +587,41 @@ def _quarantine_move(path: pathlib.Path, reason: str) -> dict:
 
 def _cmd_quarantine_file(ctx) -> str:
     if not ctx.args:
-        return "usage: quarantine_file <path> [سبب]"
+        return "usage: quarantine_file <path> [reason]"
     path = pathlib.Path(ctx.args[0])
     if not path.is_file():
         return f"❌ file not found: {path}"
-    reason = " ".join(ctx.args[1:]) or "quarantine يدوي"
+    reason = " ".join(ctx.args[1:]) or "quarantined by hand"
     entry = _quarantine_move(path, reason)
-    return f"🔒 اتنقل للحجر الصحي: {entry['id']}\nالمسار الأصلي: {entry['original_path']}\nلاستعادته: quarantine_restore {entry['id']}"
+    return f"🔒 moved to quarantine: {entry['id']}\nOriginal path: {entry['original_path']}\nTo restore it: quarantine_restore {entry['id']}"
 
 
 def _cmd_quarantine_list(ctx) -> str:
     manifest = _load_manifest()
     if not manifest:
-        return "الحجر الصحي فاضي"
-    lines = [f"🔒 {len(manifest)} ملف في الحجر الصحي:"]
+        return "Quarantine is empty"
+    lines = [f"🔒 {len(manifest)} files in quarantine:"]
     for e in manifest:
-        lines.append(f"  {e['id']} — أصله: {e['original_path']} — {e['quarantined_at']} — {e['reason']}")
+        lines.append(f"  {e['id']} — from: {e['original_path']} — {e['quarantined_at']} — {e['reason']}")
     return "\n".join(lines)
 
 
 def _cmd_quarantine_restore(ctx) -> str:
     if not ctx.args:
-        return "usage: quarantine_restore <id> [مسار_بديل]"
+        return "usage: quarantine_restore <id> [destination]"
     qid = ctx.args[0]
     manifest = _load_manifest()
     entry = next((e for e in manifest if e["id"] == qid), None)
     if entry is None:
-        return f"❌ مفيش عنصر بالـ id ده في الحجر الصحي: {qid}"
+        return f"❌ nothing in quarantine with that id: {qid}"
 
     dest = pathlib.Path(ctx.args[1]) if len(ctx.args) > 1 else pathlib.Path(entry["original_path"])
     if dest.exists():
-        return f"❌ في ملف موجود بالفعل في {dest} — حدد مسار بديل: quarantine_restore {qid} <مسار_تاني>"
+        return f"❌ a file already exists at {dest} — give another path: quarantine_restore {qid} <other_path>"
 
     src = _quarantine_dir() / qid
     if not src.is_file():
-        return f"❌ ملف الحجر الصحي نفسه مش موجود: {src} (ممكن اتشال يدويًا؟)"
+        return f"❌ the quarantined file itself is missing: {src} (removed by hand?)"
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(src), str(dest))
@@ -631,7 +631,7 @@ def _cmd_quarantine_restore(ctx) -> str:
         pass
     manifest = [e for e in manifest if e["id"] != qid]
     _save_manifest(manifest)
-    return f"✅ اتستعاد لـ {dest}\n⚠️ ده كان في الحجر الصحي بسبب: {entry['reason']} — راجعه قبل ما تشغّله"
+    return f"✅ restored to {dest}\n⚠️ it was quarantined because: {entry['reason']} — check it before running it"
 
 
 _CLAM_SUMMARY_RE = re.compile(r"^(.+?): (.+) FOUND$", re.MULTILINE)
@@ -651,10 +651,10 @@ def _cmd_virus_scan(ctx) -> str:
     clamscan = shutil.which("clamscan") or shutil.which("clamdscan")
     if not clamscan:
         return (
-            "❌ ClamAV مش متثبت — الفحص ده مش سقالة ذكاء اصطناعي مؤلَّفة، ده بيحتاج محرك antivirus "
-            "حقيقي بقاعدة توقيعات محدَّثة (زي أي أداة أمان جادة). نزّله (مجاني ومفتوح المصدر بالكامل):\n"
+            "❌ ClamAV is not installed — this is not an AI-invented scaffold, it needs a real antivirus "
+            "engine with an up-to-date signature database, like any serious security tool. Install it (entirely free and open source):\n"
             "  https://www.clamav.org/downloads\n"
-            "بعد التثبيت شغّل freshclam مرة عشان يحمّل قاعدة الفيروسات، وبعدين جرب virus_scan تاني."
+            "After installing, run freshclam once to fetch the virus database, then try virus_scan again."
         )
 
     try:
@@ -663,21 +663,21 @@ def _cmd_virus_scan(ctx) -> str:
             capture_output=True, text=True, timeout=600,
         )
     except subprocess.TimeoutExpired:
-        return "❌ الفحص أخد وقت أطول من اللازم (10 دقايق) — جرب على مسار أصغر"
+        return "❌ the scan took too long (10 minutes) — try a smaller path"
 
     if proc.returncode == 2:
         return (
-            f"❌ ClamAV اتلاقى بس قاعدة التوقيعات مش موجودة أو فيها مشكلة:\n{proc.stderr.strip() or proc.stdout.strip()}\n"
-            "شغّل freshclam عشان تحمّل/تحدّث قاعدة الفيروسات."
+            f"❌ ClamAV was found but its signature database is missing or broken:\n{proc.stderr.strip() or proc.stdout.strip()}\n"
+            "Run freshclam to fetch or update the virus database."
         )
     if proc.returncode not in (0, 1):
-        return f"❌ clamscan رجّع خطأ غير متوقع (كود {proc.returncode}):\n{proc.stdout}\n{proc.stderr}"
+        return f"❌ clamscan returned an unexpected error (exit {proc.returncode}):\n{proc.stdout}\n{proc.stderr}"
 
     infected = _CLAM_SUMMARY_RE.findall(proc.stdout)
     if not infected:
-        return f"✅ فحص فيروسات عميق على {root} — مفيش إصابات (PUA/spyware/archives متضمّنة في الفحص)"
+        return f"✅ deep virus scan of {root} — no infections (PUA, spyware and archives were all included)"
 
-    lines = [f"🛑 لقيت {len(infected)} ملف مصاب في {root}:"]
+    lines = [f"🛑 found {len(infected)} infected files in {root}:"]
     quarantined = []
     skipped = []
     for file_path, signature in infected:
@@ -696,20 +696,20 @@ def _cmd_virus_scan(ctx) -> str:
     # والنقل)، لازم المستخدم يعرف إنه لسه في مكانه بدل ما نديله إحساس
     # أمان زايف إن كل حاجة اتحجرت.
     if no_quarantine:
-        lines.append("\n(--no-quarantine: الملفات اتسابت في مكانها من غير ما تتلمس)")
+        lines.append("\n(--no-quarantine: the files were left exactly where they are, untouched)")
     elif quarantined and not skipped:
-        lines.append(f"\n🔒 اتنقلوا كلهم للحجر الصحي تلقائيًا ({len(quarantined)} ملف) — ماتم مسحهم ولا 'تنظيفهم' في مكانهم")
-        lines.append("عشان أي محاولة 'تنظيف' فيروس مع ضمان إن الملف يفضل شغال زي الأول مش حاجة أي أداة أمان بتضمنها فعليًا.")
-        lines.append("للاستعادة (لو false positive): quarantine_restore <id> — شوف quarantine_list")
+        lines.append(f"\n🔒 all moved to quarantine automatically ({len(quarantined)} files) — not deleted, and not 'cleaned' in place")
+        lines.append("because no security tool can honestly promise that 'cleaning' an infected file leaves it working as before.")
+        lines.append("To restore one (if it is a false positive): quarantine_restore <id> — see quarantine_list")
     else:
         if quarantined:
-            lines.append(f"\n⚠️ اتنقل {len(quarantined)} بس من {len(infected)} ملف مصاب للحجر الصحي — الباقي فضل في مكانه من غير ما يتلمس:")
+            lines.append(f"\n⚠️ only {len(quarantined)} of {len(infected)} infected files were quarantined — the rest were left untouched:")
         else:
-            lines.append(f"\n⚠️ محدش من الـ {len(infected)} ملف المصاب اتنقل للحجر الصحي — كلهم فضلوا في مكانهم من غير ما يتلمسوا:")
+            lines.append(f"\n⚠️ none of the {len(infected)} infected files were quarantined — all were left untouched:")
         for sp in skipped:
-            lines.append(f"    • {sp} (مش ملف حقيقي على القرص — يمكن عنصر جوه أرشيف)")
+            lines.append(f"    • {sp} (not a real file on disk — possibly an entry inside an archive)")
         if quarantined:
-            lines.append("للاستعادة (لو false positive): quarantine_restore <id> — شوف quarantine_list")
+            lines.append("To restore one (if it is a false positive): quarantine_restore <id> — see quarantine_list")
 
     return "\n".join(lines)
 
@@ -721,23 +721,23 @@ def _cmd_security_report(ctx) -> str:
     if not root.exists():
         return f"❌ path not found: {root}"
 
-    sections = [f"📋 تقرير أمان شامل: {root}", "=" * 50]
+    sections = [f"📋 Full security report: {root}", "=" * 50]
 
     py_files = _iter_scan_files(root, {".py"})
     if py_files:
-        sections.append("\n### فحص كود بايثون (code_scan) ###")
+        sections.append("\n### Python code scan (code_scan) ###")
         sections.append(_cmd_code_scan(_SubCtx(f"code_scan {root}", [str(root)], ctx.engine)))
     else:
-        sections.append("\n### فحص كود بايثون ### \n(مفيش ملفات .py)")
+        sections.append("\n### Python code scan ### \n(no .py files)")
 
-    sections.append("\n### فحص ثغرات (vuln_scan) ###")
+    sections.append("\n### Vulnerability scan (vuln_scan) ###")
     sections.append(_cmd_vuln_scan(_SubCtx(f"vuln_scan {root}", [str(root)], ctx.engine)))
 
     if shutil.which("clamscan") or shutil.which("clamdscan"):
-        sections.append("\n### فحص فيروسات (virus_scan) ###")
+        sections.append("\n### Virus scan (virus_scan) ###")
         sections.append(_cmd_virus_scan(_SubCtx(f"virus_scan {root}", [str(root)], ctx.engine)))
     else:
-        sections.append("\n### فحص فيروسات ### \n(ClamAV مش متثبت — شغّل virus_scan لوحده عشان تفاصيل التثبيت)")
+        sections.append("\n### Virus scan ### \n(ClamAV is not installed — run virus_scan on its own for install details)")
 
     return "\n".join(sections)
 
