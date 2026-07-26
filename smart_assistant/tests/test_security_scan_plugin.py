@@ -584,3 +584,179 @@ def test_security_report_notes_no_python_files(make_ctx, tmp_path):
     (tmp_path / "readme.txt").write_text("hi")
     result = ssp._cmd_security_report(make_ctx("security_report", [str(tmp_path)]))
     assert "no .py files" in result.lower()
+
+
+# ── YARA: مطابقة أنماط ────────────────────────────────────────────────
+
+requires_yara = pytest.mark.skipif(not ssp._HAS_YARA, reason="yara-python not installed")
+
+
+@pytest.fixture
+def eicar_rule(tmp_path_factory):
+    """قاعدة تجريبية بتطابق نص عادي — مش لازم عيّنة فيروس حقيقية
+    عشان نختبر السلوك، الشرط أي نمط ثابت. برّه tmp_path عن قصد —
+    وإلا سكان مجلد يشمل ملف القاعدة نفسه وهو بيحتوي على نص القاعدة
+    اللي بيطابق نفسه."""
+    p = tmp_path_factory.mktemp("rules") / "test.yar"
+    p.write_text(
+        'rule Suspicious_String {\n'
+        '    strings:\n'
+        '        $a = "definitely_suspicious_marker"\n'
+        '    condition:\n'
+        '        $a\n'
+        '}\n',
+        encoding="utf-8",
+    )
+    return p
+
+
+@pytest.fixture
+def rules_dir(tmp_path_factory):
+    """برّه tmp_path عن قصد — نفس سبب eicar_rule بالظبط."""
+    d = tmp_path_factory.mktemp("ruleset")
+    (d / "a.yar").write_text(
+        'rule A { strings: $x = "marker_a" condition: $x }\n', encoding="utf-8"
+    )
+    (d / "b.yara").write_text(
+        'rule B { strings: $y = "marker_b" condition: $y }\n', encoding="utf-8"
+    )
+    return d
+
+
+def test_yara_scan_needs_two_args(make_ctx):
+    result = ssp._cmd_yara_scan(make_ctx("yara_scan", []))
+    assert result.startswith("usage")
+
+
+def test_yara_scan_missing_target(make_ctx, eicar_rule, tmp_path):
+    result = ssp._cmd_yara_scan(make_ctx(
+        "yara_scan", [str(tmp_path / "nope"), str(eicar_rule)]
+    ))
+    assert result.startswith("❌ path not found")
+
+
+@requires_yara
+def test_yara_scan_missing_rules(make_ctx, tmp_path):
+    target = tmp_path / "f.txt"
+    target.write_text("hi", encoding="utf-8")
+    result = ssp._cmd_yara_scan(make_ctx(
+        "yara_scan", [str(target), str(tmp_path / "no_rules.yar")]
+    ))
+    assert "rules path not found" in result
+
+
+@requires_yara
+def test_yara_scan_reports_no_matches_on_clean_file(make_ctx, tmp_path, eicar_rule):
+    target = tmp_path / "clean.txt"
+    target.write_text("nothing interesting here", encoding="utf-8")
+    result = ssp._cmd_yara_scan(make_ctx("yara_scan", [str(target), str(eicar_rule)]))
+    assert result.startswith("✅")
+    assert "no rule matches" in result
+
+
+@requires_yara
+def test_yara_scan_finds_a_real_match(make_ctx, tmp_path, eicar_rule):
+    target = tmp_path / "hit.txt"
+    target.write_text("some text with definitely_suspicious_marker inside", encoding="utf-8")
+    result = ssp._cmd_yara_scan(make_ctx("yara_scan", [str(target), str(eicar_rule)]))
+    assert result.startswith("🎯 1 rule matches")
+    assert "Suspicious_String" in result
+    assert "$a" in result
+
+
+@requires_yara
+def test_yara_scan_does_not_quarantine(make_ctx, tmp_path, eicar_rule):
+    """راجع أساسي: YARA بيبلّغ بس — قواعد عامة بتجيب false positives
+    أكتر من ClamAV، فمينفعش يحجر تلقائي زي virus_scan."""
+    target = tmp_path / "hit.txt"
+    target.write_text("definitely_suspicious_marker", encoding="utf-8")
+    ssp._cmd_yara_scan(make_ctx("yara_scan", [str(target), str(eicar_rule)]))
+    assert target.is_file()
+    assert ssp._cmd_quarantine_list(make_ctx("quarantine_list", [])) == "Quarantine is empty"
+
+
+@requires_yara
+def test_yara_scan_says_a_match_is_not_a_verdict(make_ctx, tmp_path, eicar_rule):
+    target = tmp_path / "hit.txt"
+    target.write_text("definitely_suspicious_marker", encoding="utf-8")
+    result = ssp._cmd_yara_scan(make_ctx("yara_scan", [str(target), str(eicar_rule)]))
+    assert "not a verdict" in result
+
+
+@requires_yara
+def test_yara_scan_walks_a_directory(make_ctx, tmp_path, eicar_rule):
+    (tmp_path / "a.txt").write_text("definitely_suspicious_marker", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("clean", encoding="utf-8")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "c.txt").write_text("definitely_suspicious_marker", encoding="utf-8")
+    result = ssp._cmd_yara_scan(make_ctx("yara_scan", [str(tmp_path), str(eicar_rule)]))
+    assert result.startswith("🎯 2 rule matches")
+
+
+@requires_yara
+def test_yara_scan_accepts_a_directory_of_rules(make_ctx, tmp_path, rules_dir):
+    (tmp_path / "a.txt").write_text("marker_a", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("marker_b", encoding="utf-8")
+    (tmp_path / "c.txt").write_text("nothing", encoding="utf-8")
+    result = ssp._cmd_yara_scan(make_ctx("yara_scan", [str(tmp_path), str(rules_dir)]))
+    assert "A" in result and "B" in result
+    assert result.startswith("🎯 2 rule matches")
+
+
+@requires_yara
+def test_yara_scan_reports_a_broken_rule_file(make_ctx, tmp_path):
+    bad = tmp_path / "broken.yar"
+    bad.write_text("rule Broken { condition: this is not valid yara }", encoding="utf-8")
+    target = tmp_path / "f.txt"
+    target.write_text("x", encoding="utf-8")
+    result = ssp._cmd_yara_scan(make_ctx("yara_scan", [str(target), str(bad)]))
+    assert result.startswith("❌")
+    assert "compile" in result
+
+
+def test_yara_scan_missing_package_is_reported(make_ctx, tmp_path, monkeypatch):
+    monkeypatch.setattr(ssp, "_HAS_YARA", False)
+    target = tmp_path / "f.txt"
+    target.write_text("x", encoding="utf-8")
+    rules = tmp_path / "r.yar"
+    rules.write_text("rule R { condition: true }", encoding="utf-8")
+    result = ssp._cmd_yara_scan(make_ctx("yara_scan", [str(target), str(rules)]))
+    assert "pip install yara-python" in result
+
+
+@requires_yara
+def test_yara_scan_caps_the_number_of_files(make_ctx, tmp_path, eicar_rule, monkeypatch):
+    monkeypatch.setattr(ssp, "_YARA_MAX_FILES", 2)
+    for i in range(5):
+        (tmp_path / f"f{i}.txt").write_text("clean", encoding="utf-8")
+    result = ssp._cmd_yara_scan(make_ctx("yara_scan", [str(tmp_path), str(eicar_rule)]))
+    assert "scanned 2 files" in result
+    assert "capped at 2" in result
+
+
+@requires_yara
+def test_yara_scan_skips_oversized_files(make_ctx, tmp_path, eicar_rule, monkeypatch):
+    monkeypatch.setattr(ssp, "_YARA_MAX_FILE_SIZE", 10)
+    (tmp_path / "big.txt").write_text("definitely_suspicious_marker" * 5, encoding="utf-8")
+    result = ssp._cmd_yara_scan(make_ctx("yara_scan", [str(tmp_path), str(eicar_rule)]))
+    assert result.startswith("✅ scanned 0 files")
+
+
+def test_yara_rules_status_reports_missing(make_ctx, monkeypatch):
+    monkeypatch.setattr(ssp, "_HAS_YARA", False)
+    result = ssp._cmd_yara_rules_status(make_ctx("yara_rules_status", []))
+    assert "❌" in result
+    assert "pip install yara-python" in result
+
+
+@requires_yara
+def test_yara_rules_status_reports_available(make_ctx):
+    result = ssp._cmd_yara_rules_status(make_ctx("yara_rules_status", []))
+    assert "✅ yara-python" in result
+    assert "Yara-Rules/rules" in result
+
+
+def test_register_adds_yara_commands(bare_engine):
+    ssp.register(bare_engine)
+    assert bare_engine.registry.get("yara_scan") is not None
+    assert bare_engine.registry.get("yara_rules_status") is not None

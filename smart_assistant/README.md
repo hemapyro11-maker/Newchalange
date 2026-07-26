@@ -815,7 +815,22 @@ Ghidra/radare2). كل النتائج اتقارنت واتأكد إنها مطا
   إدارة الحجر الصحي يدويًا: نقل أي ملف مشبوه بنفسك، عرض كل حاجة فيه،
   أو استعادة ملف (لو false positive) — بيرفض يكتب فوق ملف موجود بالفعل
   في مكان الاستعادة عشان محدش يفقد بيانات بالغلط.
-- **`security_report <path>`** — تقرير واحد بيجمع الثلاثة كلهم.
+- **`yara_scan <path> <rules_file_or_dir>`** — مطابقة أنماط عبر
+  [YARA](https://virustotal.github.io/yara/) (نفس محرك VirusTotal،
+  `pip install yara-python`). **مكمّل لـ virus_scan مش بديل**: ClamAV
+  بيطابق قاعدة توقيعات فيروسات معروفة ومُدارة، وYARA بيطابق قواعد
+  نمطية إنت بتحددها (تصنيف عائلة malware، كشف packer، مؤشرات اختراق).
+  عشان كده الفرق مهم في السلوك: مطابقة YARA **بلاغ للمراجعة بس، مش
+  حكم نهائي** — قواعد عامة بتجيب false positives أكتر من توقيعات
+  ClamAV المُنسّقة، فـ `yara_scan` **مبيحجرش** الملفات تلقائيًا زي
+  `virus_scan`. YARA مش بيجيب قواعد جاهزة معاه؛ `yara_rules_status`
+  بيوريك حالة التثبيت ورابط مجموعة عامة موثوقة ومجانية (GPL-2.0):
+  [Yara-Rules/rules](https://github.com/Yara-Rules/rules). اتجرب
+  فعليًا: قاعدة تجريبية اتطابقت على ملف حقيقي، وملف مش مطابق رجّع
+  "no rule matches" بدل ما يتحجر غلط.
+- **`security_report <path>`** — تقرير واحد بيجمع code_scan وvuln_scan
+  وvirus_scan. `yara_scan` مش متضمّن فيه — محتاج مسار قواعد ملوش
+  افتراضي، فمينفعش يتشغّل أوتوماتيك زي الباقي.
 
 ## تطوير متعدد المجالات (Desktop / Web / Mobile / Games / Data / AI / أمان / أفلام...)
 
@@ -834,7 +849,7 @@ Ghidra/radare2). كل النتائج اتقارنت واتأكد إنها مطا
 | Data Scientist | `csv_describe`, `csv_plot`, `csv_correlate` | ✅ اتجرب على بيانات حقيقية (إحصائيات، رسومات، correlation) |
 | AI/ML Engineer | `scaffold ml <name>` | ✅ **اتجرب فعلياً** — درّب نموذج حقيقي بدقة 100% على بيانات اختبار |
 | Systems/Embedded Developer | `scaffold embedded <name>` | ✅ بنية HAL حقيقية (`blink.c` منفصل عن الهاردوير) — **اتجرب فعلياً**: `make check` (compile) و`make test` (منطق الـ blink شغال ومُختبر على الـ host) |
-| Cybersecurity/Pentest | `hash_file`, `port_scan`, `tls_check`, `file_perms`, `code_scan`, `vuln_scan`, `virus_scan`, `security_report`, `re_plugin`/`inspect_plugin` | ✅ اتجرب فعلياً: شهادة self-signed، صلاحيات SUID/world-writable، كشف eval/shell=True/SQLi/أسرار حقيقية، وكشف+حجر صحي فعلي لملف مصاب عبر ClamAV (بتوقيع اختباري مخصص) |
+| Cybersecurity/Pentest | `hash_file`, `port_scan`, `tls_check`, `file_perms`, `code_scan`, `vuln_scan`, `virus_scan`, `yara_scan`, `security_report`, `re_plugin`/`inspect_plugin` | ✅ اتجرب فعلياً: شهادة self-signed، صلاحيات SUID/world-writable، كشف eval/shell=True/SQLi/أسرار حقيقية، كشف+حجر صحي فعلي لملف مصاب عبر ClamAV (بتوقيع اختباري مخصص)، ومطابقة YARA حقيقية (محرك VirusTotal) بدون حجر تلقائي |
 | Cloud/DevOps Engineer | `scaffold docker <name>` (multi-stage, non-root, HEALTHCHECK), `scaffold ci <name>` (lint→test matrix→build) | ✅ Dockerfile اتفحص بـ `docker build`، YAML اتأكد بـ `yaml.safe_load` |
 | Database Engineer | `db_schema`, `db_query`, `db_export_csv`, `db_migration_status`, `db_migrate`, `db_indexes` | ✅ SQLite حقيقي؛ هجرات اتجربت فعلياً (نجاح/توقف عند خطأ/رفض tampering)، وكشف foreign key من غير index |
 | Blockchain Developer | `scaffold blockchain <name>` | ✅ عقد Solidity + Hardhat toolbox test حقيقي (deploy/تعديل/owner guard) — **اتجرب فعلياً**: العقد اتترجم بـ solc لـ bytecode حقيقي |
@@ -911,6 +926,16 @@ Ghidra/radare2). كل النتائج اتقارنت واتأكد إنها مطا
   GitHub). بيشتغل عبر Vulkan (أي GPU بيدعمه، مش NVIDIA بس)، لكن
   **بطيء جدًا من غير GPU حقيقي** (اتجرب فعليًا). `upscale_video` بيقص
   الفيديو لفريمات، يكبّر كل واحد، ويجمّعهم تاني مع الصوت الأصلي.
+- **`generate_subtitles <video> <out.srt|out.vtt> [model=base]
+  [lang=auto]`** — ترجمة نصية حقيقية بتوقيت لكل جملة، عبر
+  faster-whisper (نفس المكتبة اللي `listen` بتستخدمها للاستماع —
+  **مش دبندنسي جديد**). الفرق عن `listen`: `listen` بيرجّع النص
+  المجمّع بس، وده بيحتاج توقيت `start`/`end` لكل جملة عشان يبني ملف
+  ترجمة صحيح — فمساره منفصل. بيدعم `.srt` و`.vtt`.
+- **`burn_subtitles <video> <subs.srt> <out.mp4>`** — حرق الترجمة
+  جوه الفيديو (hardcoded) عبر فلتر `subtitles` بتاع FFmpeg (libass) —
+  اتجرب فعليًا وبينتج فيديو حقيقي. المسار بيتهرّب قبل ما يتحط في
+  الفلتر (مسار فيه `:` زي `C:\...` كان هيبوّظ الفلتر من غيرها).
 
 **بصراحة كاملة:** الأدوات دي بتديك نفس المحرك التقني اللي أفلام
 هوليوود بتتمنتج بيه (FFmpeg نفسه بيتستخدم في استوديوهات حقيقية) —

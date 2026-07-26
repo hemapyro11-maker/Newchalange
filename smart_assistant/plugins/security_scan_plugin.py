@@ -12,8 +12,19 @@ code_scan كمان بيشغّل bandit (لو متثبت) كفحص إضافي ا�
 غير آمن، XML/SSL ضعيف، إلخ) من غير ما يبقى معتمد عليه، لأنه مش متضمّن
 في requirements.txt الأساسي (اختياري: pip install bandit).
 
-الأوامر: code_scan, vuln_scan, virus_scan, quarantine_file,
-quarantine_list, quarantine_restore, security_report
+و`yara_scan` — مطابقة أنماط عبر YARA (محرك VirusTotal نفسه، مفتوح
+المصدر، `pip install yara-python`). ده **مكمّل** لـ virus_scan مش
+بديل: ClamAV بيطابق قاعدة توقيعات فيروسات معروفة ومُدارة، وYARA
+بيطابق قواعد نمطية بتحددها إنت (family classification، packer
+detection، indicators of compromise). عشان كده الفرق مهم في السلوك:
+مطابقة YARA **بلاغ للمراجعة بس، مش حكم نهائي** — قواعد عامة بتجيب
+false positives أكتر من توقيعات ClamAV المُنسّقة، فـ yara_scan
+**مبيحجرش** الملفات تلقائيًا زي virus_scan. YARA مش بيجيب قواعد
+جاهزة معاه؛ مجموعة عامة موثوقة ومجانية (GPL-2.0):
+https://github.com/Yara-Rules/rules
+
+الأوامر: code_scan, vuln_scan, virus_scan, yara_scan, yara_rules_status,
+quarantine_file, quarantine_list, quarantine_restore, security_report
 """
 from __future__ import annotations
 
@@ -27,6 +38,12 @@ import shutil
 import stat
 import subprocess
 import sys
+
+try:
+    import yara
+    _HAS_YARA = True
+except ImportError:
+    _HAS_YARA = False
 
 MAX_SCAN_FILES = 2000
 MAX_FILE_SIZE_FOR_SCAN = 5 * 1024 * 1024  # 5MB — ملفات نصية أكبر من كده نادراً ما تكون كود/كونفيج حقيقي
@@ -742,10 +759,119 @@ def _cmd_security_report(ctx) -> str:
     return "\n".join(sections)
 
 
+# ── YARA: مطابقة أنماط (مكمّل لـ ClamAV، مش بديل) ────────────────────
+_YARA_MAX_FILES = 500
+# ملفات أكبر من كده بتتخطى — YARA بتحمّل الملف كامل في الذاكرة، فحجم
+# غير محدود على ملف واحد ممكن يوقف الفحص كله.
+_YARA_MAX_FILE_SIZE = 200 * 1024 * 1024
+
+
+def _compile_yara_rules(rules_path: pathlib.Path):
+    """بيرجع (rules متجمّعة، رسالة خطأ). بيقبل ملف .yar واحد أو مجلد
+    فيه كذا ملف قاعدة."""
+    if rules_path.is_file():
+        sources = {rules_path.stem: str(rules_path)}
+    elif rules_path.is_dir():
+        files = sorted(rules_path.rglob("*.yar")) + sorted(rules_path.rglob("*.yara"))
+        if not files:
+            return None, f"no .yar/.yara files found in {rules_path}"
+        # yara.compile محتاج مفاتيح فريدة لكل ملف — المسار النسبي
+        # بيضمن كده حتى لو فيه ملفين بنفس الاسم في مجلدات فرعية مختلفة.
+        sources = {
+            str(f.relative_to(rules_path)).replace("/", "_").replace("\\", "_"): str(f)
+            for f in files
+        }
+    else:
+        return None, f"rules path not found: {rules_path}"
+    try:
+        return yara.compile(filepaths=sources), None
+    except yara.Error as e:
+        return None, f"could not compile the rules: {e}"
+
+
+def _cmd_yara_scan(ctx) -> str:
+    if len(ctx.args) < 2:
+        return "usage: yara_scan <path> <rules_file_or_dir>"
+    if not _HAS_YARA:
+        return (
+            "❌ yara-python is not installed — pip install yara-python "
+            "(free and open source; the same engine VirusTotal uses)"
+        )
+    target = pathlib.Path(ctx.args[0])
+    rules_path = pathlib.Path(ctx.args[1])
+    if not target.exists():
+        return f"❌ path not found: {target}"
+
+    compiled, err = _compile_yara_rules(rules_path)
+    if err:
+        return f"❌ {err}"
+
+    if target.is_file():
+        files = [target]
+    else:
+        files = [p for p in sorted(target.rglob("*")) if p.is_file()]
+    truncated = len(files) > _YARA_MAX_FILES
+    files = files[:_YARA_MAX_FILES]
+
+    findings: list[tuple[str, str, str]] = []
+    scanned = 0
+    for f in files:
+        try:
+            if f.stat().st_size > _YARA_MAX_FILE_SIZE:
+                continue
+        except OSError:
+            continue
+        scanned += 1
+        try:
+            matches = compiled.match(str(f))
+        except yara.Error:
+            continue
+        for m in matches:
+            ids = ", ".join(s.identifier for s in m.strings) if m.strings else ""
+            findings.append((str(f), m.rule, ids))
+
+    if not findings:
+        note = f"\n⚠️ scan capped at {_YARA_MAX_FILES} files — more were not checked" if truncated else ""
+        return f"✅ scanned {scanned} files against {rules_path.name} — no rule matches{note}"
+
+    lines = [f"🎯 {len(findings)} rule matches across {scanned} files scanned:"]
+    for path, rule, ids in findings[:100]:
+        extra = f"  (matched: {ids})" if ids else ""
+        lines.append(f"  🔎 {path} — {rule}{extra}")
+    if len(findings) > 100:
+        lines.append(f"  ... and {len(findings) - 100} more")
+    if truncated:
+        lines.append(f"\n⚠️ scan capped at {_YARA_MAX_FILES} files — more were not checked")
+    lines.append(
+        "\n⚠️ A rule match is a pattern hit, not a verdict. YARA rules classify and hunt — "
+        "they do not confirm malware the way a curated signature database does, so nothing "
+        "here is quarantined automatically. Review matches yourself; run virus_scan (ClamAV) "
+        "as well for a signature-based verdict."
+    )
+    return "\n".join(lines)
+
+
+def _cmd_yara_rules_status(ctx) -> str:
+    lines = ["🎯 YARA status:"]
+    if _HAS_YARA:
+        lines.append(f"  ✅ yara-python {yara.__version__}")
+    else:
+        lines.append("  ❌ yara-python — pip install yara-python")
+    lines += [
+        "",
+        "YARA ships no rules of its own — you point it at rule files you trust.",
+        "A well-maintained free public set (GPL-2.0): https://github.com/Yara-Rules/rules",
+        "Clone or download it, then: yara_scan <path> <rules_dir>",
+    ]
+    return "\n".join(lines)
+
+
 def register(engine):
     engine.registry.register("code_scan", _cmd_code_scan, "code_scan <path> [--fix] — Python security and quality scan (AST plus optional bandit), auto-fixing only the clearly safe cases")
     engine.registry.register("vuln_scan", _cmd_vuln_scan, "vuln_scan <path> — exposed secrets, known dependency vulnerabilities (pip-audit/npm audit), and file permissions")
     engine.registry.register("virus_scan", _cmd_virus_scan, "virus_scan <path> [--no-quarantine] — real virus and spyware scan via ClamAV, quarantining automatically")
+    engine.registry.register("yara_scan", _cmd_yara_scan, "yara_scan <path> <rules_file_or_dir> — pattern-match files against YARA rules (VirusTotal's engine); reports matches, does not quarantine")
+    engine.registry.register("yara_rules_status", _cmd_yara_rules_status, "yara_rules_status — is yara-python installed, and where to get a free ruleset")
     engine.registry.register("quarantine_file", _cmd_quarantine_file, "quarantine_file <path> [reason] — move a suspicious file to quarantine yourself")
     engine.registry.register("quarantine_list", _cmd_quarantine_list, "quarantine_list — everything currently in quarantine")
     engine.registry.register("quarantine_restore", _cmd_quarantine_restore, "quarantine_restore <id> [destination] — restore a file out of quarantine")

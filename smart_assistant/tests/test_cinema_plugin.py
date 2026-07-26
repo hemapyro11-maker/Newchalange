@@ -565,3 +565,261 @@ def test_probe_fps_returns_none_on_timeout(monkeypatch):
 
     monkeypatch.setattr(cp.subprocess, "run", fake_run)
     assert cp._probe_fps("whatever.mp4") is None
+
+
+# ── الترجمات: توليد وحرق ─────────────────────────────────────────────
+
+class _FakeSegment:
+    def __init__(self, start, end, text):
+        self.start, self.end, self.text = start, end, text
+
+
+class _FakeInfo:
+    language = "en"
+
+
+class _FakeWhisperModel:
+    def __init__(self, segments):
+        self._segments = segments
+
+    def transcribe(self, path, language=None, vad_filter=True):
+        return iter(self._segments), _FakeInfo()
+
+
+def test_srt_timestamp_format():
+    assert cp._srt_timestamp(0) == "00:00:00,000"
+    assert cp._srt_timestamp(3661.234) == "01:01:01,234"
+
+
+def test_srt_timestamp_never_goes_negative():
+    """راجع: النموذج ممكن يرجّع توقيت سالب لجزء من الثانية بسبب
+    تقريب داخلي — مينفعش يطلع في ملف الترجمة."""
+    assert cp._srt_timestamp(-5) == "00:00:00,000"
+
+
+def test_vtt_timestamp_uses_a_dot_not_a_comma():
+    assert cp._vtt_timestamp(1.5) == "00:00:01.500"
+
+
+def test_generate_subtitles_needs_two_args(make_ctx):
+    result = cp._cmd_generate_subtitles(make_ctx("generate_subtitles", []))
+    assert result.startswith("usage")
+
+
+def test_generate_subtitles_rejects_a_bad_extension(make_ctx, tmp_path):
+    src = tmp_path / "a.mp4"
+    src.write_bytes(b"x")
+    out = tmp_path / "subs.txt"
+    result = cp._cmd_generate_subtitles(
+        make_ctx("generate_subtitles", [str(src), str(out)])
+    )
+    assert "must end in .srt or .vtt" in result
+
+
+def test_generate_subtitles_missing_input(make_ctx, tmp_path):
+    result = cp._cmd_generate_subtitles(
+        make_ctx("generate_subtitles", [str(tmp_path / "nope.mp4"), str(tmp_path / "o.srt")])
+    )
+    assert result.startswith("❌ file not found")
+
+
+def test_generate_subtitles_missing_package_is_reported(make_ctx, tmp_path, monkeypatch):
+    src = tmp_path / "a.mp4"
+    src.write_bytes(b"x")
+
+    def boom(size):
+        raise ImportError
+    monkeypatch.setattr(cp, "_load_whisper_model", boom)
+    result = cp._cmd_generate_subtitles(
+        make_ctx("generate_subtitles", [str(src), str(tmp_path / "o.srt")])
+    )
+    assert "pip install faster-whisper" in result
+
+
+def test_generate_subtitles_writes_a_real_srt_file(make_ctx, tmp_path, monkeypatch):
+    src = tmp_path / "a.mp4"
+    src.write_bytes(b"x")
+    monkeypatch.setattr(
+        cp, "_load_whisper_model",
+        lambda size: _FakeWhisperModel([
+            _FakeSegment(0.0, 1.5, "Hello there"),
+            _FakeSegment(1.5, 3.0, "General Kenobi"),
+        ]),
+    )
+    out = tmp_path / "o.srt"
+    result = cp._cmd_generate_subtitles(make_ctx("generate_subtitles", [str(src), str(out)]))
+    assert result.startswith("✅ 2 subtitle lines")
+    text = out.read_text(encoding="utf-8")
+    assert "1\n00:00:00,000 --> 00:00:01,500\nHello there" in text
+    assert "2\n00:00:01,500 --> 00:00:03,000\nGeneral Kenobi" in text
+
+
+def test_generate_subtitles_writes_vtt_with_header(make_ctx, tmp_path, monkeypatch):
+    src = tmp_path / "a.mp4"
+    src.write_bytes(b"x")
+    monkeypatch.setattr(
+        cp, "_load_whisper_model",
+        lambda size: _FakeWhisperModel([_FakeSegment(0.0, 1.0, "hi")]),
+    )
+    out = tmp_path / "o.vtt"
+    cp._cmd_generate_subtitles(make_ctx("generate_subtitles", [str(src), str(out)]))
+    text = out.read_text(encoding="utf-8")
+    assert text.startswith("WEBVTT\n")
+    assert "00:00:00.000 --> 00:00:01.000" in text
+    assert "," not in text.split("\n\n")[1]  # مفيش فاصلة SRT في VTT
+
+
+def test_generate_subtitles_reports_the_detected_language(make_ctx, tmp_path, monkeypatch):
+    src = tmp_path / "a.mp4"
+    src.write_bytes(b"x")
+    monkeypatch.setattr(
+        cp, "_load_whisper_model",
+        lambda size: _FakeWhisperModel([_FakeSegment(0.0, 1.0, "hi")]),
+    )
+    result = cp._cmd_generate_subtitles(
+        make_ctx("generate_subtitles", [str(src), str(tmp_path / "o.srt")])
+    )
+    assert "detected language: en" in result
+
+
+def test_generate_subtitles_skips_the_language_note_when_explicit(make_ctx, tmp_path, monkeypatch):
+    src = tmp_path / "a.mp4"
+    src.write_bytes(b"x")
+    monkeypatch.setattr(
+        cp, "_load_whisper_model",
+        lambda size: _FakeWhisperModel([_FakeSegment(0.0, 1.0, "hi")]),
+    )
+    result = cp._cmd_generate_subtitles(
+        make_ctx("generate_subtitles", [str(src), str(tmp_path / "o.srt"), "lang=en"])
+    )
+    assert "detected language" not in result
+
+
+def test_generate_subtitles_drops_empty_segments(make_ctx, tmp_path, monkeypatch):
+    """VAD ممكن يرجّع segment فاضي على حواف الصمت — مينفعش يطلع كسطر
+    ترجمة فاضي في الملف."""
+    src = tmp_path / "a.mp4"
+    src.write_bytes(b"x")
+    monkeypatch.setattr(
+        cp, "_load_whisper_model",
+        lambda size: _FakeWhisperModel([
+            _FakeSegment(0.0, 0.2, "   "),
+            _FakeSegment(0.2, 1.0, "real text"),
+        ]),
+    )
+    out = tmp_path / "o.srt"
+    result = cp._cmd_generate_subtitles(make_ctx("generate_subtitles", [str(src), str(out)]))
+    assert result.startswith("✅ 1 subtitle lines")
+
+
+def test_generate_subtitles_no_speech(make_ctx, tmp_path, monkeypatch):
+    src = tmp_path / "a.mp4"
+    src.write_bytes(b"x")
+    monkeypatch.setattr(cp, "_load_whisper_model", lambda size: _FakeWhisperModel([]))
+    result = cp._cmd_generate_subtitles(
+        make_ctx("generate_subtitles", [str(src), str(tmp_path / "o.srt")])
+    )
+    assert result.startswith("🔇")
+
+
+def test_generate_subtitles_reports_transcription_failure(make_ctx, tmp_path, monkeypatch):
+    src = tmp_path / "a.mp4"
+    src.write_bytes(b"x")
+
+    class _Boom:
+        def transcribe(self, *a, **k):
+            raise RuntimeError("corrupt stream")
+    monkeypatch.setattr(cp, "_load_whisper_model", lambda size: _Boom())
+    result = cp._cmd_generate_subtitles(
+        make_ctx("generate_subtitles", [str(src), str(tmp_path / "o.srt")])
+    )
+    assert "transcription failed" in result
+
+
+def test_generate_subtitles_model_cache_is_reused(monkeypatch):
+    calls = []
+
+    class _FakeModule:
+        class WhisperModel:
+            def __init__(self, size, device, compute_type):
+                calls.append(size)
+
+    import sys
+    monkeypatch.setitem(sys.modules, "faster_whisper", _FakeModule)
+    cp._faster_whisper_models.clear()
+    cp._load_whisper_model("tiny")
+    cp._load_whisper_model("tiny")
+    assert calls == ["tiny"]
+    cp._faster_whisper_models.clear()
+
+
+@pytest.fixture
+def srt_file(tmp_path):
+    p = tmp_path / "subs.srt"
+    p.write_text(
+        "1\n00:00:00,000 --> 00:00:01,000\nHello\n\n"
+        "2\n00:00:01,000 --> 00:00:02,000\nWorld\n",
+        encoding="utf-8",
+    )
+    return p
+
+
+def test_burn_subtitles_needs_three_args(make_ctx):
+    assert cp._cmd_burn_subtitles(make_ctx("burn_subtitles", [])).startswith("usage")
+
+
+def test_burn_subtitles_missing_video(make_ctx, tmp_path, srt_file):
+    result = cp._cmd_burn_subtitles(make_ctx(
+        "burn_subtitles", [str(tmp_path / "nope.mp4"), str(srt_file), str(tmp_path / "o.mp4")]
+    ))
+    assert result.startswith("❌ file not found")
+
+
+def test_burn_subtitles_missing_srt(make_ctx, tmp_path, clip1):
+    result = cp._cmd_burn_subtitles(make_ctx(
+        "burn_subtitles", [str(clip1), str(tmp_path / "nope.srt"), str(tmp_path / "o.mp4")]
+    ))
+    assert result.startswith("❌ file not found")
+
+
+@requires_ffmpeg
+def test_burn_subtitles_produces_a_real_video(make_ctx, tmp_path, clip1, srt_file):
+    out = tmp_path / "o.mp4"
+    result = cp._cmd_burn_subtitles(make_ctx(
+        "burn_subtitles", [str(clip1), str(srt_file), str(out)]
+    ))
+    assert result.startswith("✅")
+    assert out.is_file()
+    assert out.stat().st_size > 500
+
+
+@requires_ffmpeg
+def test_burn_subtitles_handles_a_colon_in_the_path(make_ctx, tmp_path, clip1):
+    """مسار فيه `:` (زي C:\\...) لازم يتهرّب قبل ما يتحط في فلتر
+    ffmpeg، وإلا الفلتر بيتفسر غلط."""
+    weird_dir = tmp_path / "weird:name"
+    weird_dir.mkdir()
+    srt = weird_dir / "s.srt"
+    srt.write_text("1\n00:00:00,000 --> 00:00:01,000\nHi\n", encoding="utf-8")
+    out = tmp_path / "o.mp4"
+    result = cp._cmd_burn_subtitles(make_ctx(
+        "burn_subtitles", [str(clip1), str(srt), str(out)]
+    ))
+    assert result.startswith("✅")
+    assert out.is_file()
+
+
+def test_burn_subtitles_no_ffmpeg(make_ctx, tmp_path, srt_file, monkeypatch):
+    src = tmp_path / "a.mp4"
+    src.write_bytes(b"x")
+    monkeypatch.setattr(cp.shutil, "which", lambda name: None)
+    result = cp._cmd_burn_subtitles(make_ctx(
+        "burn_subtitles", [str(src), str(srt_file), str(tmp_path / "o.mp4")]
+    ))
+    assert result == "❌ ffmpeg not found"
+
+
+def test_register_adds_subtitle_commands(bare_engine):
+    cp.register(bare_engine)
+    assert bare_engine.registry.get("generate_subtitles") is not None
+    assert bare_engine.registry.get("burn_subtitles") is not None

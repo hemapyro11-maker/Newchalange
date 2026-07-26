@@ -661,6 +661,118 @@ def _cmd_upscale_video(ctx) -> str:
     return f"✅ video upscaled (x{scale}, {model}) at {dst}"
 
 
+# ── ترجمات (subtitles): توليد وحرق ──────────────────────────────────
+# faster-whisper بيدّي توقيت (start/end) لكل جملة، مش النص المجمّع بس
+# اللي voice_plugin.py بيستخدمه لـ listen — فده لازم مسار منفصل مش
+# إعادة استخدام لدالة listen. الكاش هنا محلي للملف ده عن قصد (مش نفس
+# كاش voice_plugin.py) عشان كل إضافة تفضل مستقلة بنفسها.
+_faster_whisper_models: dict[str, object] = {}
+_SUBTITLE_TIMEOUT = 1800  # الترجمة بطيئة على CPU لفيديو طويل
+
+
+def _load_whisper_model(size: str):
+    model = _faster_whisper_models.get(size)
+    if model is None:
+        from faster_whisper import WhisperModel  # noqa: PLC0415
+        model = WhisperModel(size, device="cpu", compute_type="int8")
+        _faster_whisper_models[size] = model
+    return model
+
+
+def _srt_timestamp(seconds: float) -> str:
+    total_ms = round(max(0.0, seconds) * 1000)
+    h, rem = divmod(total_ms, 3_600_000)
+    m, rem = divmod(rem, 60_000)
+    s, ms = divmod(rem, 1000)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def _vtt_timestamp(seconds: float) -> str:
+    return _srt_timestamp(seconds).replace(",", ".")
+
+
+def _cmd_generate_subtitles(ctx) -> str:
+    if len(ctx.args) < 2:
+        return (
+            "usage: generate_subtitles <video_or_audio> <out.srt|out.vtt> "
+            "[model=tiny|base|small|medium] [lang=auto|en|ar|...]"
+        )
+    src, dst = ctx.args[0], ctx.args[1]
+    model_size, lang = "base", None
+    for arg in ctx.args[2:]:
+        if arg.startswith("model="):
+            model_size = arg.split("=", 1)[1]
+        elif arg.startswith("lang="):
+            value = arg.split("=", 1)[1]
+            lang = None if value == "auto" else value
+
+    missing = _missing_files(src)
+    if missing:
+        return f"❌ file not found: {missing[0]}"
+    fmt = pathlib.Path(dst).suffix.lower()
+    if fmt not in (".srt", ".vtt"):
+        return "❌ output must end in .srt or .vtt"
+
+    try:
+        model = _load_whisper_model(model_size)
+    except ImportError:
+        return "❌ faster-whisper is not installed — pip install faster-whisper"
+    except Exception as e:  # noqa: BLE001 - اسم موديل غلط أو تعذر التحميل
+        return f"❌ could not load the '{model_size}' model: {e}"
+
+    try:
+        raw_segments, info = model.transcribe(src, language=lang, vad_filter=True)
+        segments = [s for s in raw_segments if s.text.strip()]
+    except Exception as e:  # noqa: BLE001 - ملف صوت تالف أو صيغة مش مدعومة
+        return f"❌ transcription failed: {e}"
+    if not segments:
+        return "🔇 no speech detected — nothing to write"
+
+    if fmt == ".vtt":
+        blocks = ["WEBVTT\n"] + [
+            f"{_vtt_timestamp(s.start)} --> {_vtt_timestamp(s.end)}\n{s.text.strip()}"
+            for s in segments
+        ]
+    else:
+        blocks = [
+            f"{i}\n{_srt_timestamp(s.start)} --> {_srt_timestamp(s.end)}\n{s.text.strip()}"
+            for i, s in enumerate(segments, 1)
+        ]
+    try:
+        pathlib.Path(dst).write_text("\n\n".join(blocks) + "\n", encoding="utf-8")
+    except OSError as e:
+        return f"❌ could not save the subtitles: {e}"
+
+    detected = f" (detected language: {info.language})" if lang is None else ""
+    return f"✅ {len(segments)} subtitle lines written to {dst}{detected}"
+
+
+def _cmd_burn_subtitles(ctx) -> str:
+    if len(ctx.args) < 3:
+        return "usage: burn_subtitles <video> <subtitles.srt|.vtt|.ass> <out.mp4>"
+    if not shutil.which("ffmpeg"):
+        return "❌ ffmpeg not found"
+    src, subs, dst = ctx.args[0], ctx.args[1], ctx.args[2]
+    missing = _missing_files(src, subs)
+    if missing:
+        return f"❌ file not found: {missing[0]}"
+
+    # المسار بيتحط جوه واصف فلتر ffmpeg نصي، فأي `:` أو `'` أو `\` فيه
+    # بتتفسر غلط (خصوصًا مسار ويندوز زي C:\...) — لازم تتهرّب صراحة
+    # قبل ما تتحط جوه الفلتر، وإلا الأمر بيفشل أو بيقرا مسار غلط.
+    escaped = subs.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+    ok, err = _run_ffmpeg(
+        ["ffmpeg", "-y", "-i", src, "-vf", f"subtitles='{escaped}'",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "copy", dst],
+        timeout=_SUBTITLE_TIMEOUT,
+    )
+    if not ok:
+        return f"❌ burning subtitles failed:\n{err}"
+    if not pathlib.Path(dst).is_file():
+        return "❌ ffmpeg finished but produced no real output file"
+    return f"✅ subtitles burned into {dst}"
+
+
 def register(engine):
     engine.registry.register("color_grade", _cmd_color_grade, "color_grade <in> <out> [preset] — cinematic colour grading")
     engine.registry.register("transition", _cmd_transition, "transition <c1> <c2> <out> [style] [dur] — professional transition between two clips")
@@ -676,3 +788,5 @@ def register(engine):
     engine.registry.register("upscale_image", _cmd_upscale_image, "upscale_image <in> <out> [scale=4] [model] — AI image upscaling (Real-ESRGAN)")
     engine.registry.register("upscale_video", _cmd_upscale_video, "upscale_video <in> <out> [scale=4] [model] — upscale video frame by frame (Real-ESRGAN; very slow without a GPU)")
     engine.registry.register("title_card", _cmd_title_card, "title_card <text> <out> [duration] [size] — animated title card")
+    engine.registry.register("generate_subtitles", _cmd_generate_subtitles, "generate_subtitles <video> <out.srt|out.vtt> [model=base] [lang=auto] — real speech-to-text subtitles with timestamps (faster-whisper)")
+    engine.registry.register("burn_subtitles", _cmd_burn_subtitles, "burn_subtitles <video> <subs.srt> <out.mp4> — hardcode subtitles onto the video (ffmpeg/libass)")

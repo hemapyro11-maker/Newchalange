@@ -3,6 +3,10 @@ CTkToolTip>=0.8
 pyinstaller>=6.0.0
 mcp>=1.0.0
 capstone>=5.0.0
+# yara-python: pattern-matching malware/threat detection (VirusTotal's
+# engine). Complements virus_scan (ClamAV, curated signatures) with
+# rule-based hunting — reports matches only, never quarantines.
+yara-python>=4.5.0
 Pillow>=10.0.0
 pandas>=2.0.0
 matplotlib>=3.8.0
