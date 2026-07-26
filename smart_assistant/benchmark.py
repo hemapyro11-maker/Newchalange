@@ -249,7 +249,267 @@ def measure_brain_latency(engine) -> Result:
     return Result("Model round-trip", elapsed, "s", f"via {reply.label}")
 
 
+
+# ── 4: تعديل الكود ───────────────────────────────────────────────────
+
+EDIT_CASES = [
+    # (وصف، محتوى الملف، نص البحث، البديل، المتوقع)
+    ("simple replace", "def go():\n    return 1\n", "return 1", "return 2", "ok"),
+    ("indented match", "class A:\n    def m(self):\n        return 1\n",
+     "        return 1", "        return 2", "ok"),
+    ("multi-line match", "a = 1\nb = 2\nc = 3\n", "a = 1\nb = 2", "a = 9\nb = 8", "ok"),
+    ("missing text is refused", "x = 1\n", "y = 2", "y = 3", "refused"),
+    ("ambiguous match is refused", "x = 1\ny = 2\nx = 1\n", "x = 1", "x = 9", "refused"),
+]
+
+
+def measure_edit_correctness(engine) -> Result:
+    """التعديل بيقع في الحالات الصح، وبيرفض في الحالات اللي المفروض
+    يرفض فيها. الرفض هنا **نجاح** مش فشل — تعديل المكان الغلط أسوأ من
+    عدم التعديل لأنه بيعدي من غير ما حد ياخد باله."""
+    import tempfile
+    import pathlib as _pl
+
+    try:
+        import edit_plugin
+    except ImportError:
+        return Result("Code edit correctness", 0.0, "%",
+                      "edit_plugin not loaded", skipped=True)
+
+    class _Ctx:
+        def __init__(self, raw, args):
+            self.raw, self.args, self.engine = raw, args, engine
+
+    hits, failures = 0, []
+    with tempfile.TemporaryDirectory() as tmp:
+        for i, (label, body, search, replace, expect) in enumerate(EDIT_CASES):
+            path = _pl.Path(tmp) / f"case{i}.py"
+            path.write_text(body, encoding="utf-8")
+            raw = (f"edit_file {path}\n<<<<<<< SEARCH\n{search}\n"
+                   f"=======\n{replace}\n>>>>>>> REPLACE")
+            out = edit_plugin._cmd_edit_file(_Ctx(raw, [str(path)]))
+            applied = out.startswith("✅")
+            after = path.read_text(encoding="utf-8")
+            if expect == "ok":
+                good = applied and replace.strip() in after
+            else:
+                good = (not applied) and after == body
+            if good:
+                hits += 1
+            else:
+                failures.append(f"{label}: expected {expect}, got {out.splitlines()[0][:60]!r}")
+    return Result(
+        "Code edit correctness", hits / len(EDIT_CASES) * 100, "%",
+        f"{hits}/{len(EDIT_CASES)} edit cases behaved correctly "
+        "(applying when it should, refusing when it should)",
+        failures=failures,
+    )
+
+
+def measure_edit_safety(engine) -> Result:
+    """ضمانات مكتوبة في الكود مش في التوثيق: أوامر الكتابة مستحيل
+    تتحط في المسموح التلقائي، والتعديل بياخد نسخة احتياطية."""
+    import tempfile
+    import pathlib as _pl
+
+    import permissions
+
+    try:
+        import edit_plugin
+    except ImportError:
+        return Result("Edit safety guarantees", 0.0, "%", "edit_plugin not loaded",
+                      skipped=True)
+
+    class _Ctx:
+        def __init__(self, raw, args):
+            self.raw, self.args, self.engine = raw, args, engine
+
+    checks = {}
+    for cmd in ("edit_file", "create_file"):
+        ok, _msg = permissions.allow(cmd)
+        checks[f"{cmd} cannot be auto-allowed"] = (ok is False)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _pl.Path(tmp) / "a.py"
+        path.write_text("x = 1\n", encoding="utf-8")
+        raw = f"edit_file {path}\n<<<<<<< SEARCH\nx = 1\n=======\nx = 2\n>>>>>>> REPLACE"
+        edit_plugin._cmd_edit_file(_Ctx(raw, [str(path)]))
+        backup = path.with_suffix(path.suffix + edit_plugin._BACKUP_SUFFIX)
+        checks["a backup is written before editing"] = backup.is_file()
+        checks["the backup holds the original"] = (
+            backup.is_file() and backup.read_text(encoding="utf-8") == "x = 1\n"
+        )
+
+        new = _pl.Path(tmp) / "b.py"
+        new.write_text("keep me\n", encoding="utf-8")
+        edit_plugin._cmd_create_file(_Ctx(f"create_file {new} overwritten", [str(new)]))
+        checks["create_file refuses to overwrite"] = (
+            new.read_text(encoding="utf-8") == "keep me\n"
+        )
+
+    passed = sum(checks.values())
+    return Result(
+        "Edit safety guarantees", passed / len(checks) * 100, "%",
+        f"{passed}/{len(checks)} safety properties hold",
+        failures=[k for k, v in checks.items() if not v],
+    )
+
+
+def measure_tool_call_parsing(engine) -> Result:
+    """نداء الأداة بيوصل للأمر كامل؟ الأوامر متعددة الأسطر (edit_file)
+    بتقرا جسمها من ctx.raw — لو الفصل قصّ عند سطر TOOL، بيوصلها اسم
+    الملف وبس."""
+    import core_engine
+
+    cases = {
+        "single-line call parses": (
+            "TOOL: echo hi", "echo", ["hi"], None),
+        "multi-line body survives": (
+            "TOOL: edit_file a.py\n<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE",
+            "edit_file", ["a.py"], "SEARCH"),
+        "quoted paths survive": (
+            'TOOL: probe "My Files/a.mp4"', "probe", ["My Files/a.mp4"], None),
+        "a question suppresses the tool": ("ASK: which one?\nTOOL: echo x", None, None, None),
+    }
+    passed, failures = 0, []
+    for label, (reply, want_name, want_args, want_in_raw) in cases.items():
+        _body, tool, _q = core_engine.AssistantEngine._split_directives(reply)
+        if want_name is None:
+            good = tool is None
+        else:
+            good = bool(tool) and tool[0] == want_name and tool[1] == want_args
+            if good and want_in_raw:
+                good = want_in_raw in tool[2]
+        if good:
+            passed += 1
+        else:
+            failures.append(label)
+    return Result(
+        "Tool call parsing", passed / len(cases) * 100, "%",
+        f"{passed}/{len(cases)} parsing properties hold",
+        failures=failures,
+    )
+
+
+# ── 5: جودة الاستدلال (محتاج مخ متظبط) ──────────────────────────────
+# أسئلة إجابتها **قابلة للتحقق آليًا** — مش رأي ولا ذوق. ده شرط عشان
+# الرقم يبقى قياس مش انطباع. كل سؤال محتاج خطوتين على الأقل، فمينفعش
+# يتحل بالاسترجاع.
+
+REASONING_CASES: list[tuple[str, str]] = [
+    ("A shelf holds 3 boxes. Each box holds 4 packs. Each pack holds 6 pens. "
+     "How many pens in total? Reply with the number only.", "72"),
+    ("A shirt costs 80 after a 20% discount. What was the original price? "
+     "Reply with the number only.", "100"),
+    ("If all Bloops are Razzies and all Razzies are Lazzies, are all Bloops "
+     "necessarily Lazzies? Answer yes or no only.", "yes"),
+    ("A train leaves at 14:45 and the journey takes 2 hours 40 minutes. "
+     "What time does it arrive, in 24-hour HH:MM? Reply with the time only.",
+     "17:25"),
+    ("I have 5 apples, eat 2, then buy twice as many as I have left. "
+     "How many do I have? Reply with the number only.", "9"),
+    ("عندي 3 صناديق، كل صندوق فيه 4 علب، وكل علبة فيها 6 أقلام. "
+     "كام قلم إجمالي؟ رد بالرقم بس.", "72"),
+    ("قميص سعره 80 بعد خصم 20%. كان سعره كام قبل الخصم؟ رد بالرقم بس.", "100"),
+]
+
+
+def _answer_matches(reply: str, expected: str) -> bool:
+    """مطابقة متساهلة مع الشكل، صارمة مع القيمة — النموذج ممكن يكتب
+    "72 pens" أو "**72**"، وده صح. بس 720 غلط."""
+    import re as _re
+
+    low = reply.strip().lower()
+    if expected in ("yes", "no"):
+        return bool(_re.search(rf"\b{expected}\b", low)) or (
+            expected == "yes" and "أيوه" in low or expected == "no" and "لأ" in low
+        )
+    if ":" in expected:
+        return expected in low
+    return bool(_re.search(rf"(?<![\d.]){_re.escape(expected)}(?![\d.])", low))
+
+
+def _brain_is_really_reachable(b) -> tuple[bool, str]:
+    """`ready()` مش كفاية: Ollama مزوّد محلي مالوش مفتاح، فبيتحسب
+    "جاهز" حتى لو مش مشغّل أصلاً. بنعمل نداء تجريبي واحد ونشوف.
+
+    ده مهم لأن الفرق بين "الموديل غبي" و"مفيش موديل" هو الفرق بين
+    رقم صادق ورقم كاذب — و0% من غير تفرقة بيقول الأولانية.
+    """
+    if not b.ready():
+        return False, "no brain configured — run brain_setup"
+    probe = b.chat([{"role": "user", "content": "Reply with: ok"}])
+    if not probe:
+        return False, f"no brain actually reachable ({probe.error})"
+    return True, ""
+
+
+def measure_reasoning(engine) -> Result:
+    """دقة الاستدلال على أسئلة إجابتها معروفة.
+
+    **ده الرقم اللي بيحتاج مفتاح فعلاً.** من غير مخ متظبط بيتخطى —
+    وده أمانة: صفر هنا معناه "الموديل غبي"، والحقيقة "مفيش موديل".
+    """
+    import brain
+
+    b = brain.get_brain()
+    alive, why = _brain_is_really_reachable(b)
+    if not alive:
+        return Result("Reasoning accuracy", 0.0, "%",
+                      f"{why} — then run: benchmark --full", skipped=True)
+
+    hits, failures = 0, []
+    for question, expected in REASONING_CASES:
+        reply = b.chat([{"role": "user", "content": question}], temperature=0.0)
+        if not reply:
+            failures.append(f"{question[:40]}… → call failed: {reply.error}")
+            continue
+        if _answer_matches(reply.text, expected):
+            hits += 1
+        else:
+            got = reply.text.strip().replace("\n", " ")[:50]
+            failures.append(f"{question[:40]}… → {got!r} (wanted {expected})")
+    return Result(
+        "Reasoning accuracy", hits / len(REASONING_CASES) * 100, "%",
+        f"{hits}/{len(REASONING_CASES)} verifiable questions answered correctly "
+        f"(costs {len(REASONING_CASES)} calls)",
+        failures=failures,
+    )
+
+
+def measure_reasoning_verified(engine) -> Result:
+    """نفس الأسئلة بالمراجعة الذاتية (CoVe). المقارنة بين الرقمين هي
+    الجواب الحقيقي على "هل المراجعة بتفرق؟" — بدل ما نستشهد بورقة."""
+    import brain
+
+    b = brain.get_brain()
+    alive, why = _brain_is_really_reachable(b)
+    if not alive:
+        return Result("Reasoning, self-verified", 0.0, "%", why, skipped=True)
+
+    hits, failures = 0, []
+    for question, expected in REASONING_CASES:
+        reply = b.verified_chat([{"role": "user", "content": question}])
+        if not reply:
+            failures.append(f"{question[:40]}… → call failed")
+            continue
+        if _answer_matches(reply.text, expected):
+            hits += 1
+        else:
+            got = reply.text.strip().replace("\n", " ")[:50]
+            failures.append(f"{question[:40]}… → {got!r} (wanted {expected})")
+    return Result(
+        "Reasoning, self-verified", hits / len(REASONING_CASES) * 100, "%",
+        f"{hits}/{len(REASONING_CASES)} correct with verification on "
+        f"(costs {len(REASONING_CASES) * 4} calls — compare against the row above)",
+        failures=failures,
+    )
+
+
 # ── التشغيل والتقرير ─────────────────────────────────────────────────
+
+# القياسات اللي بتنادي نموذج فعلاً — بتتخطى في الوضع السريع
+_MODEL_MEASURES: tuple = ()
 
 MEASURES = (
     measure_intent_accuracy,
@@ -258,15 +518,22 @@ MEASURES = (
     measure_local_resolution,
     measure_dictionary_coverage,
     measure_repo_map,
+    measure_edit_correctness,
+    measure_edit_safety,
+    measure_tool_call_parsing,
     measure_local_latency,
     measure_brain_latency,
+    measure_reasoning,
+    measure_reasoning_verified,
 )
+
+_MODEL_MEASURES = (measure_brain_latency, measure_reasoning, measure_reasoning_verified)
 
 
 def run(engine, include_model: bool = True) -> list[Result]:
     results = []
     for fn in MEASURES:
-        if not include_model and fn is measure_brain_latency:
+        if not include_model and fn in _MODEL_MEASURES:
             continue
         try:
             results.append(fn(engine))

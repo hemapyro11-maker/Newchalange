@@ -88,3 +88,104 @@ def test_skipped_results_are_marked_not_counted_as_zero():
     out = benchmark.report(results)
     assert "skipped" in out
     assert "0.00" not in out
+
+
+# ── القياسات الواسعة ─────────────────────────────────────────────────
+
+def test_edit_correctness_is_perfect(bare_engine):
+    r = benchmark.measure_edit_correctness(bare_engine)
+    assert r.skipped or r.value == 100.0, r.failures
+
+
+def test_edit_cases_include_both_applying_and_refusing():
+    """رفض التعديل الغامض **نجاح** — لو المجموعة فيها حالات ناجحة بس،
+    الرقم مش بيقيس الأمان خالص."""
+    expects = {c[4] for c in benchmark.EDIT_CASES}
+    assert expects == {"ok", "refused"}
+
+
+def test_edit_safety_properties_hold(bare_engine):
+    r = benchmark.measure_edit_safety(bare_engine)
+    assert r.skipped or r.value == 100.0, r.failures
+
+
+def test_tool_call_parsing_is_perfect(bare_engine):
+    r = benchmark.measure_tool_call_parsing(bare_engine)
+    assert r.value == 100.0, r.failures
+
+
+def test_reasoning_cases_have_checkable_answers():
+    """كل سؤال إجابته قابلة للتحقق آليًا — مش رأي. ده شرط عشان الرقم
+    يبقى قياس مش انطباع."""
+    for question, expected in benchmark.REASONING_CASES:
+        assert expected
+        assert len(expected) < 10, question
+
+
+def test_reasoning_set_covers_both_languages():
+    arabic = [q for q, _ in benchmark.REASONING_CASES
+              if any("؀" <= c <= "ۿ" for c in q)]
+    assert len(arabic) >= 2
+
+
+def test_answer_matching_is_lenient_about_shape():
+    assert benchmark._answer_matches("72", "72")
+    assert benchmark._answer_matches("**72** pens in total", "72")
+    assert benchmark._answer_matches("The answer is Yes.", "yes")
+
+
+def test_answer_matching_is_strict_about_value():
+    """72 مش 720 ولا 172 — المطابقة المتساهلة أوي بتخلي الرقم بلا معنى."""
+    assert not benchmark._answer_matches("720", "72")
+    assert not benchmark._answer_matches("172", "72")
+    assert not benchmark._answer_matches("7.2", "72")
+    assert not benchmark._answer_matches("no", "yes")
+
+
+def test_reasoning_skips_when_no_model_is_actually_reachable(bare_engine, monkeypatch):
+    """ready() بترجع True لـ Ollama حتى لو مش مشغّل. لو صدّقناها،
+    الرقم بيطلع 0% ويقرا 'الموديل غبي' والحقيقة 'مفيش موديل'."""
+    import brain
+    monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
+    monkeypatch.setattr(
+        brain.Brain, "chat",
+        lambda self, messages, **kw: brain.BrainReply(text="", error="connection refused"),
+    )
+    r = benchmark.measure_reasoning(bare_engine)
+    assert r.skipped is True
+    assert "actually reachable" in r.detail
+
+
+def test_reasoning_scores_when_the_model_answers(bare_engine, monkeypatch):
+    import brain
+    answers = {q: a for q, a in benchmark.REASONING_CASES}
+    monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
+    monkeypatch.setattr(
+        brain.Brain, "chat",
+        lambda self, messages, **kw: brain.BrainReply(
+            text=answers.get(messages[-1]["content"], "ok"), provider="f", label="F"),
+    )
+    r = benchmark.measure_reasoning(bare_engine)
+    assert r.skipped is False
+    assert r.value == 100.0
+
+
+def test_reasoning_reports_the_call_cost(bare_engine, monkeypatch):
+    """4 نداءات لكل سؤال مش تفصيلة — لازم تبان قبل ما حد يشغّلها."""
+    import brain
+    monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
+    monkeypatch.setattr(
+        brain.Brain, "chat",
+        lambda self, messages, **kw: brain.BrainReply(text="72", provider="f", label="F"),
+    )
+    r = benchmark.measure_reasoning_verified(bare_engine)
+    assert "calls" in r.detail
+
+
+def test_fast_run_skips_every_model_measure(bare_engine, monkeypatch):
+    import brain
+    monkeypatch.setattr(
+        brain.Brain, "chat",
+        lambda *a, **k: pytest.fail("a fast benchmark run called the model"),
+    )
+    benchmark.run(bare_engine, include_model=False)
