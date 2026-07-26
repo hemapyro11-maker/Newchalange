@@ -74,9 +74,17 @@ _CONFIRM_NO = {"n", "no", "لا", "لأ"}
 # "اسمح دايمًا" — بينفذ وبيضيف الأمر لقايمة المسموح (permissions.py)
 _CONFIRM_ALWAYS = {"a", "always", "دايما", "دايمًا", "اسمح"}
 
-# أقصى عدد رسائل بنحتفظ بيها في محادثة المخ (brain.py بيقصّها كمان حسب
-# سياق المزوّد النشط، ده حد أعلى إضافي عشان الذاكرة متكبرش بلا نهاية)
+# أقصى عدد رسائل بنحتفظ بيها حرفيًا في محادثة المخ. لما نعدّيه بنلخّص
+# الجزء القديم بدل ما نرميه (شوف `_compact_history`) — brain.py بيقصّ
+# كمان حسب سياق المزوّد النشط، ده حد أعلى إضافي.
 _MAX_CHAT_TURNS = 30
+# بعد الضغط بنسيب العدد ده من الرسايل حرفي، والباقي بيتحول لملخص.
+# لازم يبقى أصغر بكتير من الحد فوق عشان الضغط يحصل نادر (كل ~18 رسالة
+# مش كل رسالة) — كل ضغط بيكلّف نداء نموذج واحد.
+_COMPACT_KEEP = 12
+# أقصى عدد أوامر متسلسلة في طلب واحد. كل خطوة = نداء نموذج، فالسقف ده
+# هو اللي بيمنع حلقة لا نهائية تولّع الحصة.
+_MAX_TOOL_STEPS = 4
 
 _SYSTEM_PROMPT = (
     "You are Nezuko, an assistant running inside an app on the user's own "
@@ -85,15 +93,54 @@ _SYSTEM_PROMPT = (
     "Arabic, answer in natural Egyptian Arabic. If they write in English, "
     "answer in English. Match them every time — never switch on your own, "
     "and never answer in a language they did not use.\n\n"
+    "You can do three things: answer, ask, or propose a tool.\n\n"
     "To run a tool, write a line on its own exactly like this:\n"
     "TOOL: <command_name> <arguments>\n\n"
+    "When the request is missing something you genuinely need — which file "
+    "they mean, which of two readings was intended, a value you cannot "
+    "infer — ask instead of guessing. Write a line on its own like this:\n"
+    "ASK: <your question>\n\n"
     "Rules:\n"
     "- Use only commands from the list below. Never invent a command name.\n"
     "- For ordinary questions (a greeting, an opinion, an explanation) just "
-    "answer — no TOOL line.\n"
+    "answer — no TOOL and no ASK line.\n"
+    "- Ask only when guessing wrong would waste their time or touch the "
+    "wrong file. Ask the one question that matters, not a list. If you can "
+    "reasonably infer it, infer it and say what you assumed.\n"
+    "- Never put ASK and TOOL in the same reply. Ask first, act once they "
+    "answer.\n"
+    "- After a tool runs you are shown its output. If the task needs another "
+    "step, propose the next TOOL. If it is done, say so plainly.\n"
     "- The TOOL line goes last, with one short line above it saying why.\n"
     "- Never claim you ran something. The user confirms first.\n"
 )
+
+# بتتحقن مع الأسئلة اللي المؤشرات بتقول إنها محتاجة شغل مش استرجاع.
+# ده أرخص تحسين للاستدلال: بيزود توكنات الخرج شوية بس **مش** بيزود عدد
+# النداءات — يعني مبيستهلكش من الحصة اليومية زيادة.
+_THINK_HINT = (
+    "\nThis one needs working out, not recall. Think it through step by "
+    "step before answering: break it into sub-problems, solve them in "
+    "order, check the result against what was actually asked, then answer. "
+    "Show the reasoning briefly — do not just assert a conclusion.\n"
+)
+
+# مؤشرات إن السؤال محتاج استدلال مش مجرد رد. بالعربي والإنجليزي، وبتتقارن
+# بعد التطبيع (intents.normalize) عشان الهمزات والتشكيل مايفرقوش.
+_HARD_MARKERS = (
+    # إنجليزي
+    "why", "how come", "compare", "trade-off", "tradeoff", "pros and cons",
+    "which is better", "step by step", "explain", "prove", "derive",
+    "calculate", "optimi", "refactor", "debug", "root cause", "design",
+    "architect", "algorithm", "complexity", "figure out", "work out",
+    # عربي (بعد التطبيع: ا بدل أإآ، ه بدل ة، ي بدل ى)
+    "ليه", "ازاي", "قارن", "مقارنه", "الفرق بين", "افضل", "اثبت", "علل",
+    "احسب", "حساب", "خطوه بخطوه", "حلل", "تحليل", "صمم", "تصميم",
+    "ايه السبب", "سبب المشكله", "ينفع ازاي", "امتي",
+)
+
+# رقم + عملية حسابية = مسألة، حتى من غير أي كلمة مفتاحية
+_MATH_RE = re.compile(r"\d\s*[-+*/^%×÷]\s*\d|\d+\s*%|=\s*\d")
 
 
 @dataclass
@@ -184,7 +231,15 @@ class AssistantEngine:
         # وسائط ناقصة لأمر اتعرف محليًا (زي مسار ملف) — بتتملي من رسالة
         # المستخدم الجاية، وكل ده **بصفر حصة** (مفيش نموذج بيتنادى)
         self._pending_args: tuple[str, list[str], list, str] | None = None
-        # محادثة المخ (مش متسجّلة على القرص — بتتصفّر مع كل تشغيل)
+        # لما المخ يسأل سؤال توضيحي (ASK:)، رد المستخدم الجاي لازم يروح
+        # للمخ مباشرة — مش للقاموس المحلي. "التقرير" كإجابة على "أنهي
+        # ملف؟" مش أمر، ولو عدّت على القاموس هتتفهم غلط.
+        self._awaiting_answer = False
+        # الخطوة الحالية في سلسلة أوامر اقترحها المخ. None = الأمر ده مش
+        # جاي من سلسلة، فمفيش متابعة بعد تنفيذه.
+        self._chain_step: int | None = None
+        # محادثة المخ. أول رسالة ممكن تكون ملخص (role=system) للجزء
+        # القديم اللي اتضغط — بتتحفظ على القرص مع باقي المحادثة.
         self.chat_history: list[dict] = []
         # معرّف الجلسة الحالية — المحادثة بتتحفظ على القرص بعد كل
         # دور، فقفل البرنامج مبيضيّعش الكلام زي الأول
@@ -386,6 +441,7 @@ class AssistantEngine:
 
         if self._pending_intent is not None:
             pending, self._pending_intent = self._pending_intent, None
+            step, self._chain_step = self._chain_step, None
             reply = text.lower()
             if reply in _CONFIRM_ALWAYS:
                 pending_name, pending_args, pending_raw = pending
@@ -393,7 +449,9 @@ class AssistantEngine:
                 self._log(message, "ok" if ok else "warn")
                 if ok:
                     intents.remember(pending_raw, pending_name)
-                    self._execute(pending_name, pending_args, pending_raw)
+                    result = self._execute(pending_name, pending_args, pending_raw)
+                    if step is not None:
+                        self._continue_chain(pending_name, result, step)
                 return
             if reply in _CONFIRM_YES:
                 pending_name, pending_args, pending_raw = pending
@@ -407,7 +465,9 @@ class AssistantEngine:
                 # بتقرا ctx.raw مباشرة (مش ctx.args) عشان تتفادى مشاكل
                 # shlex.split مع نصوص فيها JSON/SQL، فلو بعتنا "y" هنا
                 # كانت هتشتغل على نص فاضي بدل الأمر اللي المستخدم أكّده فعلاً.
-                self._execute(pending_name, pending_args, pending_raw)
+                result = self._execute(pending_name, pending_args, pending_raw)
+                if step is not None:
+                    self._continue_chain(pending_name, result, step)
                 return
             if reply in _CONFIRM_NO:
                 self._log("❌ اتلغى", "info")
@@ -416,6 +476,14 @@ class AssistantEngine:
 
         # وسيطة ناقصة مستنية؟ الرسالة دي هي الإجابة — كل ده 🆓
         if self._pending_args is not None and self._fill_pending_arg(text):
+            return
+
+        # المخ سأل سؤال توضيحي؟ الرسالة دي هي الإجابة عليه — تروح له
+        # مباشرة. لو عدّت على القاموس المحلي الأول، إجابة زي "التاني"
+        # أو "the report" كانت هتتفهم كأمر أو متتفهمش خالص.
+        if self._awaiting_answer:
+            self._awaiting_answer = False
+            self._converse_async(text)
             return
 
         known = {c.name for c in self.registry.list_commands()}
@@ -510,11 +578,16 @@ class AssistantEngine:
         self._execute(command, args, line)
         return True
 
-    def _execute(self, name: str, args: list[str], raw: str):
+    def _execute(self, name: str, args: list[str], raw: str) -> str | None:
+        """بينفذ أمر وبيرجّع نتيجته كنص (أو None لو فشل).
+
+        الرجوع بالنتيجة هو اللي بيخلي سلسلة الخطوات ممكنة — المخ محتاج
+        يشوف خرج الأمر عشان يقرر الخطوة اللي بعدها.
+        """
         cmd = self.registry.get(name)
         if cmd is None:
             self._log(f"❓ unknown command: {name} (try 'help')", "warn")
-            return
+            return None
         ctx = CommandContext(raw=raw, args=args, engine=self)
         start = time.time()
         if not self._in_hook:
@@ -525,13 +598,14 @@ class AssistantEngine:
             self._log(traceback.format_exc(), "error")
             if not self._in_hook:
                 hooks.fire(self, "on_error", command=name)
-            return
+            return None
         self._record_command_used(name)
         log.debug("command %s finished in %.3fs", name, time.time() - start)
         if result:
             self._log(str(result), "info")
         if not self._in_hook:
             hooks.fire(self, "after_command", command=name)
+        return str(result) if result else ""
 
     # ── محادثة مع المخ (المرحلة الوحيدة اللي بتستهلك حصة) ─────────────
     def _tool_catalog(self) -> str:
@@ -539,7 +613,7 @@ class AssistantEngine:
             f"{c.name} — {c.description}" for c in self.registry.list_commands()
         )
 
-    def _converse_async(self, text: str):
+    def _converse_async(self, text: str, step: int = 0):
         """بينادي المخ على thread منفصل.
 
         مهم: `_run_loop` بيشتغل على thread واحد بينفذ كل حاجة بالتتابع.
@@ -548,11 +622,89 @@ class AssistantEngine:
         طول المدة دي. فبنفصله على thread لوحده والطابور يفضل ماشي.
         """
         threading.Thread(
-            target=self._converse, args=(text,), daemon=True,
+            target=self._converse, args=(text, step), daemon=True,
             name="nezuko-brain",
         ).start()
 
-    def _converse(self, text: str):
+    @staticmethod
+    def _looks_hard(text: str) -> bool:
+        """السؤال ده محتاج استدلال ولا مجرد رد؟
+
+        بنستخدمه عشان نحقن تعليمة "فكّر خطوة بخطوة" في الأسئلة الصعبة
+        بس. حقنها في كل رسالة كان هيخلي "إزيك" ترجع مقال — والأهم إنها
+        بتبطّأ كل حاجة من غير فايدة.
+        """
+        low = intents.normalize(text)
+        if any(marker in low for marker in _HARD_MARKERS):
+            return True
+        if _MATH_RE.search(text):
+            return True
+        # سؤال طويل غالبًا فيه شروط متعددة لازم تتحل بالترتيب
+        return len(text) > 220 and "?" in text + "؟"
+
+    def _summary_text(self) -> str:
+        """ملخص الجزء القديم من المحادثة، لو اتضغط قبل كده."""
+        if self.chat_history and self.chat_history[0].get("role") == "system":
+            return str(self.chat_history[0].get("content", ""))
+        return ""
+
+    def _live_turns(self) -> list[dict]:
+        """الرسايل الحقيقية من غير رسالة الملخص."""
+        return self.chat_history[1:] if self._summary_text() else self.chat_history
+
+    def _compact_history(self, b) -> None:
+        """بيلخّص أقدم جزء من المحادثة بدل ما يرميه.
+
+        قبل كده كان `del chat_history[:-30]` — يعني الدور الواحد
+        وتلاتين بيختفي خالص، وبعده نيزوكو مش فاكرة إنك أصلاً قلت
+        إنك شغال على مشروع معيّن. الضغط بيحوّل القديم لملخص قصير
+        بيفضل مثبت، فالحقايق بتعيش والتوكنات بتقل.
+
+        بيكلّف نداء نموذج واحد، وبيحصل كل ~18 رسالة مش كل رسالة.
+        """
+        turns = self._live_turns()
+        if len(turns) <= _MAX_CHAT_TURNS:
+            return
+
+        old, recent = turns[:-_COMPACT_KEEP], turns[-_COMPACT_KEEP:]
+        previous = self._summary_text()
+        transcript = "\n".join(
+            f"{m.get('role', '?')}: {m.get('content', '')}" for m in old
+        )
+        reply = b.chat([
+            {"role": "system", "content": (
+                "You are compacting the earlier part of a conversation so it "
+                "can be dropped without losing what matters.\n\n"
+                "Keep: what the user is working on, decisions they made, "
+                "file paths and names, values and settings they gave, "
+                "constraints they stated, and anything still unresolved.\n"
+                "Drop: pleasantries, restatements, and anything already "
+                "superseded by a later message.\n\n"
+                "Write it as compact notes, not prose. Keep it under 250 "
+                "words. Write in the language the conversation is in."
+            )},
+            {"role": "user", "content": (
+                (f"Notes so far:\n{previous}\n\n" if previous else "")
+                + f"New portion to fold in:\n{transcript}"
+            )},
+        ])
+
+        if reply:
+            self.chat_history = [
+                {"role": "system", "content": (
+                    "Notes from earlier in this conversation:\n" + reply.text
+                )},
+                *recent,
+            ]
+            self._log(
+                f"⎿ compacted {len(old)} older messages into notes", "info"
+            )
+        else:
+            # التلخيص فشل — نقص زي الأول. مش أسوأ من السلوك القديم،
+            # والبديل (نسيب المحادثة تكبر) هيكسر سياق المزوّد.
+            self.chat_history = ([{"role": "system", "content": previous}] if previous else []) + recent
+
+    def _converse(self, text: str, step: int = 0):
         b = brain.get_brain()
         if not b.ready():
             self._log(
@@ -564,29 +716,46 @@ class AssistantEngine:
             return
 
         style = styles.prompt_for()
+        summary = self._summary_text()
         messages = [
             {"role": "system", "content": (
                 _SYSTEM_PROMPT
                 + (f"\n{style}\n" if style else "")
+                + (_THINK_HINT if self._looks_hard(text) else "")
+                + (f"\n{summary}\n" if summary else "")
                 + "\nالأوامر المتاحة:\n" + self._tool_catalog()
             )},
-            *self.chat_history[-_MAX_CHAT_TURNS:],
+            *self._live_turns()[-_MAX_CHAT_TURNS:],
             {"role": "user", "content": text},
         ]
         cfg = brain.load_config()
-        reply = b.deep_chat(messages) if cfg.get("deep_mode") else b.chat(messages)
+        # الوضع العميق: يدوي دايمًا، أو تلقائي في الأسئلة الصعبة بس لو
+        # المستخدم فعّل auto_deep. مخليينه مقفول افتراضيًا عن قصد —
+        # بيستهلك ~4 أضعاف الحصة، وده قرار المستخدم مش قرارنا.
+        go_deep = bool(cfg.get("deep_mode")) or (
+            bool(cfg.get("auto_deep")) and self._looks_hard(text)
+        )
+        reply = b.deep_chat(messages) if go_deep else b.chat(messages)
 
         if not reply:
             self._log(f"❌ المخ مردش: {reply.error}", "error")
             return
 
-        body, tool = self._split_tool_call(reply.text)
+        body, tool, question = self._split_directives(reply.text)
         badge = f"{'🔒' if reply.is_local else '☁️'} {reply.label}"
 
         self.chat_history.append({"role": "user", "content": text})
         self.chat_history.append({"role": "assistant", "content": reply.text})
-        del self.chat_history[:-_MAX_CHAT_TURNS]
+        self._compact_history(b)
         sessions.save(self.session_id, self.chat_history)
+
+        # ── سأل بدل ما يخمّن ──────────────────────────────────────────
+        if question is not None:
+            # ردك الجاي هو الإجابة — يروح للمخ مباشرة مش للقاموس
+            self._awaiting_answer = True
+            prefix = f"{body}\n\n" if body else ""
+            self._log(f"{prefix}❓ {question}\n— {badge}", "info")
+            return
 
         if tool is None:
             self._log(f"{body}\n\n— {badge}", "info")
@@ -599,34 +768,71 @@ class AssistantEngine:
             return
 
         shown = f"{tool_name} {' '.join(tool_args)}".strip()
+        step_note = f"  ({step + 1}/{_MAX_TOOL_STEPS})" if step else ""
 
         # الأمر ده في قايمة المسموح؟ ينفذ على طول من غير سؤال.
         # القايمة بتبدأ فاضية دايمًا — إنت اللي بتضيف فيها بنفسك.
         if permissions.is_allowed(tool_name):
             intents.remember(text, tool_name)
-            self._log(f"{body}\n\n↪ {shown}\n— {badge}", "info")
-            self._execute(tool_name, tool_args, text)
+            self._log(f"{body}\n\n↪ {shown}{step_note}\n— {badge}", "info")
+            result = self._execute(tool_name, tool_args, text)
+            self._continue_chain(tool_name, result, step)
             return
 
+        self._chain_step = step
         self._pending_intent = (tool_name, tool_args, text)
         self._log(
-            f"{body}\n\n🔧 محتاجة أشغّل: {shown}\n"
+            f"{body}\n\n🔧 محتاجة أشغّل: {shown}{step_note}\n"
             "اكتب y للتنفيذ، أو a عشان تسمح بالأمر ده دايمًا، "
             "أو أي حاجة تانية للإلغاء.\n"
             f"— {badge}",
             "info",
         )
 
+    def _continue_chain(self, tool_name: str, result: str | None, step: int):
+        """بيرجّع نتيجة الأمر للمخ عشان يقرر الخطوة اللي بعدها.
+
+        دي الفجوة اللي كانت بتخلي نيزوكو أضعف في شغل الكود: النموذج كان
+        بيقترح أمر واحد وخلاص، ونتيجته عمرها ما بترجعله. يعني مكانش
+        ينفع "شغّل الاختبارات → اقرا الخطأ → صلّحه" — وده بالظبط الشكل
+        اللي بيخلي مساعد يعرف يصلّح كود فعلاً.
+
+        كل خطوة جديدة بتعدي على نفس التأكيد — مفيش تنفيذ تلقائي.
+        """
+        if result is None or step + 1 >= _MAX_TOOL_STEPS:
+            if result is not None and step + 1 >= _MAX_TOOL_STEPS:
+                self._log(
+                    f"⏹️ وقفت بعد {_MAX_TOOL_STEPS} خطوات — قول لي أكمّل لو "
+                    "لسه محتاج.",
+                    "warn",
+                )
+            return
+        self._converse_async(
+            f"Output of `{tool_name}`:\n{result}\n\n"
+            "If the task needs another step, propose it. If it is done, say so.",
+            step + 1,
+        )
+
     @staticmethod
-    def _split_tool_call(reply: str) -> tuple[str, tuple[str, list[str]] | None]:
-        """بيفصل نص الرد عن سطر `TOOL:` لو موجود.
+    def _split_directives(
+        reply: str,
+    ) -> tuple[str, tuple[str, list[str]] | None, str | None]:
+        """بيفصل نص الرد عن سطر `TOOL:` أو `ASK:` لو موجود.
 
         بنستخدم بروتوكول نصي بدل function-calling الخاص بكل مزوّد، عشان
         نفس الكود يشتغل على أي نموذج من غير ترجمة schema لكل واحد.
+
+        لو النموذج خالف التعليمات وبعت الاتنين، السؤال بيكسب: نسأل أأمن
+        من إننا ننفذ أمر مبني على تخمين النموذج نفسه شكّك فيه.
         """
         tool = None
+        question = None
         kept: list[str] = []
         for line in reply.splitlines():
+            ask = re.match(r"^\s*ASK:\s*(.+)$", line)
+            if ask and question is None:
+                question = ask.group(1).strip()
+                continue
             m = re.match(r"^\s*TOOL:\s*(\S+)(.*)$", line)
             if m and tool is None:
                 try:
@@ -635,5 +841,7 @@ class AssistantEngine:
                     tool = (m.group(1), m.group(2).split())
                 continue
             kept.append(line)
-        return "\n".join(kept).strip(), tool
+        if question is not None:
+            tool = None
+        return "\n".join(kept).strip(), tool, question
 

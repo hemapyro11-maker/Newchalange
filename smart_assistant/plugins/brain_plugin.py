@@ -131,8 +131,13 @@ def _cmd_brain_model(ctx) -> str:
 def _cmd_brain_mode(ctx) -> str:
     cfg = brain.load_config()
     if not ctx.args:
-        cur = "deep" if cfg.get("deep_mode") else "normal"
-        return f"Current mode: {cur}\nusage: brain_mode normal|deep"
+        if cfg.get("deep_mode"):
+            cur = "deep (always)"
+        elif cfg.get("auto_deep"):
+            cur = "auto (deep only when the question needs working out)"
+        else:
+            cur = "normal"
+        return f"Current mode: {cur}\nusage: brain_mode normal|auto|deep"
     mode = ctx.args[0].lower()
     if mode in ("deep", "عميق"):
         cfg["deep_mode"] = True
@@ -141,7 +146,17 @@ def _cmd_brain_mode(ctx) -> str:
             "🧠 Deep mode on — several models answer and the strongest merges them.\n"
             "⚠️ Uses ~4× the quota and is slower. Save it for questions that matter."
         )
+    if mode in ("auto", "تلقائي", "تلقاءي"):
+        cfg["deep_mode"] = False
+        cfg["auto_deep"] = True
+        brain.save_config(cfg)
+        return (
+            "🎯 Auto mode — normal speed for ordinary messages, deep mode only for\n"
+            "questions that need working out (why/compare/calculate/debug).\n"
+            "Costs the extra quota on those questions only, not on every message."
+        )
     cfg["deep_mode"] = False
+    cfg["auto_deep"] = False
     brain.save_config(cfg)
     return "⚡ Normal mode — one model, faster and cheaper."
 

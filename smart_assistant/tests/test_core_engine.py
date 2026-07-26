@@ -519,33 +519,386 @@ def test_deep_mode_uses_deep_chat(bare_engine, monkeypatch):
     assert used.get("deep") is True
 
 
-# ── فصل سطر TOOL ─────────────────────────────────────────────────────
+# ── فصل سطر TOOL / ASK ───────────────────────────────────────────────
 
 def test_split_tool_call_extracts_command_and_args():
-    body, tool = AssistantEngine._split_tool_call("شرح كده.\nTOOL: probe /a/b.mp4")
+    body, tool, _q = AssistantEngine._split_directives("شرح كده.\nTOOL: probe /a/b.mp4")
     assert body == "شرح كده."
     assert tool == ("probe", ["/a/b.mp4"])
 
 
 def test_split_tool_call_returns_none_when_absent():
-    body, tool = AssistantEngine._split_tool_call("رد عادي من غير أدوات")
+    body, tool, _q = AssistantEngine._split_directives("رد عادي من غير أدوات")
     assert tool is None
     assert body == "رد عادي من غير أدوات"
 
 
 def test_split_tool_call_handles_quoted_args():
-    _, tool = AssistantEngine._split_tool_call('TOOL: probe "C:/My Files/a.mp4"')
+    _b, tool, _q = AssistantEngine._split_directives('TOOL: probe "C:/My Files/a.mp4"')
     assert tool == ("probe", ["C:/My Files/a.mp4"])
 
 
 def test_split_tool_call_survives_bad_quoting():
-    _, tool = AssistantEngine._split_tool_call('TOOL: echo "unterminated')
+    _b, tool, _q = AssistantEngine._split_directives('TOOL: echo "unterminated')
     assert tool[0] == "echo"
 
 
 def test_split_tool_call_takes_only_the_first_tool_line():
-    _, tool = AssistantEngine._split_tool_call("TOOL: echo one\nTOOL: echo two")
+    _b, tool, _q = AssistantEngine._split_directives("TOOL: echo one\nTOOL: echo two")
     assert tool == ("echo", ["one"])
+
+
+def test_split_extracts_a_question():
+    body, tool, question = AssistantEngine._split_directives(
+        "محتاج أعرف حاجة الأول.\nASK: أنهي ملف بالظبط؟"
+    )
+    assert question == "أنهي ملف بالظبط؟"
+    assert tool is None
+    assert body == "محتاج أعرف حاجة الأول."
+
+
+def test_split_takes_only_the_first_question():
+    _b, _t, question = AssistantEngine._split_directives("ASK: واحد\nASK: اتنين")
+    assert question == "واحد"
+
+
+def test_a_question_wins_over_a_tool_in_the_same_reply():
+    """لو النموذج خالف التعليمات وبعت الاتنين — نسأل. تنفيذ أمر مبني
+    على تخمين النموذج نفسه شكّك فيه هو أسوأ الاحتمالات."""
+    _b, tool, question = AssistantEngine._split_directives(
+        "ASK: أنهي ملف؟\nTOOL: echo guess"
+    )
+    assert question == "أنهي ملف؟"
+    assert tool is None
+
+
+# ── يسأل بدل ما يخمّن ────────────────────────────────────────────────
+
+def test_a_question_does_not_queue_any_command(bare_engine, monkeypatch):
+    _fake_brain(monkeypatch, "ASK: أنهي ملف بالظبط؟")
+    logs = []
+    bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
+    bare_engine._converse("افحص الملف")
+    assert bare_engine._pending_intent is None
+    assert any("أنهي ملف بالظبط؟" in msg for _, msg in logs)
+
+
+def test_your_answer_goes_straight_to_the_brain_not_the_dictionary(
+    bare_engine, monkeypatch
+):
+    """لو الإجابة عدّت على القاموس المحلي الأول، رد زي "التقرير" كان
+    هيتفهم كأمر أو ميتفهمش خالص بدل ما يتحسب إجابة على السؤال."""
+    _fake_brain(monkeypatch, "ASK: أنهي ملف؟")
+    bare_engine._converse("افحص الملف")
+    assert bare_engine._awaiting_answer is True
+
+    sent = {}
+    monkeypatch.setattr(
+        bare_engine, "_converse_async",
+        lambda text, step=0: sent.update(text=text),
+    )
+    bare_engine._dispatch("التقرير")
+    assert sent["text"] == "التقرير"
+    assert bare_engine._awaiting_answer is False
+
+
+def test_the_waiting_flag_clears_so_the_next_message_is_normal(
+    bare_engine, monkeypatch
+):
+    _fake_brain(monkeypatch, "ASK: أنهي واحد؟")
+    bare_engine._converse("حاجة")
+    monkeypatch.setattr(bare_engine, "_converse_async", lambda text, step=0: None)
+    bare_engine._dispatch("الأول")
+    assert bare_engine._awaiting_answer is False
+
+
+# ── كشف الأسئلة الصعبة (بيشغّل التفكير خطوة بخطوة) ──────────────────
+
+@pytest.mark.parametrize("text", [
+    "ليه الكود ده بطيء؟",
+    "قارن بين الطريقتين",
+    "why is this slower",
+    "compare these two approaches",
+    "احسب 12 * 340",
+    "what is 15% of 240",
+    "explain the complexity here",
+    "ايه السبب في المشكله دي",
+])
+def test_hard_questions_are_detected(text):
+    assert AssistantEngine._looks_hard(text) is True
+
+
+@pytest.mark.parametrize("text", [
+    "إزيك",
+    "hi there",
+    "افتح الإعدادات",
+    "شكرًا",
+])
+def test_ordinary_messages_are_not_treated_as_hard(text):
+    assert AssistantEngine._looks_hard(text) is False
+
+
+def test_think_step_by_step_is_injected_only_when_hard(bare_engine, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
+    monkeypatch.setattr(
+        brain.Brain, "chat",
+        lambda self, messages, **kw: [
+            seen.update(system=messages[0]["content"]),
+            brain.BrainReply(text="رد", provider="f", label="F"),
+        ][1],
+    )
+    bare_engine._converse("إزيك")
+    assert "step by step" not in seen["system"]
+
+    bare_engine._converse("ليه ده بيحصل؟")
+    assert "step by step" in seen["system"]
+
+
+def test_auto_deep_stays_off_unless_you_turn_it_on(bare_engine, monkeypatch):
+    """الوضع العميق بيستهلك ~4 أضعاف الحصة — قرار المستخدم مش قرارنا."""
+    monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
+    used = {}
+    monkeypatch.setattr(
+        brain.Brain, "chat",
+        lambda self, messages, **kw: [
+            used.setdefault("normal", True),
+            brain.BrainReply(text="رد", provider="f", label="F"),
+        ][1],
+    )
+    monkeypatch.setattr(
+        brain.Brain, "deep_chat",
+        lambda self, messages, **kw: [
+            used.setdefault("deep", True),
+            brain.BrainReply(text="رد", provider="f", label="F"),
+        ][1],
+    )
+    bare_engine._converse("ليه ده بيحصل؟")
+    assert used == {"normal": True}
+
+
+def test_auto_deep_escalates_hard_questions_when_enabled(bare_engine, monkeypatch):
+    monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
+    used = {}
+    monkeypatch.setattr(
+        brain.Brain, "chat",
+        lambda self, messages, **kw: [
+            used.setdefault("normal", True),
+            brain.BrainReply(text="رد", provider="f", label="F"),
+        ][1],
+    )
+    monkeypatch.setattr(
+        brain.Brain, "deep_chat",
+        lambda self, messages, **kw: [
+            used.setdefault("deep", True),
+            brain.BrainReply(text="رد", provider="f", label="F"),
+        ][1],
+    )
+    cfg = brain.load_config()
+    cfg["auto_deep"] = True
+    brain.save_config(cfg)
+
+    bare_engine._converse("إزيك")       # عادي → مايتصعّدش
+    assert used == {"normal": True}
+    bare_engine._converse("ليه ده بيحصل؟")  # صعب → يتصعّد
+    assert used.get("deep") is True
+
+
+# ── ضغط المحادثة بدل رميها ───────────────────────────────────────────
+
+def _long_history(n: int) -> list[dict]:
+    out = []
+    for i in range(n):
+        out += [
+            {"role": "user", "content": f"رسالة {i}"},
+            {"role": "assistant", "content": f"رد {i}"},
+        ]
+    return out
+
+
+def test_old_messages_become_notes_instead_of_being_dropped(
+    bare_engine, monkeypatch
+):
+    """الفرق العملي: بعد 30 دور، نيزوكو تفضل فاكرة إنك شغال على
+    مشروع معيّن — مش تسأل من الأول."""
+    monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
+    monkeypatch.setattr(
+        brain.Brain, "chat",
+        lambda self, messages, **kw: brain.BrainReply(
+            text="المستخدم شغال على مشروع نيزوكو", provider="f", label="F"
+        ),
+    )
+    bare_engine.chat_history = _long_history(20)
+    bare_engine._compact_history(brain.get_brain())
+
+    assert bare_engine.chat_history[0]["role"] == "system"
+    assert "مشروع نيزوكو" in bare_engine.chat_history[0]["content"]
+    assert len(bare_engine.chat_history) == core_engine._COMPACT_KEEP + 1
+
+
+def test_compaction_does_not_run_below_the_threshold(bare_engine, monkeypatch):
+    """كل ضغط بيكلّف نداء نموذج — مينفعش يحصل كل رسالة."""
+    monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
+    calls = []
+    monkeypatch.setattr(
+        brain.Brain, "chat",
+        lambda self, messages, **kw: [
+            calls.append(1),
+            brain.BrainReply(text="ملخص", provider="f", label="F"),
+        ][1],
+    )
+    bare_engine.chat_history = _long_history(5)
+    bare_engine._compact_history(brain.get_brain())
+    assert calls == []
+
+
+def test_earlier_notes_are_folded_into_the_new_ones(bare_engine, monkeypatch):
+    """الملخص بيتراكم — منستبدلوش، وإلا أقدم حاجة بتضيع في كل ضغطة."""
+    monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
+    seen = {}
+    monkeypatch.setattr(
+        brain.Brain, "chat",
+        lambda self, messages, **kw: [
+            seen.update(prompt=messages[-1]["content"]),
+            brain.BrainReply(text="ملخص جديد", provider="f", label="F"),
+        ][1],
+    )
+    bare_engine.chat_history = [
+        {"role": "system", "content": "ملاحظات قديمة: بيشتغل على الصوت"},
+        *_long_history(20),
+    ]
+    bare_engine._compact_history(brain.get_brain())
+    assert "بيشتغل على الصوت" in seen["prompt"]
+
+
+def test_failed_compaction_still_trims_instead_of_growing_forever(
+    bare_engine, monkeypatch
+):
+    monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
+    monkeypatch.setattr(
+        brain.Brain, "chat",
+        lambda self, messages, **kw: brain.BrainReply(text="", error="مفيش نت"),
+    )
+    bare_engine.chat_history = _long_history(20)
+    bare_engine._compact_history(brain.get_brain())
+    assert len(bare_engine.chat_history) == core_engine._COMPACT_KEEP
+
+
+def test_the_notes_reach_the_model(bare_engine, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
+    monkeypatch.setattr(
+        brain.Brain, "chat",
+        lambda self, messages, **kw: [
+            seen.update(system=messages[0]["content"]),
+            brain.BrainReply(text="رد", provider="f", label="F"),
+        ][1],
+    )
+    bare_engine.chat_history = [
+        {"role": "system", "content": "ملاحظات: المشروع اسمه نيزوكو"},
+    ]
+    bare_engine._converse("كمّل")
+    assert "المشروع اسمه نيزوكو" in seen["system"]
+
+
+def test_notes_are_not_replayed_as_a_conversation_turn(bare_engine, monkeypatch):
+    """رسالة الملخص بتتحط في الـ system prompt — لو اتبعتت كمان كدور
+    عادي كان النموذج هيشوفها مرتين."""
+    seen = {}
+    monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
+    monkeypatch.setattr(
+        brain.Brain, "chat",
+        lambda self, messages, **kw: [
+            seen.update(rest=messages[1:-1]),
+            brain.BrainReply(text="رد", provider="f", label="F"),
+        ][1],
+    )
+    bare_engine.chat_history = [
+        {"role": "system", "content": "ملاحظات"},
+        {"role": "user", "content": "كلام"},
+    ]
+    bare_engine._converse("كمّل")
+    assert all(m["role"] != "system" for m in seen["rest"])
+
+
+# ── سلسلة خطوات: نتيجة الأمر بترجع للمخ ──────────────────────────────
+
+def test_command_result_is_returned_so_it_can_feed_the_next_step(bare_engine):
+    bare_engine.registry.register("echo2", lambda ctx: "the output")
+    assert bare_engine._execute("echo2", [], "echo2") == "the output"
+
+
+def test_a_failing_command_returns_none_and_stops_the_chain(bare_engine):
+    def boom(ctx):
+        raise RuntimeError("مكسور")
+    bare_engine.registry.register("boom", boom)
+    assert bare_engine._execute("boom", [], "boom") is None
+
+
+def test_tool_output_is_sent_back_to_the_brain(bare_engine, monkeypatch):
+    """ده اللي بيخلي "شغّل الاختبارات → اقرا الخطأ → صلّحه" ممكنة."""
+    sent = {}
+    monkeypatch.setattr(
+        bare_engine, "_converse_async",
+        lambda text, step=0: sent.update(text=text, step=step),
+    )
+    bare_engine._continue_chain("run_tests", "2 failed", 0)
+    assert "run_tests" in sent["text"]
+    assert "2 failed" in sent["text"]
+    assert sent["step"] == 1
+
+
+def test_the_chain_stops_at_the_step_limit(bare_engine, monkeypatch):
+    """السقف هو اللي بيمنع حلقة تولّع الحصة."""
+    calls = []
+    monkeypatch.setattr(
+        bare_engine, "_converse_async",
+        lambda text, step=0: calls.append(step),
+    )
+    bare_engine._continue_chain("x", "out", core_engine._MAX_TOOL_STEPS - 1)
+    assert calls == []
+
+
+def test_a_failed_step_does_not_continue_the_chain(bare_engine, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        bare_engine, "_converse_async",
+        lambda text, step=0: calls.append(step),
+    )
+    bare_engine._continue_chain("x", None, 0)
+    assert calls == []
+
+
+def test_confirming_a_chained_step_continues_the_chain(bare_engine, monkeypatch):
+    _fake_brain(monkeypatch, "هجرب.\nTOOL: echo3 hi")
+    bare_engine.registry.register("echo3", lambda ctx: "done")
+    bare_engine._converse("اعمل حاجة")
+    assert bare_engine._pending_intent is not None
+
+    followed = {}
+    monkeypatch.setattr(
+        bare_engine, "_converse_async",
+        lambda text, step=0: followed.update(text=text, step=step),
+    )
+    bare_engine._dispatch("y")
+    assert "done" in followed["text"]
+    assert followed["step"] == 1
+
+
+def test_a_command_you_typed_yourself_does_not_start_a_chain(
+    bare_engine, monkeypatch
+):
+    """السلسلة للأوامر اللي المخ اقترحها بس — أمر كتبته بإيدك مالوش
+    متابعة، وإلا كل أمر عادي كان هيصرف من الحصة."""
+    _no_brain(monkeypatch)
+    bare_engine.registry.register("echo4", lambda ctx: "out")
+    calls = []
+    monkeypatch.setattr(
+        bare_engine, "_converse_async",
+        lambda text, step=0: calls.append(text),
+    )
+    bare_engine._dispatch("echo4 hi")
+    assert calls == []
 
 
 # ── التنفيذ مش بيتقفل على thread المحرك ─────────────────────────────

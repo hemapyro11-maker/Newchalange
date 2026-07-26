@@ -127,6 +127,27 @@ def test_mode_without_args_reports_current(make_ctx):
     assert "Current mode" in bp._cmd_brain_mode(make_ctx("brain_mode", []))
 
 
+def test_auto_mode_escalates_only_hard_questions(make_ctx):
+    out = bp._cmd_brain_mode(make_ctx("brain_mode auto", ["auto"]))
+    cfg = brain.load_config()
+    assert cfg["auto_deep"] is True
+    assert cfg["deep_mode"] is False   # مش دايمًا عميق — على حسب السؤال
+    assert "not on every message" in out
+
+
+def test_normal_clears_auto_too(make_ctx):
+    bp._cmd_brain_mode(make_ctx("brain_mode auto", ["auto"]))
+    bp._cmd_brain_mode(make_ctx("brain_mode normal", ["normal"]))
+    cfg = brain.load_config()
+    assert cfg["auto_deep"] is False
+    assert cfg["deep_mode"] is False
+
+
+def test_mode_reports_auto_when_set(make_ctx):
+    bp._cmd_brain_mode(make_ctx("brain_mode auto", ["auto"]))
+    assert "auto" in bp._cmd_brain_mode(make_ctx("brain_mode", []))
+
+
 def test_local_on_blocks_cloud_and_says_so(make_ctx):
     out = bp._cmd_brain_local(make_ctx("brain_local on", ["on"]))
     assert "nothing leaves your machine" in out
