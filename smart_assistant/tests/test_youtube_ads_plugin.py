@@ -49,7 +49,7 @@ def test_budget_calc_respects_custom_days(make_ctx):
 
 def test_budget_calc_shows_view_range(make_ctx):
     result = yap._cmd_ads_budget_calc(make_ctx("ads_budget_calc", ["100", "5"]))
-    assert "منخفض" in result and "متوسط" in result and "مرتفع" in result
+    assert "low:" in result and "mid:" in result and "high:" in result
 
 
 # ── ads_targeting_advisor ────────────────────────────────────────────────
@@ -67,7 +67,7 @@ def test_targeting_advisor_invalid_goal(make_ctx):
 def test_targeting_advisor_views_goal(make_ctx):
     result = yap._cmd_ads_targeting_advisor(make_ctx("ads_targeting_advisor", ["ألعاب", "views"]))
     assert "Affinity" in result
-    assert "تجنب" in result
+    assert "Avoid" in result
 
 
 def test_targeting_advisor_sales_goal_recommends_remarketing(make_ctx):
@@ -95,19 +95,19 @@ def test_copy_score_empty_parts_rejected(make_ctx):
 
 def test_copy_score_good_copy_detects_cta_and_urgency(make_ctx):
     result = yap._cmd_ads_copy_score(make_ctx("ads_copy_score", ["اشترك", "الآن", "|", "عرض", "لفترة", "محدودة", "جرب", "مجانا"]))
-    assert "فيه دعوة لاتخاذ إجراء" in result
-    assert "فيه إحساس بالإلحاح" in result
+    assert "has a call to action" in result
+    assert "conveys urgency" in result
 
 
 def test_copy_score_missing_cta_flagged(make_ctx):
     result = yap._cmd_ads_copy_score(make_ctx("ads_copy_score", ["عنوان", "عادي", "|", "وصف", "عادي", "جدا"]))
-    assert "مفيش CTA واضح" in result
+    assert "no clear call to action" in result
 
 
 def test_copy_score_long_headline_flagged(make_ctx):
     long_words = ["كلمة"] * 30
     result = yap._cmd_ads_copy_score(make_ctx("ads_copy_score", [*long_words, "|", "وصف", "قصير"]))
-    assert "أطول من" in result
+    assert "over 100 characters" in result
 
 
 # ── ads_campaign_plan ────────────────────────────────────────────────────
