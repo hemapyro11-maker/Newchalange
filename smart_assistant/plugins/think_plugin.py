@@ -89,10 +89,10 @@ _ON = {"on", "y", "yes", "تشغيل", "شغل", "شغال"}
 _OFF = {"off", "n", "no", "وقف", "إيقاف", "متوقف"}
 
 CRITIQUE_INSTRUCTION = (
-    "راجع إجابتك اللي فوق دي بعين ناقدة: فيها حاجة ناقصة، غير دقيقة، أو "
-    "غامضة؟ لو الإجابة سليمة وكاملة زي ما هي، اكتبها تاني بالظبط من غير "
-    "تغيير. لو محتاجة تحسين، اكتب النسخة النهائية المحسّنة بس — من غير "
-    "أي شرح عن التعديل نفسه، ومن غير أي TOOL: خالص في الرد ده."
+    "Look at your answer above critically: is anything missing, inaccurate, or "
+    "vague? If it is sound and complete as it stands, repeat it exactly, unchanged. "
+    "If it needs improving, write only the improved final version — with no "
+    "commentary about the revision, and no TOOL: line at all in this reply."
 )
 CRITIQUE_SYSTEM = (
     "You are reviewing your own previous answer for accuracy and "
@@ -348,21 +348,21 @@ def _ask_ollama_chat(messages: list[dict], model: str) -> str:
 def _invoke_tool(engine, name: str, args: list[str]) -> str:
     cmd = engine.registry.get(name)
     if cmd is None:
-        return "❌ الأداة دي مش موجودة فعليًا في نيزوكو"
+        return "❌ that tool does not actually exist in Nezuko"
     from core_engine import CommandContext
     tool_ctx = CommandContext(raw=f"{name} {' '.join(args)}".strip(), args=args, engine=engine)
     try:
         result = cmd.handler(tool_ctx)
     except Exception as e:
-        return f"❌ حصل خطأ أثناء تشغيل الأداة: {e}"
-    return str(result) if result else "(الأداة اشتغلت من غير أي output)"
+        return f"❌ the tool raised an error: {e}"
+    return str(result) if result else "(the tool ran and produced no output)"
 
 
 _OLLAMA_MISSING_MSG = (
-    "⚠️ مفيش نموذج محلي شغال (Ollama) عشان أفكر معاك.\n"
-    "ده مجاني بالكامل — نزّله من https://ollama.com وشغّل:\n"
+    "⚠️ No local model running (Ollama) to think with.\n"
+    "It is completely free — get it from https://ollama.com then run:\n"
     "   ollama pull llama3.2\n"
-    "لتفكير أعمق فعليًا، جرب نموذج استدلال مخصص زي DeepSeek-R1 (مجاني برضه):\n"
+    "For genuinely deeper reasoning, try a dedicated reasoning model like DeepSeek-R1 (also free):\n"
     "   ollama pull deepseek-r1\n"
     "   think_model deepseek-r1"
 )
@@ -382,7 +382,7 @@ def _self_critique(engine, draft: str) -> str:
     revised = _strip_plan_line(_strip_tool_line(revised))
     if not revised:
         return draft
-    state["history"].append({"role": "assistant", "content": f"[مراجعة ذاتية] {revised}"})
+    state["history"].append({"role": "assistant", "content": f"[self-review] {revised}"})
     return revised
 
 
@@ -415,11 +415,11 @@ def _continue_reasoning(engine) -> str:
         shown = f"{cmd_name} {' '.join(cmd_args)}".strip()
         out = []
         if plan:
-            out.append(f"🗺 الخطة: {plan}")
+            out.append(f"🗺 Plan: {plan}")
         out.append(f"🧠 {clean_reply}")
         out.append("")
-        out.append(f"🔧 محتاج أشغّل: {shown}")
-        out.append("موافق؟ اكتب: think y   (أو think n للرفض)")
+        out.append(f"🔧 I need to run: {shown}")
+        out.append("Go ahead? type: think y   (or think n to refuse)")
         return "\n".join(out)
 
     # إجابة نهائية — إما مفيش أداة مطلوبة، أو النموذج هلوس اسم أداة وهمي،
@@ -430,12 +430,12 @@ def _continue_reasoning(engine) -> str:
     if valid_tool is not None and suppress:
         # الملاحظة دي بتتضاف بعد المراجعة الذاتية، مش قبلها — عشان تفضل
         # مضمونة تظهر للمستخدم حتى لو النموذج أعاد صياغة كل حاجة تانية.
-        final_text += "\n\n⚠️ (اتجاهل طلب تشغيل أداة تاني بعد فشل متكرر — جرب توضّح المطلوب بشكل مختلف)"
+        final_text += "\n\n⚠️ (ignored another tool request after repeated failures — try phrasing what you want differently)"
 
     state["plan"] = None
     out = []
     if plan:
-        out.append(f"🗺 الخطة: {plan}")
+        out.append(f"🗺 Plan: {plan}")
     out.append(f"🧠 {final_text}")
     return "\n".join(out)
 
@@ -448,14 +448,14 @@ def _cmd_think(ctx) -> str:
     text = parts[1].strip() if len(parts) > 1 else ""
     if not text:
         return (
-            "usage: think <رسالتك>\n"
-            "   think y / think n — تأكيد أو رفض تشغيل أداة مقترحة\n"
-            "   think_reset — بداية محادثة جديدة\n"
-            "   think_status — حالة الجلسة الحالية\n"
-            "   think_model <name> — تغيير النموذج المحلي المستخدم\n"
-            "   think_critique on|off — تشغيل/إيقاف المراجعة الذاتية للإجابات\n"
-            "   think_remember <ملاحظة> — حفظ حقيقة دائمة تعدي الجلسات\n"
-            "   think_forget — مسح كل الملاحظات الدائمة"
+            "usage: think <your message>\n"
+            "   think y / think n — approve or refuse a proposed tool\n"
+            "   think_reset — start a fresh conversation\n"
+            "   think_status — state of the current session\n"
+            "   think_model <name> — change which local model is used\n"
+            "   think_critique on|off — turn self-review of answers on or off\n"
+            "   think_remember <note> — save a fact that outlives sessions\n"
+            "   think_forget — clear every saved note"
         )
 
     low = text.lower()
@@ -471,16 +471,16 @@ def _cmd_think(ctx) -> str:
             note = ""
             if state["tool_fail_streak"] >= MAX_CONSECUTIVE_TOOL_FAILURES:
                 note = (
-                    f"\n[تنبيه تلقائي: {cmd_name} فشلت {state['tool_fail_streak']} مرات "
-                    "متتالية — جرب أسلوب مختلف تمامًا أو جاوب المستخدم مباشرة من غير "
-                    "أداة تانية دلوقتي.]"
+                    f"\n[automatic note: {cmd_name} has failed {state['tool_fail_streak']} times "
+                    "in a row — try a completely different approach, or answer the user directly without "
+                    "another tool right now.]"
                 )
                 state["tool_fail_streak"] = 0
                 state["suppress_next_tool"] = True
-            state["history"].append({"role": "user", "content": f"[نتيجة تشغيل {cmd_name}]:\n{result}{note}"})
+            state["history"].append({"role": "user", "content": f"[output of {cmd_name}]:\n{result}{note}"})
             return _continue_reasoning(engine)
         if low in _NO:
-            state["history"].append({"role": "user", "content": "[رفضت تشغيل الأداة المقترحة]"})
+            state["history"].append({"role": "user", "content": "[the user refused the proposed tool]"})
             return _continue_reasoning(engine)
         # مش y ولا n — نسيب الاقتراح القديم ونعالج النص كرسالة جديدة عادية
 
@@ -498,48 +498,48 @@ def _cmd_think_reset(ctx) -> str:
     state["tool_fail_streak"] = 0
     state["suppress_next_tool"] = False
     return (
-        f"🧹 اتمسحت الجلسة ({n} رسالة). ابدأ من جديد بـ: think <رسالتك>\n"
-        "(الملاحظات الدائمة لو فيه لسه محفوظة — استخدم think_forget لمسحها)"
+        f"🧹 session cleared ({n} messages). Start again with: think <your message>\n"
+        "(any saved notes are still there — use think_forget to clear those)"
     )
 
 
 def _cmd_think_status(ctx) -> str:
     state = _state(ctx.engine)
     lines = [
-        f"🧠 النموذج الحالي: {state['model']}",
-        f"💬 عدد الرسائل في الجلسة: {len(state['history'])}",
-        f"🔎 المراجعة الذاتية: {'شغالة' if state.get('critique_enabled', True) else 'متوقفة'}",
-        f"💾 ملاحظات دائمة محفوظة: {len(_load_memory())}",
+        f"🧠 Current model: {state['model']}",
+        f"💬 Messages in this session: {len(state['history'])}",
+        f"🔎 Self-review: {'on' if state.get('critique_enabled', True) else 'off'}",
+        f"💾 Saved notes: {len(_load_memory())}",
     ]
     if state.get("plan"):
-        lines.append(f"🗺 الخطة الحالية: {state['plan']}")
+        lines.append(f"🗺 Current plan: {state['plan']}")
     if state["pending_tool"]:
         name, args = state["pending_tool"]
-        lines.append(f"🔧 في انتظار تأكيد أداة: {name} {' '.join(args)}".strip())
+        lines.append(f"🔧 Waiting on approval for: {name} {' '.join(args)}".strip())
     return "\n".join(lines)
 
 
 def _cmd_think_model(ctx) -> str:
     if not ctx.args:
         state = _state(ctx.engine)
-        return f"النموذج الحالي: {state['model']}\nusage: think_model <name>   (زي: think_model deepseek-r1)"
+        return f"Current model: {state['model']}\nusage: think_model <name>   (e.g. think_model deepseek-r1)"
     state = _state(ctx.engine)
     state["model"] = ctx.args[0]
-    return f"✅ هيستخدم النموذج: {state['model']}  (لازم يكون متثبت — جرب: ollama pull {state['model']} لو مش شغال)"
+    return f"✅ will use model: {state['model']}  (it must be installed — try: ollama pull {state['model']} if it does not work)"
 
 
 def _cmd_think_critique(ctx) -> str:
     state = _state(ctx.engine)
     if not ctx.args:
-        status = "شغالة ✅" if state.get("critique_enabled", True) else "متوقفة ❌"
-        return f"المراجعة الذاتية: {status}\nusage: think_critique on|off"
+        status = "on ✅" if state.get("critique_enabled", True) else "off ❌"
+        return f"Self-review: {status}\nusage: think_critique on|off"
     arg = ctx.args[0].lower()
     if arg in _ON:
         state["critique_enabled"] = True
-        return "✅ المراجعة الذاتية بقت شغالة — كل إجابة نهائية هتتراجع مرة قبل ما تتعرض عليك"
+        return "✅ self-review is on — every final answer gets reviewed once before you see it"
     if arg in _OFF:
         state["critique_enabled"] = False
-        return "❌ المراجعة الذاتية بقت متوقفة — الإجابات هتتعرض على طول (أسرع، لكن من غير مراجعة تانية)"
+        return "❌ self-review is off — answers appear straight away (faster, but unreviewed)"
     return "usage: think_critique on|off"
 
 
@@ -547,27 +547,27 @@ def _cmd_think_remember(ctx) -> str:
     parts = ctx.raw.split(maxsplit=1)
     note = parts[1].strip() if len(parts) > 1 else ""
     if not note:
-        return "usage: think_remember <حقيقة أو ملاحظة تتحفظ بشكل دائم عبر كل الجلسات القادمة>"
+        return "usage: think_remember <a fact or note to keep permanently, across every future session>"
     notes = _load_memory()
     notes.append(note)
     _save_memory(notes)
-    return f"💾 اتسجلت — {len(notes)} ملاحظة دائمة محفوظة دلوقتي (هتفضل موجودة حتى بعد think_reset)"
+    return f"💾 noted — {len(notes)} saved notes now (they survive think_reset)"
 
 
 def _cmd_think_forget(ctx) -> str:
     n = len(_load_memory())
     _save_memory([])
-    return f"🗑 اتمسحت كل الملاحظات الدائمة ({n} ملاحظة)"
+    return f"🗑 cleared every saved note ({n} of them)"
 
 
 def _playbooks_usage() -> str:
     return (
         "usage:\n"
-        "  think_playbooks list                    — عرض كل الـ playbooks المحفوظة\n"
-        "  think_playbooks add <name> <محتوى...>   — إنشاء/تحديث playbook (بصياغة markdown)\n"
-        "  think_playbooks show <name>              — عرض محتوى playbook معيّن\n"
-        "  think_playbooks remove <name>            — حذف playbook\n"
-        "  (name: حروف/أرقام/underscore/شرطة/عربي بس — من غير مسافات أو /)"
+        "  think_playbooks list                    — every saved playbook\n"
+        "  think_playbooks add <name> <content...> — create or update a playbook (markdown)\n"
+        "  think_playbooks show <name>             — print one playbook\n"
+        "  think_playbooks remove <name>           — delete a playbook\n"
+        "  (name: letters, digits, underscore, dash or Arabic only — no spaces or /)"
     )
 
 
@@ -579,8 +579,8 @@ def _cmd_think_playbooks(ctx) -> str:
     if sub == "list":
         names = _list_playbooks()
         if not names:
-            return "مفيش أي playbook محفوظ. أضف واحد بـ: think_playbooks add <name> <محتوى...>"
-        return "📘 الـ playbooks المتاحة:\n" + "\n".join(f"  - {n}" for n in names)
+            return "No playbooks saved. Add one with: think_playbooks add <name> <content...>"
+        return "📘 Available playbooks:\n" + "\n".join(f"  - {n}" for n in names)
 
     if sub == "add":
         parts = ctx.raw.split(maxsplit=3)
@@ -588,43 +588,43 @@ def _cmd_think_playbooks(ctx) -> str:
             return _playbooks_usage()
         name, content = parts[2], parts[3].strip()
         if not _valid_playbook_name(name):
-            return f"❌ اسم غير صالح: '{name}' — حروف/أرقام/underscore/شرطة/عربي بس، من غير مسافات أو /"
+            return f"❌ invalid name: '{name}' — letters, digits, underscore, dash or Arabic only, no spaces or /"
         if not _write_playbook(name, content):
-            return f"❌ فشل حفظ playbook '{name}'"
-        return f"✅ اتحفظ playbook '{name}' ({len(content)} حرف)"
+            return f"❌ could not save playbook '{name}'"
+        return f"✅ saved playbook '{name}' ({len(content)} characters)"
 
     if sub == "show":
         if len(ctx.args) < 2:
             return "usage: think_playbooks show <name>"
         content = _read_playbook(ctx.args[1])
         if content is None:
-            return f"❌ مفيش playbook بالاسم '{ctx.args[1]}'"
+            return f"❌ no playbook named '{ctx.args[1]}'"
         return f"📘 {ctx.args[1]}:\n{content}"
 
     if sub == "remove":
         if len(ctx.args) < 2:
             return "usage: think_playbooks remove <name>"
         if not _delete_playbook(ctx.args[1]):
-            return f"❌ مفيش playbook بالاسم '{ctx.args[1]}'"
-        return f"🗑 اتشال playbook '{ctx.args[1]}'"
+            return f"❌ no playbook named '{ctx.args[1]}'"
+        return f"🗑 removed playbook '{ctx.args[1]}'"
 
     return _playbooks_usage()
 
 
 def register(engine):
     engine.registry.register("think", _cmd_think,
-                              "think <رسالتك> — تفكير عميق متعدد الأدوار، بيستخدم أوامر نيزوكو الحقيقية كأدوات")
+                              "think <your message> — multi-turn deep reasoning that uses Nezuko's real commands as tools")
     engine.registry.register("think_reset", _cmd_think_reset,
-                              "think_reset — بداية جلسة تفكير جديدة")
+                              "think_reset — start a fresh thinking session")
     engine.registry.register("think_status", _cmd_think_status,
-                              "think_status — حالة جلسة التفكير الحالية")
+                              "think_status — state of the current thinking session")
     engine.registry.register("think_model", _cmd_think_model,
-                              "think_model <name> — تغيير النموذج المحلي المستخدم للتفكير")
+                              "think_model <name> — change which local model does the thinking")
     engine.registry.register("think_critique", _cmd_think_critique,
-                              "think_critique on|off — تشغيل/إيقاف مراجعة الإجابات ذاتيًا قبل عرضها")
+                              "think_critique on|off — review answers before showing them, or not")
     engine.registry.register("think_remember", _cmd_think_remember,
-                              "think_remember <ملاحظة> — حفظ حقيقة دائمة تعدي كل جلسات think المستقبلية")
+                              "think_remember <note> — save a fact that outlives every future think session")
     engine.registry.register("think_forget", _cmd_think_forget,
-                              "think_forget — مسح كل الملاحظات الدائمة المحفوظة من think_remember")
+                              "think_forget — clear every note saved with think_remember")
     engine.registry.register("think_playbooks", _cmd_think_playbooks,
-                              "think_playbooks list|add|show|remove — تعليمات markdown متخصصة بتتحقن في تفكير think حسب الصلة")
+                              "think_playbooks list|add|show|remove — markdown instructions injected into think when relevant")

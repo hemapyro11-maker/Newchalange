@@ -218,7 +218,7 @@ def test_think_confirm_yes_actually_runs_tool_and_continues(make_ctx, monkeypatc
     state = tp._state(bare_engine)
     assert state["pending_tool"] is None
     # نتيجة تشغيل الأداة الحقيقية (help) لازم تكون اتسجلت في التاريخ
-    tool_result_messages = [m for m in state["history"] if "نتيجة تشغيل help" in m.get("content", "")]
+    tool_result_messages = [m for m in state["history"] if "[output of help]" in m.get("content", "")]
     assert len(tool_result_messages) == 1
     assert "echo" in tool_result_messages[0]["content"]  # ناتج أمر help الحقيقي فيه أسماء أوامر تانية زي echo
 
@@ -236,7 +236,7 @@ def test_think_confirm_no_skips_tool_and_continues(make_ctx, monkeypatch, bare_e
     assert "هجاوب من غير" in result
     state = tp._state(bare_engine)
     assert state["pending_tool"] is None
-    rejection_messages = [m for m in state["history"] if "رفضت" in m.get("content", "")]
+    rejection_messages = [m for m in state["history"] if "refused the proposed tool" in m.get("content", "")]
     assert len(rejection_messages) == 1
 
 
@@ -296,7 +296,7 @@ def test_think_tool_failure_streak_suppresses_further_tool_proposals(make_ctx, m
     result = tp._cmd_think(make_ctx("think y", ["y"], engine=bare_engine))  # فشل 3 → suppress
     state = tp._state(bare_engine)
     assert state["pending_tool"] is None  # اتجاهل الاقتراح الرابع بسبب الفشل المتكرر
-    assert "فشل متكرر" in result
+    assert "repeated failures" in result
     assert state["tool_fail_streak"] == 0  # اتصفّر بعد التنبيه
 
 
@@ -417,7 +417,7 @@ def test_think_reset_clears_history(make_ctx, monkeypatch, bare_engine):
     assert len(state["history"]) == 3
 
     result = tp._cmd_think_reset(make_ctx("think_reset", [], engine=bare_engine))
-    assert "اتمسحت" in result
+    assert "cleared" in result
     state = tp._state(bare_engine)
     assert state["history"] == []
     assert state["pending_tool"] is None
@@ -442,7 +442,7 @@ def test_think_status_shows_pending_tool(make_ctx, monkeypatch, bare_engine):
 def test_think_status_shows_critique_and_memory_state(make_ctx, bare_engine):
     tp._cmd_think_remember(make_ctx("think_remember ملحوظة", ["ملحوظة"], engine=bare_engine))
     result = tp._cmd_think_status(make_ctx("think_status", [], engine=bare_engine))
-    assert "شغالة" in result
+    assert "on" in result
     assert "1" in result
 
 
@@ -477,17 +477,17 @@ def test_think_uses_configured_model(make_ctx, monkeypatch, bare_engine):
 
 def test_think_critique_no_args_shows_status(make_ctx, bare_engine):
     result = tp._cmd_think_critique(make_ctx("think_critique", [], engine=bare_engine))
-    assert "شغالة" in result
+    assert "on" in result
 
 
 def test_think_critique_off_then_on(make_ctx, bare_engine):
     result = tp._cmd_think_critique(make_ctx("think_critique off", ["off"], engine=bare_engine))
-    assert "متوقفة" in result
+    assert "off" in result
     state = tp._state(bare_engine)
     assert state["critique_enabled"] is False
 
     result = tp._cmd_think_critique(make_ctx("think_critique on", ["on"], engine=bare_engine))
-    assert "شغالة" in result
+    assert "on" in result
     state = tp._state(bare_engine)
     assert state["critique_enabled"] is True
 
@@ -577,7 +577,7 @@ def test_playbooks_add_no_content_shows_usage(make_ctx, bare_engine):
 
 def test_playbooks_list_empty(make_ctx, bare_engine):
     result = tp._cmd_think_playbooks(make_ctx("think_playbooks list", ["list"], engine=bare_engine))
-    assert "مفيش" in result
+    assert "No playbooks saved" in result
 
 
 def test_playbooks_show(make_ctx, bare_engine):
