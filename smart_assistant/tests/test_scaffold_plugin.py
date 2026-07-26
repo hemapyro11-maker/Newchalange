@@ -220,7 +220,7 @@ def test_scaffold_python_creates_runnable_main(make_ctx, tmp_path):
         ["python3", "-m", "myscript.main"], cwd=root / "src", capture_output=True, text=True,
     )
     assert proc.returncode == 0
-    assert "جاهز" in proc.stdout
+    assert "ready" in proc.stdout
 
 
 def test_scaffold_game_creates_runnable_pygame_source(make_ctx, tmp_path):

@@ -18,9 +18,9 @@ _INVALID_NAME_CHARS = set('/\\:*?"<>|')
 def _validate_name(name: str) -> str | None:
     """يرجع رسالة خطأ لو الاسم غير آمن كاسم مجلد، وإلا None."""
     if not name or name in (".", ".."):
-        return "❌ اسم المشروع لازم يكون غير فاضي ومش '.' أو '..'"
+        return "❌ the project name must not be empty, '.' or '..'"
     if any(c in _INVALID_NAME_CHARS for c in name):
-        return f"❌ اسم المشروع مينفعش يحتوي على: {' '.join(sorted(_INVALID_NAME_CHARS))}"
+        return f"❌ the project name may not contain: {' '.join(sorted(_INVALID_NAME_CHARS))}"
     return None
 
 
@@ -57,7 +57,7 @@ def _scaffold_web(root: pathlib.Path, name: str) -> list[str]:
         '    <meta name="viewport" content="width=device-width, initial-scale=1" />\n'
         '    <title>' + name + '</title>\n'
         '    <link rel="stylesheet" href="styles/main.css" />\n  </head>\n  <body>\n'
-        '    <h1>' + name + '</h1>\n    <p>ابدأ هنا.</p>\n'
+        '    <h1>' + name + '</h1>\n    <p>Start here.</p>\n'
         '    <script type="module" src="scripts/main.js"></script>\n  </body>\n</html>\n'
     ))
     _write(root / "src" / "styles" / "main.css", (
@@ -66,8 +66,8 @@ def _scaffold_web(root: pathlib.Path, name: str) -> list[str]:
         "  background: var(--bg);\n  color: var(--text);\n}\n"
     ))
     _write(root / "src" / "scripts" / "main.js", (
-        f'console.log("{name} جاهز");\n\n'
-        "export function main() {\n  // ابدأ منطق التطبيق هنا\n}\n\nmain();\n"
+        f'console.log("{name} ready");\n\n'
+        "export function main() {\n  // application logic starts here\n}\n\nmain();\n"
     ))
     _write(root / "package.json", json.dumps({
         "name": slug, "version": "0.1.0", "private": True, "type": "module",
@@ -99,8 +99,8 @@ def _scaffold_web(root: pathlib.Path, name: str) -> list[str]:
     _write(root / ".prettierrc.json", json.dumps({"semi": True, "singleQuote": False, "printWidth": 100}, indent=2))
     _write(root / ".gitignore", "node_modules/\ndist/\n.DS_Store\n")
     _write(root / "README.md", (
-        f"# {name}\n\n## التشغيل\n\nافتح `src/index.html` في المتصفح مباشرة — مفيش build step.\n\n"
-        "## جودة الكود\n\n```bash\nnpm install\nnpm run lint\nnpm run format\n```\n"
+        f"# {name}\n\n## Running it\n\nOpen `src/index.html` in a browser directly — there is no build step.\n\n"
+        "## Code quality\n\n```bash\nnpm install\nnpm run lint\nnpm run format\n```\n"
     ))
     return [
         "src/index.html", "src/styles/main.css", "src/scripts/main.js",
@@ -130,7 +130,7 @@ dependencyResolutionManagement {{
 rootProject.name = "{name}"
 include(":app")
 ''')
-    _write(root / "build.gradle.kts", "// top-level build file — لا تضيف dependencies هنا، استخدم app/build.gradle.kts\n")
+    _write(root / "build.gradle.kts", "// top-level build file — do not add dependencies here, use app/build.gradle.kts\n")
     _write(root / "gradle.properties", (
         "org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8\n"
         "android.useAndroidX=true\n"
@@ -462,7 +462,7 @@ def _scaffold_python(root: pathlib.Path, name: str) -> list[str]:
 
 
 def greet(who: str = "world") -> str:
-    return f"{{who}} جاهز"
+    return f"{{who}} ready"
 
 
 def main() -> None:
@@ -477,11 +477,11 @@ if __name__ == "__main__":
 
 
 def test_greet_default():
-    assert greet() == "world جاهز"
+    assert greet() == "world ready"
 
 
 def test_greet_custom():
-    assert greet("Ahmed") == "Ahmed جاهز"
+    assert greet("Ahmed") == "Ahmed ready"
 ''')
     _write(root / "pyproject.toml", f'''[project]
 name = "{slug}"
@@ -607,7 +607,7 @@ class Message(BaseModel):
 
 
 def build_welcome_message(app_name: str) -> str:
-    return f"{app_name} API جاهز"
+    return f"{app_name} API ready"
 ''')
     _write(root / "app" / "main.py", '''from fastapi import FastAPI
 
@@ -780,13 +780,13 @@ def _scaffold_fullstack(root: pathlib.Path, name: str) -> list[str]:
 ''')
     _write(root / "README.md", f"# {name} — Full-Stack\n\n```bash\ndocker compose up\n```\n\n"
            "- backend: http://localhost:8000\n- frontend: http://localhost:8080\n\n"
-           "أو شغّل كل جزء لوحده حسب التعليمات في `backend/README.md` و`frontend/README.md`.\n")
+           "or run each part on its own, following `backend/README.md` and `frontend/README.md`.\n")
     files += ["docker-compose.yml", "README.md"]
     return files
 
 
 def _scaffold_docker(root: pathlib.Path, name: str) -> list[str]:
-    _write(root / "Dockerfile", '''# ---- مرحلة البناء (builder) ----
+    _write(root / "Dockerfile", '''# ---- build stage (builder) ----
 # بتثبت المتطلبات في مجلد مستخدم منفصل، عشان الصورة النهائية متحتويش
 # على أدوات بناء (compilers, ...) أو ملفات مؤقتة زيادة عن اللزوم.
 FROM python:3.12-slim AS builder
@@ -876,7 +876,7 @@ def add(a: int, b: int) -> int:
 
 def divide(a: float, b: float) -> float:
     if b == 0:
-        raise ValueError("القسمة على صفر غير مسموحة")
+        raise ValueError("division by zero is not allowed")
     return a / b
 ''')
     _write(root / "tests" / "test_example.py", '''import pytest
@@ -1090,7 +1090,7 @@ def main():
     simulator = AerSimulator()
     result = simulator.run(qc, shots=1000).result()
     counts = result.get_counts()
-    print(f"نتائج القياس: {{counts}}")
+    print(f"measurement results: {{counts}}")
 
 
 if __name__ == "__main__":
@@ -1201,19 +1201,19 @@ describe("{safe}", function () {{
     return {{ contract, owner, other }};
   }}
 
-  it("يسجّل الرسالة الأولية والمالك وقت الـ deploy", async function () {{
+  it("records the initial message and owner on deploy", async function () {{
     const {{ contract, owner }} = await deploy("hello");
     expect(await contract.message()).to.equal("hello");
     expect(await contract.owner()).to.equal(owner.address);
   }});
 
-  it("المالك يقدر يغيّر الرسالة", async function () {{
+  it("lets the owner change the message", async function () {{
     const {{ contract }} = await deploy("hello");
     await contract.setMessage("updated");
     expect(await contract.message()).to.equal("updated");
   }});
 
-  it("غير المالك مايقدرش يغيّر الرسالة", async function () {{
+  it("stops anyone else changing the message", async function () {{
     const {{ contract, other }} = await deploy("hello");
     await expect(contract.connect(other).setMessage("nope")).to.be.revertedWith("not owner");
   }});
@@ -1340,7 +1340,7 @@ int main(void) {
     blink_init(&state);
 
     blink_step(&state, &hal, 100);
-    assert(gpio_calls == 0 && "لسه محدش وصل لـ 500ms");
+    assert(gpio_calls == 0 && "nothing has reached 500ms yet");
 
     blink_step(&state, &hal, 450);
     assert(gpio_calls == 1);
@@ -1350,7 +1350,7 @@ int main(void) {
     assert(gpio_calls == 2);
     assert(last_value == 0);
 
-    printf("blink logic ok — %d نداء gpio_set صحيحين\\n", gpio_calls);
+    printf("blink logic ok — %d correct gpio_set calls\\n", gpio_calls);
     return 0;
 }
 ''')
@@ -1362,7 +1362,7 @@ CFLAGS = -Wall -Wextra -std=c11
 check:
 \t$(CC) -ffreestanding -std=c11 -c main.c -o /dev/null
 \t$(CC) -ffreestanding -std=c11 -c blink.c -o /dev/null
-\t@echo "✅ main.c وblink.c بيترجموا (compile-only، freestanding)"
+\t@echo "✅ main.c and blink.c compile (compile-only, freestanding)"
 
 # اختبار منطق blink.c فعلياً على الجهاز المضيف (مش هاردوير حقيقي)
 test:
@@ -1438,9 +1438,9 @@ make            # بيبني {safe}.ko
 
 ```bash
 sudo insmod {safe}.ko    # تحميل الموديول
-dmesg | tail              # تشوف "module loaded" في الـ kernel log
+dmesg | tail              # look for "module loaded" in the kernel log
 sudo rmmod {safe}         # تفريغ الموديول
-dmesg | tail               # تشوف "module unloaded"
+dmesg | tail               # look for "module unloaded"
 ```
 
 ## التنظيف
@@ -1466,7 +1466,7 @@ clients: set[asyncio.StreamWriter] = set()
 async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     clients.add(writer)
     addr = writer.get_extra_info("peername")
-    print(f"اتصل: {{addr}}")
+    print(f"connected: {{addr}}")
     try:
         while True:
             data = await reader.readline()
@@ -1483,7 +1483,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
 
 async def main(host="0.0.0.0", port=8765):
     server = await asyncio.start_server(handle_client, host, port)
-    print(f"شغال على {{host}}:{{port}}")
+    print(f"listening on {{host}}:{{port}}")
     async with server:
         await server.serve_forever()
 
@@ -1604,53 +1604,53 @@ def _scaffold_ink_story(root: pathlib.Path, name: str) -> list[str]:
 
 
 _SCAFFOLDS = {
-    "web": (_scaffold_web, "موقع ويب ثابت — Frontend (HTML/CSS/JS)"),
-    "backend": (_scaffold_backend, "خادم Backend (FastAPI) — شغال فوراً"),
-    "fullstack": (_scaffold_fullstack, "مشروع Full-Stack (frontend + backend مع بعض)"),
-    "android": (_scaffold_android, "مشروع أندرويد (Kotlin/Gradle) — يفتح في Android Studio"),
-    "ios": (_scaffold_ios, "مشروع iOS (SwiftUI) — يحتاج Xcode على ماك"),
-    "game": (_scaffold_game, "لعبة 2D بـ Pygame (شغالة فوراً: pip install pygame && python main.py)"),
-    "python": (_scaffold_python, "مشروع بايثون عام"),
-    "docker": (_scaffold_docker, "Dockerfile + .dockerignore لمشروع بايثون"),
-    "ci": (_scaffold_ci, "GitHub Actions CI workflow حقيقي"),
-    "pytest": (_scaffold_pytest, "سقالة اختبارات pytest"),
-    "ml": (_scaffold_ml, "تدريب نموذج AI/ML (scikit-learn) — شغال فوراً"),
-    "quantum": (_scaffold_quantum, "دائرة كمّية (Qiskit) — Bell state شغالة فوراً"),
-    "blockchain": (_scaffold_blockchain, "عقد ذكي (Solidity) + إعداد Hardhat"),
-    "embedded": (_scaffold_embedded, "سقالة C للأنظمة المدمجة (GPIO blink pattern)"),
-    "kernel_module": (_scaffold_kernel_module, "موديول Linux kernel أساسي — يحتاج kernel headers للبناء"),
-    "multiplayer_server": (_scaffold_multiplayer_server, "خادم متعدد اللاعبين (asyncio) — شغال فوراً"),
-    "arvr": (_scaffold_arvr, "مشروع WebXR (A-Frame، مجاني ومفتوح المصدر)"),
-    "screenplay": (_scaffold_screenplay, "سيناريو فيلم بصيغة Fountain القياسية"),
-    "ink_story": (_scaffold_ink_story, "قصة متفرعة بصيغة Ink (نفس أداة ألعاب حقيقية زي 80 Days)"),
+    "web": (_scaffold_web, "static website — frontend (HTML/CSS/JS)"),
+    "backend": (_scaffold_backend, "backend server (FastAPI) — runs immediately"),
+    "fullstack": (_scaffold_fullstack, "full-stack project (frontend and backend together)"),
+    "android": (_scaffold_android, "Android project (Kotlin/Gradle) — opens in Android Studio"),
+    "ios": (_scaffold_ios, "iOS project (SwiftUI) — needs Xcode on a Mac"),
+    "game": (_scaffold_game, "2D game with Pygame (runs immediately: pip install pygame && python main.py)"),
+    "python": (_scaffold_python, "general Python project"),
+    "docker": (_scaffold_docker, "Dockerfile and .dockerignore for a Python project"),
+    "ci": (_scaffold_ci, "a real GitHub Actions CI workflow"),
+    "pytest": (_scaffold_pytest, "pytest test skeleton"),
+    "ml": (_scaffold_ml, "AI/ML model training (scikit-learn) — runs immediately"),
+    "quantum": (_scaffold_quantum, "quantum circuit (Qiskit) — a Bell state that runs immediately"),
+    "blockchain": (_scaffold_blockchain, "smart contract (Solidity) plus Hardhat setup"),
+    "embedded": (_scaffold_embedded, "embedded C skeleton (GPIO blink pattern)"),
+    "kernel_module": (_scaffold_kernel_module, "basic Linux kernel module — needs kernel headers to build"),
+    "multiplayer_server": (_scaffold_multiplayer_server, "multiplayer server (asyncio) — runs immediately"),
+    "arvr": (_scaffold_arvr, "WebXR project (A-Frame, free and open source)"),
+    "screenplay": (_scaffold_screenplay, "film screenplay in the standard Fountain format"),
+    "ink_story": (_scaffold_ink_story, "branching story in Ink format (the same tool real games like 80 Days use)"),
 }
 
 
 def _cmd_scaffold(ctx) -> str:
     if len(ctx.args) < 2:
         types = "\n".join(f"  {k} — {desc}" for k, (_, desc) in _SCAFFOLDS.items())
-        return f"usage: scaffold <type> <project_name> [output_dir]\nالأنواع المتاحة:\n{types}"
+        return f"usage: scaffold <type> <project_name> [output_dir]\nAvailable types:\n{types}"
     kind, name = ctx.args[0], ctx.args[1]
     if kind not in _SCAFFOLDS:
-        return f"❌ نوع غير معروف: {kind} (available: {', '.join(_SCAFFOLDS)})"
+        return f"❌ unknown type: {kind} (available: {', '.join(_SCAFFOLDS)})"
     name_error = _validate_name(name)
     if name_error:
         return name_error
     base = pathlib.Path(ctx.args[2]) if len(ctx.args) > 2 else pathlib.Path(".")
     root = base / name
     if root.exists() and any(root.iterdir()):
-        return f"❌ المجلد {root} موجود بالفعل ومش فاضي — اختار اسم/مكان تاني"
+        return f"❌ {root} already exists and is not empty — pick another name or location"
     fn, _ = _SCAFFOLDS[kind]
     try:
         files = fn(root, name)
     except OSError as e:
-        return f"❌ فشل إنشاء الملفات: {e}"
+        return f"❌ could not create the files: {e}"
     listing = "\n".join(f"  📄 {f}" for f in files)
-    return f"✅ اتعمل مشروع {kind} في {root}:\n{listing}"
+    return f"✅ created a {kind} project at {root}:\n{listing}"
 
 
 def register(engine):
     engine.registry.register(
         "scaffold", _cmd_scaffold,
-        "scaffold <web|android|ios|game|python> <name> [dir] — إنشاء سقالة مشروع جاهزة",
+        "scaffold <web|android|ios|game|python> <name> [dir] — generate a ready-to-run project skeleton",
     )
