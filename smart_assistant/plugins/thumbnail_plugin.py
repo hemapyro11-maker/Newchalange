@@ -187,7 +187,7 @@ def _cmd_thumbnail_generate(ctx) -> str:
     try:
         img = Image.open(bg_path).convert("RGB")
     except Exception as e:
-        return f"❌ تعذرت قراءة الصورة: {e}"
+        return f"❌ could not read the image: {e}"
 
     # cover-fit: نكبّر لحد ما أصغر بعد يغطي المساحة المطلوبة، وبعدين نقص
     # الزيادة من النص عشان الصورة تملى 1280x720 بالظبط من غير تشويه.

@@ -182,8 +182,9 @@ dependencies {{
 """)
     _write(root / "app" / "src" / "main" / "java" / pkg_path / "Greeter.kt", f"""package {pkg}
 
-/** منطق بحت من غير أي اعتماد على Android framework — عشان يتاختبر
- * كـ JVM unit test عادي (app/src/test/...) من غير محاكي/جهاز حقيقي. */
+/** Pure logic with no dependency on the Android framework — so it can be
+ * tested as an ordinary JVM unit test (app/src/test/...) with no emulator
+ * or real device. */
 object Greeter {{
     fun greet(who: String): String = "Hello, $who!"
 }}
@@ -226,17 +227,17 @@ class GreeterTest {{
     ))
     _write(root / "README.md", f'''# {name} — Android (Kotlin) Starter
 
-افتح المجلد في Android Studio (هيحمّل Gradle wrapper تلقائيًا)، أو من
-سطر الأوامر لو عندك Gradle متثبت:
+Open the folder in Android Studio (it fetches the Gradle wrapper itself),
+or from the command line if you have Gradle installed:
 
 ```bash
-gradle test              # يشغّل JUnit unit tests (app/src/test)
-gradle assembleDebug     # يبني APK
+gradle test              # runs the JUnit unit tests (app/src/test)
+gradle assembleDebug     # builds an APK
 ```
 
-منطق الترحيب في `Greeter.kt` منفصل عمدًا عن `MainActivity.kt` (اللي
-بيحتاج Android framework/emulator) — عشان يتاختبر كـ JVM unit test عادي
-في `GreeterTest.kt` من غير محاكي.
+The greeting logic in `Greeter.kt` is deliberately separate from
+`MainActivity.kt` (which needs the Android framework and an emulator), so it
+can be tested as a plain JVM unit test in `GreeterTest.kt` without one.
 ''')
     return [
         "settings.gradle.kts", "build.gradle.kts", "gradle.properties", "app/build.gradle.kts",
@@ -261,8 +262,8 @@ struct {safe}App: App {{
     }}
 }}
 """)
-    _write(root / "Greeter.swift", '''// منطق بحت من غير أي اعتماد على SwiftUI/UIKit — عشان يتاختبر بـ XCTest
-// عادي (شوف GreeterTests.swift) من غير simulator ولا device حقيقي.
+    _write(root / "Greeter.swift", '''// Pure logic with no dependency on SwiftUI or UIKit — so it can be tested
+// with ordinary XCTest (see GreeterTests.swift), no simulator or device.
 enum Greeter {
     static func greet(_ who: String) -> String {
         "Hello, \\(who)!"
@@ -300,20 +301,20 @@ final class GreeterTests: XCTestCase {{
     ))
     _write(root / "README.md", f'''# {name} — SwiftUI Starter
 
-افتح المجلد في Xcode (على ماك)، أضف الملفات لمشروع iOS App جديد، وشغّل
-الاختبارات (⌘U) أو من سطر الأوامر:
+Open the folder in Xcode (on a Mac), add the files to a new iOS App project,
+and run the tests (⌘U), or from the command line:
 
 ```bash
 xcodebuild test -scheme {safe} -destination 'platform=iOS Simulator,name=iPhone 15'
 ```
 
-منطق الترحيب في `Greeter.swift` منفصل عمدًا عن `ContentView.swift` (اللي
-بيحتاج SwiftUI runtime) — عشان يتاختبر كـ XCTest عادي في
-`{safe}Tests/GreeterTests.swift` من غير simulator.
+The greeting logic in `Greeter.swift` is deliberately separate from
+`ContentView.swift` (which needs the SwiftUI runtime), so it can be tested as
+plain XCTest in `{safe}Tests/GreeterTests.swift` without a simulator.
 
-**ملحوظة:** الملفات دي سقالة (starter files) لازم تتضاف لمشروع Xcode
-(.xcodeproj) — Xcode نفسه هو اللي بيولّد بنية المشروع الكاملة (project
-file، build settings، إلخ) وقت "New Project"، ومحتاج ماك لتشغيله.
+**Note:** these are starter files to add to an Xcode project (.xcodeproj).
+Xcode itself generates the full project structure (project file, build
+settings, and so on) when you choose "New Project", and it needs a Mac.
 ''')
     return [
         f"{safe}App.swift", "Greeter.swift", "ContentView.swift",
@@ -322,9 +323,9 @@ file، build settings، إلخ) وقت "New Project"، ومحتاج ماك لت�
 
 
 def _scaffold_game(root: pathlib.Path, name: str) -> list[str]:
-    _write(root / "player.py", '''"""player.py — منطق حركة اللاعب بحت، من غير أي اعتماد على pygame أو
-الشاشة — عشان يتاختبر مباشرة زي أي منطق بيزنس عادي، من غير ما نحتاج
-نفتح نافذة أو نحاكي أحداث لوحة مفاتيح."""
+    _write(root / "player.py", '''"""player.py — pure player-movement logic, with no dependency on pygame or
+the screen, so it can be tested directly like any other business logic
+without opening a window or faking keyboard events."""
 
 
 class Player:
@@ -349,9 +350,9 @@ class Player:
 ''')
     _write(root / "main.py", f'''"""{name} — Pygame starter.
 
-حلقة اللعبة نفسها في run()، مش في module-level مباشرة، عشان نقدر
-نستدعيها من الاختبارات بـ max_frames محدود (شوف tests/test_headless_smoke.py)
-من غير ما ندخل في حلقة لا نهائية وقت الاختبار."""
+The game loop lives in run() rather than at module level, so tests can call
+it with a bounded max_frames (see tests/test_headless_smoke.py) instead of
+entering an infinite loop."""
 import pygame
 
 from player import Player
@@ -411,9 +412,10 @@ def test_opposite_keys_cancel_out():
     p.move(left=True, right=True, up=False, down=False)
     assert p.position == (0, 0)
 ''')
-    _write(root / "tests" / "test_headless_smoke.py", '''"""اختبار حقيقي بيشغّل حلقة اللعبة فعليًا لعدد فريمات محدود من غير شاشة
-حقيقية (SDL_VIDEODRIVER=dummy) — بيتأكد إن pygame.init/الرسم/الأحداث
-شغالين مع بعض من غير ما ينهار، مش بس إن الكود بيترجم syntactically."""
+    _write(root / "tests" / "test_headless_smoke.py", '''"""A real test that runs the game loop for a bounded number of frames with no
+actual display (SDL_VIDEODRIVER=dummy) — confirming that pygame.init,
+drawing and event handling work together without crashing, not merely that
+the code parses."""
 import os
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
@@ -433,19 +435,19 @@ def test_game_loop_runs_headless_for_a_few_frames():
 
 ```bash
 pip install -r requirements.txt
-python main.py          # يفتح نافذة فعلية باللعبة
+python main.py          # opens a real game window
 ```
 
-## الاختبارات
+## Tests
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                   # منطق اللاعب + headless smoke test للحلقة كاملة
+pytest                   # player logic plus a headless smoke test of the whole loop
 ```
 
-منطق الحركة في `player.py` منفصل عن pygame نفسه عشان يتاختبر مباشرة،
-واختبار الـ headless smoke بيشغّل `main.run()` فعليًا لـ 5 فريمات بدون
-شاشة حقيقية (`SDL_VIDEODRIVER=dummy`).
+The movement logic in `player.py` is separate from pygame so it can be tested
+directly, and the headless smoke test genuinely runs `main.run()` for 5
+frames with no real display (`SDL_VIDEODRIVER=dummy`).
 ''')
     return [
         "player.py", "main.py", "tests/test_player.py", "tests/test_headless_smoke.py",
@@ -458,7 +460,7 @@ def _scaffold_python(root: pathlib.Path, name: str) -> list[str]:
     pkg = _ensure_identifier(slug.replace("-", "_"), "app")
 
     _write(root / "src" / pkg / "__init__.py", f'"""{name}."""\n\n__version__ = "0.1.0"\n')
-    _write(root / "src" / pkg / "main.py", f'''"""نقطة الدخول الرئيسية."""
+    _write(root / "src" / pkg / "main.py", f'''"""Main entry point."""
 
 
 def greet(who: str = "world") -> str:
@@ -521,20 +523,20 @@ testpaths = ["tests"]
     _write(root / ".gitignore", "__pycache__/\n*.pyc\n.venv/\n.pytest_cache/\n.mypy_cache/\n.ruff_cache/\n*.egg-info/\n")
     _write(root / "README.md", f'''# {name}
 
-## التشغيل
+## Running it
 
 ```bash
 pip install -e ".[dev]"
 python -m {pkg}.main
 ```
 
-## الاختبارات
+## Tests
 
 ```bash
 pytest
 ```
 
-## جودة الكود
+## Code quality
 
 ```bash
 ruff check .
@@ -553,7 +555,7 @@ def _scaffold_backend(root: pathlib.Path, name: str) -> list[str]:
 
     _write(root / "app" / "__init__.py", "")
     _write(root / "app" / "core" / "__init__.py", "")
-    _write(root / "app" / "core" / "config.py", f'''"""إعدادات التطبيق — بتتحمّل من متغيرات البيئة (.env)."""
+    _write(root / "app" / "core" / "config.py", f'''"""Application settings — loaded from environment variables (.env)."""
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -568,7 +570,7 @@ class Settings(BaseSettings):
 
 settings = Settings()
 ''')
-    _write(root / "app" / "core" / "logging.py", '''"""إعداد logging منظّم — يُستدعى مرة واحدة عند بدء التطبيق."""
+    _write(root / "app" / "core" / "logging.py", '''"""Structured logging setup — called once at application start."""
 
 import logging
 import sys
@@ -602,8 +604,8 @@ class Message(BaseModel):
     message: str
 ''')
     _write(root / "app" / "services" / "__init__.py", "")
-    _write(root / "app" / "services" / "example_service.py", '''"""مثال طبقة منطق العمل (business logic layer) — منفصلة عن الـ routes
-عمداً، عشان تقدر تختبرها من غير ما تشغّل سيرفر HTTP."""
+    _write(root / "app" / "services" / "example_service.py", '''"""An example business-logic layer — deliberately separate from the routes so
+you can test it without starting an HTTP server."""
 
 
 def build_welcome_message(app_name: str) -> str:
@@ -716,7 +718,7 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ''')
     _write(root / "README.md", f'''# {name}
 
-## التشغيل
+## Running it
 
 ```bash
 pip install -e ".[dev]"
@@ -724,13 +726,13 @@ cp .env.example .env
 uvicorn app.main:app --reload
 ```
 
-## الاختبارات
+## Tests
 
 ```bash
 pytest
 ```
 
-## جودة الكود
+## Code quality
 
 ```bash
 ruff check .
@@ -738,15 +740,15 @@ black --check .
 mypy app
 ```
 
-## البنية
+## Structure
 
 ```
 app/
-  core/      إعدادات ولوجينج
-  api/routes/  نقاط النهاية (endpoints)
+  core/      settings and logging
+  api/routes/  endpoints
   models/    Pydantic schemas
-  services/  منطق العمل — منفصل عن الـ HTTP layer
-tests/       اختبارات pytest حقيقية (TestClient)
+  services/  business logic — separate from the HTTP layer
+tests/       real pytest tests (TestClient)
 ```
 ''')
     return [
@@ -787,18 +789,18 @@ def _scaffold_fullstack(root: pathlib.Path, name: str) -> list[str]:
 
 def _scaffold_docker(root: pathlib.Path, name: str) -> list[str]:
     _write(root / "Dockerfile", '''# ---- build stage (builder) ----
-# بتثبت المتطلبات في مجلد مستخدم منفصل، عشان الصورة النهائية متحتويش
-# على أدوات بناء (compilers, ...) أو ملفات مؤقتة زيادة عن اللزوم.
+# Dependencies install into a separate user directory so the final image
+# carries no build tools (compilers and the like) or leftover temporaries.
 FROM python:3.12-slim AS builder
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
-# ---- المرحلة النهائية (runtime) — صورة نظيفة وصغيرة ----
+# ---- final stage (runtime) — a clean, small image ----
 FROM python:3.12-slim
 WORKDIR /app
 
-# مستخدم غير root — تشغيل الحاوية كـ root ممارسة أمان سيئة
+# Non-root user — running a container as root is poor security practice
 RUN useradd --create-home --uid 1000 appuser
 COPY --from=builder /root/.local /home/appuser/.local
 COPY . .
@@ -808,7 +810,7 @@ ENV PATH=/home/appuser/.local/bin:$PATH
 
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 CMD python -c "print('ok')" || exit 1
 
-# غيّر السطر ده لنقطة دخول مشروعك الفعلية (زي: uvicorn app.main:app --host 0.0.0.0)
+# Change this line to your project's real entry point (e.g. uvicorn app.main:app --host 0.0.0.0)
 CMD ["python", "main.py"]
 ''')
     _write(root / ".dockerignore", (
@@ -867,7 +869,7 @@ jobs:
 
 
 def _scaffold_pytest(root: pathlib.Path, name: str) -> list[str]:
-    _write(root / "src" / "example.py", '''"""مثال كود عشان الاختبارات يكون ليها حاجة حقيقية تختبرها."""
+    _write(root / "src" / "example.py", '''"""Example code so the tests have something real to test."""
 
 
 def add(a: int, b: int) -> int:
@@ -916,8 +918,8 @@ commands = ruff check src tests
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                # اختبار على بايثون الحالي + تقرير تغطية
-tox                   # اختبار على كل نسخ بايثون في [tox] envlist
+pytest                # test on the current Python, with a coverage report
+tox                   # test across every Python in the [tox] envlist
 ```
 ''')
     return ["src/example.py", "tests/test_example.py", "pytest.ini", "tox.ini", "requirements-dev.txt", "README.md"]
@@ -928,8 +930,8 @@ def _scaffold_ml(root: pathlib.Path, name: str) -> list[str]:
     pkg = _ensure_identifier(slug.replace("-", "_"), "app")
 
     _write(root / "src" / pkg / "__init__.py", f'"""{name} — ML pipeline."""\n\n__version__ = "0.1.0"\n')
-    _write(root / "src" / pkg / "data.py", '''"""تحميل وتقسيم البيانات — طبقة منفصلة عشان تقدر تستبدلها ببيانات
-حقيقية من غير ما تلمس كود التدريب أو التقييم."""
+    _write(root / "src" / pkg / "data.py", '''"""Loading and splitting the data — a separate layer so you can swap in real
+data without touching the training or evaluation code."""
 
 from sklearn.datasets import load_iris
 from sklearn.model_selection import train_test_split
@@ -941,7 +943,7 @@ def load_data(test_size: float = 0.2, random_state: int = 42):
         dataset.data, dataset.target, test_size=test_size, random_state=random_state
     )
 ''')
-    _write(root / "src" / pkg / "model.py", '''"""تعريف النموذج — منفصل عن التدريب عشان تقدر تجرب نماذج مختلفة بسهولة."""
+    _write(root / "src" / pkg / "model.py", '''"""Model definition — kept apart from training so you can try different models easily."""
 
 from sklearn.ensemble import RandomForestClassifier
 
@@ -949,7 +951,7 @@ from sklearn.ensemble import RandomForestClassifier
 def build_model(random_state: int = 42) -> RandomForestClassifier:
     return RandomForestClassifier(random_state=random_state)
 ''')
-    _write(root / "src" / pkg / "train.py", f'''"""حلقة التدريب."""
+    _write(root / "src" / pkg / "train.py", f'''"""The training loop."""
 
 from {pkg}.data import load_data
 from {pkg}.model import build_model
@@ -961,7 +963,7 @@ def train():
     model.fit(X_train, y_train)
     return model, X_test, y_test
 ''')
-    _write(root / "src" / pkg / "evaluate.py", '''"""تقييم النموذج بعد التدريب."""
+    _write(root / "src" / pkg / "evaluate.py", '''"""Evaluating the model after training."""
 
 from sklearn.metrics import accuracy_score
 
@@ -970,7 +972,7 @@ def evaluate(model, X_test, y_test) -> float:
     predictions = model.predict(X_test)
     return accuracy_score(y_test, predictions)
 ''')
-    _write(root / "src" / pkg / "__main__.py", f'''"""نقطة الدخول: python -m {pkg}"""
+    _write(root / "src" / pkg / "__main__.py", f'''"""Entry point: python -m {pkg}"""
 
 from {pkg}.evaluate import evaluate
 from {pkg}.train import train
@@ -994,7 +996,7 @@ def test_pipeline_trains_and_reaches_reasonable_accuracy():
     model, X_test, y_test = train()
     accuracy = evaluate(model, X_test, y_test)
     assert 0.0 <= accuracy <= 1.0
-    assert accuracy > 0.7  # Iris + RandomForest بيوصل غالباً لأكتر من 90%
+    assert accuracy > 0.7  # Iris with RandomForest usually clears 90%
 ''')
     _write(root / "data" / ".gitkeep", "")
     _write(root / "models" / ".gitkeep", "")
@@ -1029,32 +1031,32 @@ testpaths = ["tests"]
     _write(root / ".gitignore", "__pycache__/\n*.pyc\n.venv/\n.pytest_cache/\n.ruff_cache/\n*.egg-info/\ndata/*\n!data/.gitkeep\nmodels/*\n!models/.gitkeep\n")
     _write(root / "README.md", f'''# {name}
 
-## التشغيل
+## Running it
 
 ```bash
 pip install -e ".[dev]"
 python -m {pkg}
 ```
 
-## الاختبارات
+## Tests
 
 ```bash
 pytest
 ```
 
-## البنية
+## Structure
 
 ```
 src/{pkg}/
-  data.py      تحميل/تقسيم البيانات
-  model.py     تعريف النموذج
-  train.py     حلقة التدريب
-  evaluate.py  التقييم
-data/          بياناتك الحقيقية (فاضي دلوقتي — placeholder)
-models/        النماذج المدرّبة المحفوظة
+  data.py      loading and splitting the data
+  model.py     model definition
+  train.py     the training loop
+  evaluate.py  evaluation
+data/          your real data (empty for now — a placeholder)
+models/        saved trained models
 ```
 
-استبدل `src/{pkg}/data.py` ببياناتك الحقيقية بدل Iris demo dataset.
+Replace `src/{pkg}/data.py` with your real data instead of the Iris demo dataset.
 ''')
     return [
         f"src/{pkg}/data.py", f"src/{pkg}/model.py", f"src/{pkg}/train.py",
@@ -1064,10 +1066,10 @@ models/        النماذج المدرّبة المحفوظة
 
 
 def _scaffold_quantum(root: pathlib.Path, name: str) -> list[str]:
-    _write(root / "circuit.py", '''"""circuit.py — بناء دائرة Bell state (تشابك كمّي) بحت، منفصل عن أي
-محاكي — نفس فكرة فصل المنطق عن التنفيذ زي embedded/game scaffolds، عشان
-نقدر نتأكد من بنية الدائرة نفسها في الاختبارات من غير ما نحتاج نشغّل
-محاكي في كل مرة."""
+    _write(root / "circuit.py", '''"""circuit.py — building a Bell state (quantum entanglement) circuit, kept
+apart from any simulator. Same separation of logic from execution as the
+embedded and game scaffolds, so tests can check the circuit structure itself
+without running a simulator every time."""
 from qiskit import QuantumCircuit
 
 
@@ -1078,8 +1080,9 @@ def build_bell_circuit() -> QuantumCircuit:
     qc.measure([0, 1], [0, 1])
     return qc
 ''')
-    _write(root / "bell_state.py", f'''"""{name} — Qiskit starter: تشغيل دائرة Bell state (تشابك كمّي) فعليًا
-على محاكي محلي (AerSimulator) — بدون أي خدمة سحابية أو حساب IBM Quantum."""
+    _write(root / "bell_state.py", f'''"""{name} — Qiskit starter: genuinely runs a Bell state (entanglement)
+circuit on a local simulator (AerSimulator) — no cloud service and no IBM
+Quantum account."""
 from qiskit_aer import AerSimulator
 
 from circuit import build_bell_circuit
@@ -1110,9 +1113,9 @@ def test_circuit_measures_both_qubits():
     assert qc.num_qubits == 2
     assert qc.num_clbits == 2
 ''')
-    _write(root / "tests" / "test_bell_state_simulation.py", '''"""يشغّل الدائرة فعليًا على AerSimulator ويتأكد من خاصية التشابك
-الأساسية: القياسات لازم تطلع '00' أو '11' بس — أبدًا '01' أو '10' —
-وده بالظبط تعريف Bell state، مش مجرد اختبار إن الكود بيتنفذ من غير error."""
+    _write(root / "tests" / "test_bell_state_simulation.py", '''"""Runs the circuit on AerSimulator and checks the defining property of
+entanglement: measurements must come out '00' or '11' only, never '01' or
+'10'. That is what a Bell state *is* — not merely that the code ran."""
 from qiskit_aer import AerSimulator
 
 from circuit import build_bell_circuit
@@ -1134,18 +1137,18 @@ def test_bell_state_only_produces_correlated_outcomes():
 
 ```bash
 pip install -r requirements.txt
-python bell_state.py     # يشغّل الدائرة فعليًا ويطبع نتائج القياس
+python bell_state.py     # actually runs the circuit and prints the measurements
 ```
 
-## الاختبارات
+## Tests
 
 ```bash
 pip install -r requirements-dev.txt
-pytest    # بنية الدائرة + تحقق فعلي من خاصية التشابك عبر AerSimulator
+pytest    # circuit structure, plus a real check of entanglement via AerSimulator
 ```
 
-منطق بناء الدائرة في `circuit.py` منفصل عن التنفيذ (`bell_state.py`)
-عشان يتاختبر مباشرة.
+The circuit-building logic in `circuit.py` is separate from execution
+(`bell_state.py`) so it can be tested directly.
 ''')
     return [
         "circuit.py", "bell_state.py", "tests/test_circuit.py",
@@ -1228,9 +1231,9 @@ npx hardhat compile
 npx hardhat test
 ```
 
-العقد في `contracts/{safe}.sol`، والاختبارات (deploy، تغيير الرسالة، منع
-غير المالك من التعديل) في `test/{safe}.test.js` باستخدام Hardhat +
-ethers.js + chai (عبر `@nomicfoundation/hardhat-toolbox`).
+The contract is in `contracts/{safe}.sol`, and the tests (deploy, changing
+the message, blocking non-owners) are in `test/{safe}.test.js` using Hardhat,
+ethers.js and chai via `@nomicfoundation/hardhat-toolbox`.
 ''')
     return [
         f"contracts/{safe}.sol", "package.json", "hardhat.config.js",
@@ -1242,11 +1245,11 @@ def _scaffold_embedded(root: pathlib.Path, name: str) -> list[str]:
     _write(root / "hal.h", '''#ifndef HAL_H
 #define HAL_H
 
-/* HAL (Hardware Abstraction Layer): كل بورد بيدّي implementation مختلف
- * لـ gpio_set/delay_ms (تسجيل مباشر لعناوين الذاكرة، أو HAL library
- * جاهزة من مصنّع الـ MCU). منطق البرنامج (blink.c) ميعرفش ولا يهمه
- * إزاي الـ pin بيتحرك فعلياً — ده اللي بيخلينا نقدر نختبره على الجهاز
- * المضيف (host) من غير هاردوير حقيقي. */
+/* HAL (Hardware Abstraction Layer): each board supplies its own
+ * implementation of gpio_set/delay_ms — direct register writes, or a HAL
+ * library from the MCU vendor. The program logic (blink.c) neither knows nor
+ * cares how the pin actually moves, and that is exactly what lets us test it
+ * on the host with no real hardware. */
 typedef struct {
     void (*gpio_set)(int pin, int value);
     void (*delay_ms)(int ms);
@@ -1270,9 +1273,9 @@ void blink_step(blink_state_t *state, const hal_t *hal, uint32_t dt_ms);
 
 #endif
 ''')
-    _write(root / "blink.c", f'''/* {name} — منطق الـ blink البحت (led toggle كل INTERVAL_MS)،
- * منفصل عن أي تفاصيل هاردوير عشان نقدر نختبره في test/test_blink.c
- * من غير محاكي أو بورد حقيقي. */
+    _write(root / "blink.c", f'''/* {name} — the pure blink logic (toggle the LED every INTERVAL_MS), kept
+ * apart from any hardware detail so it can be tested in test/test_blink.c
+ * with no simulator and no real board. */
 #include "blink.h"
 
 #define LED_PIN 13
@@ -1292,10 +1295,10 @@ void blink_step(blink_state_t *state, const hal_t *hal, uint32_t dt_ms) {{
     }}
 }}
 ''')
-    _write(root / "main.c", f'''/* {name} — نقطة الدخول: بتربط منطق blink.c بتنفيذ gpio_set/delay_ms
- * الحقيقي بتاع البورد المستهدف. لازم يتترجم بـ cross toolchain (زي
- * arm-none-eabi-gcc) للفرمواير الفعلي — الملف ده متعمد يفضل
- * freestanding (مايستخدمش libc عادية) عشان يترجم على أي بيئة. */
+    _write(root / "main.c", f'''/* {name} — entry point: wires the blink.c logic to the target board's real
+ * gpio_set/delay_ms. Building actual firmware needs a cross toolchain such as
+ * arm-none-eabi-gcc. This file stays deliberately freestanding (no ordinary
+ * libc) so it compiles anywhere. */
 #include <stdint.h>
 #include "hal.h"
 #include "blink.h"
@@ -1314,9 +1317,9 @@ int main(void) {{
     return 0;
 }}
 ''')
-    _write(root / "test" / "test_blink.c", '''/* اختبار حقيقي شغال على الجهاز المضيف (host) — بيستخدم hal_t وهمي
- * (mock) بيسجّل كل نداء gpio_set، وبيتأكد إن الـ LED بيتقلب بالظبط
- * كل 500ms من غير أي هاردوير حقيقي. */
+    _write(root / "test" / "test_blink.c", '''/* A real test that runs on the host — it uses a mock hal_t that records every
+ * gpio_set call, and confirms the LED toggles exactly every 500ms, with no
+ * hardware at all. */
 #include <assert.h>
 #include <stdio.h>
 #include "../blink.h"
@@ -1357,14 +1360,14 @@ int main(void) {
     _write(root / "Makefile", """CC = gcc
 CFLAGS = -Wall -Wextra -std=c11
 
-# فحص إن main.c/blink.c بيترجموا (compile-only) بأسلوب freestanding —
-# للفرمواير الفعلي محتاج cross toolchain حقيقي زي arm-none-eabi-gcc
+# Checks that main.c and blink.c compile (compile-only) in freestanding mode.
+# Real firmware needs a genuine cross toolchain such as arm-none-eabi-gcc.
 check:
 \t$(CC) -ffreestanding -std=c11 -c main.c -o /dev/null
 \t$(CC) -ffreestanding -std=c11 -c blink.c -o /dev/null
 \t@echo "✅ main.c and blink.c compile (compile-only, freestanding)"
 
-# اختبار منطق blink.c فعلياً على الجهاز المضيف (مش هاردوير حقيقي)
+# Tests the blink.c logic for real on the host — not on hardware
 test:
 \t$(CC) $(CFLAGS) test/test_blink.c blink.c -o test/test_blink
 \t./test/test_blink
@@ -1376,17 +1379,17 @@ clean:
 """)
     _write(root / "README.md", f'''# {name} — Embedded/MCU Starter
 
-بنية HAL (Hardware Abstraction Layer) بسيطة: منطق الـ blink في `blink.c`
-منفصل تمامًا عن تفاصيل الهاردوير (`hal.h`)، عشان يتاختبر على الجهاز
-المضيف من غير بورد حقيقي.
+A simple HAL (Hardware Abstraction Layer): the blink logic in `blink.c` is
+fully separate from hardware detail (`hal.h`), so it can be tested on the
+host with no real board.
 
 ```bash
-make check   # يتأكد إن main.c/blink.c بيترجموا (freestanding)
-make test    # يبني ويشغّل اختبار حقيقي لمنطق blink.c على الـ host
+make check   # confirms main.c and blink.c compile (freestanding)
+make test    # builds and runs a real test of the blink.c logic on the host
 ```
 
-للفرمواير الفعلي على بورد حقيقي، لازم cross toolchain (زي
-`arm-none-eabi-gcc`) وتوفّر `gpio_set`/`delay_ms` الحقيقيين لبوردك.
+For real firmware on a real board you need a cross toolchain (such as
+`arm-none-eabi-gcc`) and your board's actual `gpio_set` and `delay_ms`.
 ''')
     _write(root / ".gitignore", "*.o\n*.elf\n*.bin\n*.hex\ntest/test_blink\n")
     return ["hal.h", "blink.h", "blink.c", "main.c", "test/test_blink.c", "Makefile", "README.md", ".gitignore"]
@@ -1428,36 +1431,36 @@ clean:
     ))
     _write(root / "README.md", f'''# {name} — Linux Kernel Module Starter
 
-## البناء (محتاج kernel headers متثبتة — `apt install linux-headers-$(uname -r)`)
+## Building (needs kernel headers — `apt install linux-headers-$(uname -r)`)
 
 ```bash
-make            # بيبني {safe}.ko
+make            # builds {safe}.ko
 ```
 
-## التحميل والتشغيل
+## Loading and running it
 
 ```bash
-sudo insmod {safe}.ko    # تحميل الموديول
+sudo insmod {safe}.ko    # load the module
 dmesg | tail              # look for "module loaded" in the kernel log
-sudo rmmod {safe}         # تفريغ الموديول
+sudo rmmod {safe}         # unload the module
 dmesg | tail               # look for "module unloaded"
 ```
 
-## التنظيف
+## Cleaning up
 
 ```bash
 make clean
 ```
 
-**ملحوظة أمان:** موديولات الكernel بتشتغل بصلاحيات الـ kernel نفسه (ring 0) —
-أي باج فيها ممكن يهنّج أو يخرّب النظام كله، مش زي أي كراش عادي في برنامج
-مستخدم عادي. جرّبه في VM لحد ما تتأكد منه.
+**Safety note:** kernel modules run with kernel privileges (ring 0) — a bug
+here can hang or corrupt the entire system, unlike an ordinary user-space
+crash. Test it in a VM until you trust it.
 ''')
     return [f"{safe}.c", "Makefile", ".gitignore", "README.md"]
 
 
 def _scaffold_multiplayer_server(root: pathlib.Path, name: str) -> list[str]:
-    _write(root / "server.py", f'''"""{name} — خادم متعدد اللاعبين أساسي (asyncio TCP broadcast)."""
+    _write(root / "server.py", f'''"""{name} — a basic multiplayer server (asyncio TCP broadcast)."""
 import asyncio
 
 clients: set[asyncio.StreamWriter] = set()
@@ -1491,7 +1494,7 @@ async def main(host="0.0.0.0", port=8765):
 if __name__ == "__main__":
     asyncio.run(main())
 ''')
-    _write(root / "client.py", '''"""عميل بسيط للاتصال بالسيرفر."""
+    _write(root / "client.py", '''"""A simple client for connecting to the server."""
 import asyncio
 
 
@@ -1529,9 +1532,10 @@ def _scaffold_arvr(root: pathlib.Path, name: str) -> list[str]:
 </body>
 </html>
 ''')
-    _write(root / "src" / "main.js", '''// component بسيط: كل نقرة على الصندوق بتلوّنه بلون تاني من دورة ألوان ثابتة —
-// عشان الأسس تكون واضحة: تسجيل component، الاستماع لحدث click، وتعديل
-// خاصية color وقت التفاعل، من غير أي مكتبة خارجية غير A-Frame نفسها.
+    _write(root / "src" / "main.js", '''// A small component: each click on the box moves it to the next colour in a
+// fixed cycle. It shows the basics plainly — registering a component,
+// listening for a click, and changing the colour property on interaction,
+// with no library beyond A-Frame itself.
 AFRAME.registerComponent("cursor-listener", {
   init: function () {
     const colors = ["#4f6ef7", "#f74f6e", "#4ff7a0", "#f7d24f"];
@@ -1554,11 +1558,12 @@ AFRAME.registerComponent("cursor-listener", {
 
 ```bash
 npm install
-npm start        # يشغّل http-server على http://localhost:8080
+npm start        # serves it on http://localhost:8080
 ```
 
-افتح الرابط في متصفح (أو headset يدعم WebXR) — دوس على الصندوق يغيّر لونه
-(المنطق في `src/main.js`، A-Frame component مسجّل باسم `cursor-listener`).
+Open the link in a browser, or a WebXR-capable headset — click the box and it
+changes colour. The logic is in `src/main.js`, an A-Frame component registered
+as `cursor-listener`.
 ''')
     return ["index.html", "src/main.js", "package.json", ".gitignore", "README.md"]
 
@@ -1583,21 +1588,21 @@ FADE OUT.
 
 
 def _scaffold_ink_story(root: pathlib.Path, name: str) -> list[str]:
-    _write(root / "story.ink", f'''// {name} — قصة متفرعة أساسية (Ink format: inklestudios.com/ink)
+    _write(root / "story.ink", f'''// {name} — a basic branching story (Ink format: inklestudios.com/ink)
 -> start
 
 === start ===
-تبدأ القصة هنا.
+The story starts here.
 
-* [اختيار أ] -> choice_a
-* [اختيار ب] -> choice_b
+* [Choice A] -> choice_a
+* [Choice B] -> choice_b
 
 === choice_a ===
-اخترت أ.
+You chose A.
 -> END
 
 === choice_b ===
-اخترت ب.
+You chose B.
 -> END
 ''')
     return ["story.ink"]

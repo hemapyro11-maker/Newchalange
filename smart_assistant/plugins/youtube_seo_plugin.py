@@ -68,42 +68,42 @@ def _score_title(title: str) -> tuple[int, list[str]]:
     length = len(title)
 
     if length > TITLE_MAX_LEN:
-        notes.append(f"❌ العنوان أطول من {TITLE_MAX_LEN} حرف — يوتيوب هيقطعه")
+        notes.append(f"❌ the title is over {TITLE_MAX_LEN} characters — YouTube will cut it off")
         score -= 25
     elif TITLE_IDEAL_MIN <= length <= TITLE_IDEAL_MAX:
-        notes.append(f"✅ طول ممتاز ({length} حرف) — ضمن المدى المثالي {TITLE_IDEAL_MIN}-{TITLE_IDEAL_MAX}")
+        notes.append(f"✅ excellent length ({length} characters) — inside the ideal {TITLE_IDEAL_MIN}-{TITLE_IDEAL_MAX} range")
         score += 20
     elif length < TITLE_IDEAL_MIN:
-        notes.append(f"⚠️ العنوان قصير ({length} حرف) — ممكن ينقصه كلمات مفتاحية")
+        notes.append(f"⚠️ the title is short ({length} characters) — it may be missing keywords")
         score += 5
     elif length <= TITLE_TRUNCATE_WARN:
-        notes.append(f"🙂 طول مقبول ({length} حرف)")
+        notes.append(f"🙂 acceptable length ({length} characters)")
         score += 10
     else:
-        notes.append(f"⚠️ العنوان طويل ({length} حرف) — ممكن يتقطع في نتائج البحث حوالي {TITLE_TRUNCATE_WARN} حرف")
+        notes.append(f"⚠️ the title is long ({length} characters) — search results may cut it around {TITLE_TRUNCATE_WARN}")
 
     if re.search(r"\d", title):
         score += 10
-        notes.append("✅ فيه رقم — بيلفت الانتباه ويوحي بمحتوى محدد (زي \"7 طرق\")")
+        notes.append("✅ contains a number — that catches the eye and promises something specific (\"7 ways\")")
 
     hit_power = [w for w in _POWER_WORDS if w.lower() in title.lower()]
     if hit_power:
         score += 10
-        notes.append(f"✅ فيه كلمة قوية: {', '.join(hit_power[:3])}")
+        notes.append(f"✅ contains a power word: {', '.join(hit_power[:3])}")
 
     letters = [c for c in title if c.isalpha()]
     upper_ratio = sum(1 for c in letters if c.isupper()) / len(letters) if letters else 0
     if upper_ratio > 0.6 and len(letters) > 8:
         score -= 15
-        notes.append("❌ نسبة حروف كبيرة عالية جدًا — بيبان سبام/كليك بيت رخيص")
+        notes.append("❌ far too many capitals — it reads as spam or cheap clickbait")
 
     punct_spam = re.findall(r"[!?]{2,}", title)
     if punct_spam:
         score -= 10
-        notes.append("⚠️ علامات ترقيم متكررة (!!! أو ???) — ممكن تقلل المصداقية")
+        notes.append("⚠️ repeated punctuation (!!! or ???) — that can cost you credibility")
 
     if "|" in title or " - " in title:
-        notes.append("ℹ️ فيه فاصل (| أو -) — كويس لو بيفصل بين الموضوع واسم القناة/سلسلة")
+        notes.append("ℹ️ contains a separator (| or -) — good if it divides the topic from a channel or series name")
 
     return max(0, min(100, score)), notes
 
@@ -116,7 +116,7 @@ def _cmd_seo_title_score(ctx) -> str:
         return "usage: seo_title_score <title>"
 
     score, notes = _score_title(title)
-    lines = [f"🏷 تقييم العنوان: \"{title}\"", f"\nالنتيجة: {score}/100", "\nالتفاصيل:"]
+    lines = [f"🏷 Title review: \"{title}\"", f"\nScore: {score}/100", "\nDetails:"]
     lines += [f"  {n}" for n in notes]
     return "\n".join(lines)
 
@@ -130,36 +130,36 @@ def _score_description(text: str) -> tuple[int, list[str]]:
     above_fold = text[:150]
 
     if length < 100:
-        notes.append(f"❌ قصير جدًا ({length} حرف) — مساحة ضايعة لكلمات مفتاحية ومعلومات")
+        notes.append(f"❌ far too short ({length} characters) — wasted space for keywords and information")
     elif length < 250:
-        notes.append(f"⚠️ قصير ({length} حرف) — يوتيوب بيفضّل وصف أطول للـ SEO (200+ كلمة مثالي)")
+        notes.append(f"⚠️ short ({length} characters) — YouTube favours longer descriptions for SEO (200+ words is ideal)")
         score += 10
     else:
-        notes.append(f"✅ طول جيد ({length} حرف)")
+        notes.append(f"✅ good length ({length} characters)")
         score += 20
 
     if len(above_fold.strip()) < 50:
-        notes.append("⚠️ أول 150 حرف (اللي بتظهر قبل \"عرض المزيد\") فاضية شبه — حط أهم معلومة هنا")
+        notes.append("⚠️ the first 150 characters (what shows before \"show more\") are nearly empty — put the most important thing there")
     else:
         score += 15
-        notes.append("✅ أول 150 حرف فيها محتوى فعلي")
+        notes.append("✅ the first 150 characters carry real content")
 
     if _URL_RE.search(text):
         score += 10
-        notes.append("✅ فيه رابط (سوشيال ميديا/موقع)")
+        notes.append("✅ contains a link (social or website)")
 
     ts_count = len(_TIMESTAMP_RE.findall(text))
     if ts_count >= 2:
         score += 15
-        notes.append(f"✅ فيه {ts_count} توقيت (chapters) — بيحسّن engagement والـ SEO")
+        notes.append(f"✅ contains {ts_count} timestamps (chapters) — good for engagement and SEO")
 
     hashtags = _HASHTAG_RE.findall(text)
     if len(hashtags) > 3:
         score -= 10
-        notes.append(f"⚠️ فيه {len(hashtags)} هاشتاج — يوتيوب بيعرض أول 3 بس فوق العنوان، الباقي ممكن يبان سبام")
+        notes.append(f"⚠️ contains {len(hashtags)} hashtags — YouTube shows only the first 3 above the title, and the rest can read as spam")
     elif hashtags:
         score += 5
-        notes.append(f"✅ فيه {len(hashtags)} هاشتاج (ضمن الحد المعقول)")
+        notes.append(f"✅ contains {len(hashtags)} hashtags (a reasonable number)")
 
     return max(0, min(100, score)), notes
 
@@ -172,7 +172,7 @@ def _cmd_seo_description_score(ctx) -> str:
         return "usage: seo_description_score <description text OR path to .txt file>"
 
     score, notes = _score_description(text)
-    lines = [f"📄 تقييم الوصف ({len(text)} حرف)", f"\nالنتيجة: {score}/100", "\nالتفاصيل:"]
+    lines = [f"📄 Description review ({len(text)} characters)", f"\nScore: {score}/100", "\nDetails:"]
     lines += [f"  {n}" for n in notes]
     return "\n".join(lines)
 
@@ -215,16 +215,16 @@ def _cmd_seo_tags_suggest(ctx) -> str:
         title = title_path.read_text(encoding="utf-8")
         description = desc_path.read_text(encoding="utf-8")
     except OSError as e:
-        return f"❌ تعذرت القراءة: {e}"
+        return f"❌ could not read it: {e}"
 
     keywords = _extract_keywords(title, description)
     if not keywords:
-        return "❌ مش لاقي كلمات كفاية (كل الكلمات قصيرة جدًا أو stopwords)"
+        return "❌ not enough usable words (everything is too short, or a stopword)"
 
     total_chars = sum(len(k) + 1 for k in keywords)  # +1 للفاصلة تقريبًا
-    lines = [f"🏷 كلمات مفتاحية مرشحة ({len(keywords)}):"]
+    lines = [f"🏷 Candidate keywords ({len(keywords)}):"]
     lines += [f"  • {k}" for k in keywords]
-    lines.append(f"\n📏 لو استخدمتها كلها كـ tags: ~{total_chars} حرف من أصل {TAGS_CHAR_BUDGET} المسموحين")
+    lines.append(f"\n📏 Using them all as tags: ~{total_chars} of the {TAGS_CHAR_BUDGET} characters allowed")
     return "\n".join(lines)
 
 
@@ -239,17 +239,17 @@ def _cmd_seo_tags_audit(ctx) -> str:
 
     tags = [t.strip() for t in raw_tags.split(",") if t.strip()]
     if not tags:
-        return "❌ مفيش وسوم صالحة بعد الفصل بالفاصلة"
+        return "❌ no valid tags after splitting on commas"
 
     total_chars = sum(len(t) for t in tags)
-    lines = [f"🏷 تدقيق {len(tags)} وسم — إجمالي {total_chars}/{TAGS_CHAR_BUDGET} حرف"]
+    lines = [f"🏷 Auditing {len(tags)} tags — {total_chars}/{TAGS_CHAR_BUDGET} characters total"]
 
     if total_chars > TAGS_CHAR_BUDGET:
-        lines.append(f"  ❌ تجاوزت حد يوتيوب ({TAGS_CHAR_BUDGET} حرف) — يوتيوب هيتجاهل الوسوم الزيادة")
+        lines.append(f"  ❌ over YouTube's limit ({TAGS_CHAR_BUDGET} characters) — the excess tags will be ignored")
     elif total_chars > TAGS_CHAR_BUDGET * 0.9:
-        lines.append("  ⚠️ قريب من الحد الأقصى")
+        lines.append("  ⚠️ close to the limit")
     else:
-        lines.append(f"  ✅ في حدود المسموح (باقيلك {TAGS_CHAR_BUDGET - total_chars} حرف)")
+        lines.append(f"  ✅ within the limit ({TAGS_CHAR_BUDGET - total_chars} characters to spare)")
 
     lower_seen: dict[str, str] = {}
     duplicates = []
@@ -260,7 +260,7 @@ def _cmd_seo_tags_audit(ctx) -> str:
         else:
             lower_seen[low] = t
     if duplicates:
-        lines.append(f"  ⚠️ وسوم مكررة: {', '.join(duplicates)}")
+        lines.append(f"  ⚠️ duplicate tags: {', '.join(duplicates)}")
 
     near_dupes = []
     lowers = [t.lower() for t in tags]
@@ -269,15 +269,15 @@ def _cmd_seo_tags_audit(ctx) -> str:
             if a != b and (a == b + "s" or b == a + "s" or a == b + "es" or b == a + "es"):
                 near_dupes.append(f"{a} / {b}")
     if near_dupes:
-        lines.append(f"  ℹ️ وسوم شبه مكررة (مفرد/جمع) — ممكن تدمجهم: {', '.join(near_dupes[:5])}")
+        lines.append(f"  ℹ️ near-duplicate tags (singular and plural) you could merge: {', '.join(near_dupes[:5])}")
 
     broad = sum(1 for t in tags if " " not in t.strip())
     specific = len(tags) - broad
-    lines.append(f"  📊 وسوم عامة (كلمة واحدة): {broad}  |  وسوم محددة (عبارة): {specific}")
+    lines.append(f"  📊 broad tags (single word): {broad}  |  specific tags (phrases): {specific}")
     if specific == 0 and len(tags) > 3:
-        lines.append("  💡 كل الوسوم كلمة واحدة — ضيف عبارات أدق (2-3 كلمات) بتوصف الفيديو تحديدًا")
+        lines.append("  💡 every tag is a single word — add sharper 2-3 word phrases that describe this video specifically")
     elif broad == 0 and len(tags) > 3:
-        lines.append("  💡 كل الوسوم عبارات — ضيف كام وسم عام (كلمة واحدة) للوصول الأوسع")
+        lines.append("  💡 every tag is a phrase — add a few single-word tags for broader reach")
 
     return "\n".join(lines)
 
@@ -296,7 +296,7 @@ def _cmd_seo_full_audit(ctx) -> str:
         title = title_path.read_text(encoding="utf-8").strip()
         description = desc_path.read_text(encoding="utf-8")
     except OSError as e:
-        return f"❌ تعذرت القراءة: {e}"
+        return f"❌ could not read it: {e}"
 
     tags_raw = " ".join(ctx.args[2:])
     tags = [t.strip() for t in tags_raw.split(",") if t.strip()]
@@ -317,28 +317,28 @@ def _cmd_seo_full_audit(ctx) -> str:
     overall = round(title_score * 0.4 + desc_score * 0.3 + tags_score * 0.3)
 
     lines = [
-        "📋 تقرير SEO شامل",
-        f"\nالنتيجة الكلية: {overall}/100",
-        f"\n🏷 العنوان ({title_score}/100): \"{title}\"",
+        "📋 Full SEO report",
+        f"\nOverall score: {overall}/100",
+        f"\n🏷 Title ({title_score}/100): \"{title}\"",
     ]
     lines += [f"  {n}" for n in title_notes]
-    lines.append(f"\n📄 الوصف ({desc_score}/100):")
+    lines.append(f"\n📄 Description ({desc_score}/100):")
     lines += [f"  {n}" for n in desc_notes]
-    lines.append(f"\n🔖 الوسوم ({tags_score}/100): {len(tags)} وسم")
+    lines.append(f"\n🔖 Tags ({tags_score}/100): {len(tags)} tags")
     if not tags:
-        lines.append("  ❌ مفيش وسوم خالص")
+        lines.append("  ❌ no tags at all")
 
     return "\n".join(lines)
 
 
 def register(engine):
     engine.registry.register("seo_title_score", _cmd_seo_title_score,
-                              "seo_title_score <title> — تقييم عنوان الفيديو /100")
+                              "seo_title_score <title> — score a video title out of 100")
     engine.registry.register("seo_description_score", _cmd_seo_description_score,
-                              "seo_description_score <text|path> — تقييم وصف الفيديو /100")
+                              "seo_description_score <text|path> — score a video description out of 100")
     engine.registry.register("seo_tags_suggest", _cmd_seo_tags_suggest,
-                              "seo_tags_suggest <title.txt> <description.txt> — كلمات مفتاحية مرشحة")
+                              "seo_tags_suggest <title.txt> <description.txt> — candidate keywords")
     engine.registry.register("seo_tags_audit", _cmd_seo_tags_audit,
-                              "seo_tags_audit <tag1, tag2, ...> — تدقيق وسوم مقابل حدود يوتيوب")
+                              "seo_tags_audit <tag1, tag2, ...> — audit tags against YouTube's limits")
     engine.registry.register("seo_full_audit", _cmd_seo_full_audit,
-                              "seo_full_audit <title.txt> <description.txt> <tags> — تقرير SEO كامل")
+                              "seo_full_audit <title.txt> <description.txt> <tags> — a full SEO report")
