@@ -147,6 +147,11 @@ class AssistantApp(ctk.CTk):
         self.entry.pack(side=self._side, fill="x", expand=True, padx=(2, 10), pady=4)
         self.entry.bind("<Return>", lambda e: self._send())
         self.entry.focus_set()
+        # نفس مشكلة الـ paste اللي في CTkEntry بتاع مفتاح الـ API —
+        # موجودة هنا كمان في صندوق الشات الرئيسي، فبنعمل نفس الحل.
+        self.entry.bind("<Control-v>", self._paste_into_entry)
+        self.entry.bind("<Control-V>", self._paste_into_entry)
+        self.entry.bind("<Button-3>", self._paste_into_entry)  # كليك يمين
 
         # شريط أدوات نصي مختصر — أفعال بحرف واحد، مفيش أزرار ضخمة
         tools = ctk.CTkFrame(bottom, fg_color="transparent")
@@ -296,6 +301,23 @@ class AssistantApp(ctk.CTk):
         self.status_label.configure(text=f"{GLYPH_STATUS}  " + "  ·  ".join(parts))
 
     # ── الأفعال ────────────────────────────────────────────────────────
+    def _paste_into_entry(self, event=None):
+        try:
+            clip = self.entry.clipboard_get()
+        except Exception:
+            return "break"  # الحافظة فاضية أو مفيهاش نص
+        if not clip:
+            return "break"
+        # بنلصق في مكان المؤشر (مش استبدال كامل)، عشان ده صندوق شات
+        # عادي ممكن يبقى فيه نص مكتوب قبل الـ paste خلاف مربع المفتاح.
+        try:
+            if self.entry.selection_present():
+                self.entry.delete("sel.first", "sel.last")
+        except Exception:
+            pass
+        self.entry.insert("insert", clip)
+        return "break"
+
     def _send(self):
         text = self.entry.get().strip()
         if not text:
