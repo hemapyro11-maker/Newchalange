@@ -84,45 +84,45 @@ def _analyze_image(path: pathlib.Path) -> dict:
     aspect_diff = abs(aspect - TARGET_ASPECT) / TARGET_ASPECT if aspect else 1
     if width == TARGET_SIZE[0] and height == TARGET_SIZE[1]:
         score += 20
-        notes.append(f"✅ الدقة مطابقة للموصى بيه ({TARGET_SIZE[0]}x{TARGET_SIZE[1]})")
+        notes.append(f"✅ resolution matches the recommended {TARGET_SIZE[0]}x{TARGET_SIZE[1]}")
     elif aspect_diff < 0.03:
         score += 12
-        notes.append(f"✅ نسبة العرض للارتفاع صح (16:9) لكن الدقة {width}x{height} مش المثالية بالظبط")
+        notes.append(f"✅ aspect ratio is right (16:9), though {width}x{height} is not the ideal resolution")
     else:
         score -= 10
-        notes.append(f"⚠️ نسبة العرض للارتفاع {aspect:.2f} بعيدة عن 16:9 — ممكن تتقص في المعاينة")
+        notes.append(f"⚠️ aspect ratio {aspect:.2f} is far from 16:9 — it may get cropped in previews")
 
     if file_size > MAX_FILE_SIZE:
         score -= 20
-        notes.append(f"❌ حجم الملف {file_size / 1024:.0f}KB أكبر من حد يوتيوب (2MB)")
+        notes.append(f"❌ file size {file_size / 1024:.0f}KB is over YouTube's 2MB limit")
     else:
-        notes.append(f"✅ حجم الملف {file_size / 1024:.0f}KB — ضمن حد يوتيوب")
+        notes.append(f"✅ file size {file_size / 1024:.0f}KB — within YouTube's limit")
 
     if brightness < 60:
         score -= 5
-        notes.append(f"⚠️ الصورة غامقة (سطوع {brightness:.0f}/255) — ممكن تضيع في القائمة")
+        notes.append(f"⚠️ the image is dark (brightness {brightness:.0f}/255) — it may disappear in a feed")
     elif brightness > 210:
         score -= 5
-        notes.append(f"⚠️ الصورة فاتحة جدًا (سطوع {brightness:.0f}/255) — ممكن تبان باهتة")
+        notes.append(f"⚠️ the image is very light (brightness {brightness:.0f}/255) — it may look washed out")
     else:
         score += 10
-        notes.append(f"✅ سطوع متوازن ({brightness:.0f}/255)")
+        notes.append(f"✅ balanced brightness ({brightness:.0f}/255)")
 
     if contrast < 30:
         score -= 10
-        notes.append(f"⚠️ تباين منخفض ({contrast:.0f}) — الصورة ممكن تبان فلات وسط باقي المصغرات")
+        notes.append(f"⚠️ low contrast ({contrast:.0f}) — it may look flat next to other thumbnails")
     elif contrast > 55:
         score += 15
-        notes.append(f"✅ تباين قوي ({contrast:.0f}) — بيلفت العين في قائمة النتائج")
+        notes.append(f"✅ strong contrast ({contrast:.0f}) — it catches the eye in a results list")
     else:
         score += 5
-        notes.append(f"🙂 تباين متوسط ({contrast:.0f})")
+        notes.append(f"🙂 moderate contrast ({contrast:.0f})")
 
     if saturation > 100:
         score += 10
-        notes.append(f"✅ ألوان زاهية (تشبع {saturation:.0f}/255) — عادة بتاخد نقرات أكتر")
+        notes.append(f"✅ vivid colours (saturation {saturation:.0f}/255) — these usually get more clicks")
     else:
-        notes.append(f"ℹ️ ألوان هادئة (تشبع {saturation:.0f}/255)")
+        notes.append(f"ℹ️ muted colours (saturation {saturation:.0f}/255)")
 
     return {
         "width": width, "height": height, "file_size": file_size,
@@ -143,12 +143,12 @@ def _cmd_thumbnail_analyze(ctx) -> str:
     try:
         result = _analyze_image(path)
     except Exception as e:
-        return f"❌ تعذر تحليل الصورة: {e}"
+        return f"❌ could not analyse the image: {e}"
 
     lines = [
-        f"🖼 تحليل مصغرة: {path.name}",
-        f"   📐 {result['width']}x{result['height']}  |  🎨 اللون السائد: {result['dominant_hex']}",
-        f"\nالنتيجة: {result['score']}/100\n",
+        f"🖼 Thumbnail analysis: {path.name}",
+        f"   📐 {result['width']}x{result['height']}  |  🎨 dominant colour: {result['dominant_hex']}",
+        f"\nScore: {result['score']}/100\n",
     ]
     lines += [f"  {n}" for n in result["notes"]]
     return "\n".join(lines)
@@ -182,7 +182,7 @@ def _cmd_thumbnail_generate(ctx) -> str:
     if not bg_path.is_file():
         return f"❌ file not found: {bg_path}"
     if not title.strip():
-        return "❌ النص فاضي"
+        return "❌ the text is empty"
 
     try:
         img = Image.open(bg_path).convert("RGB")
@@ -226,11 +226,11 @@ def _cmd_thumbnail_generate(ctx) -> str:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         img.save(out_path, quality=90)
     except OSError as e:
-        return f"❌ تعذر حفظ الصورة: {e}"
+        return f"❌ could not save the image: {e}"
 
     size_kb = out_path.stat().st_size / 1024
-    warn = f" ⚠️ الحجم {size_kb:.0f}KB أكبر من حد يوتيوب 2MB" if size_kb * 1024 > MAX_FILE_SIZE else ""
-    return f"✅ اتعملت المصغرة ({tw}x{th}, {size_kb:.0f}KB) في {out_path}{warn}"
+    warn = f" ⚠️ {size_kb:.0f}KB is over YouTube's 2MB limit" if size_kb * 1024 > MAX_FILE_SIZE else ""
+    return f"✅ thumbnail created ({tw}x{th}, {size_kb:.0f}KB) at {out_path}{warn}"
 
 
 def _cmd_thumbnail_ab_compare(ctx) -> str:
@@ -249,25 +249,25 @@ def _cmd_thumbnail_ab_compare(ctx) -> str:
         a = _analyze_image(path_a)
         b = _analyze_image(path_b)
     except Exception as e:
-        return f"❌ تعذر التحليل: {e}"
+        return f"❌ could not analyse: {e}"
 
     lines = [
-        f"⚖️ مقارنة A/B: {path_a.name}  مقابل  {path_b.name}",
-        f"\n  A) {path_a.name} — {a['score']}/100  (تباين {a['contrast']:.0f}, تشبع {a['saturation']:.0f})",
-        f"  B) {path_b.name} — {b['score']}/100  (تباين {b['contrast']:.0f}, تشبع {b['saturation']:.0f})",
+        f"⚖️ A/B comparison: {path_a.name}  vs  {path_b.name}",
+        f"\n  A) {path_a.name} — {a['score']}/100  (contrast {a['contrast']:.0f}, saturation {a['saturation']:.0f})",
+        f"  B) {path_b.name} — {b['score']}/100  (contrast {b['contrast']:.0f}, saturation {b['saturation']:.0f})",
     ]
     if a["score"] == b["score"]:
-        lines.append("\n🤝 نفس النتيجة تقريبًا — القرار هيعتمد على مين بيمثل محتوى الفيديو أدق")
+        lines.append("\n🤝 effectively tied — pick whichever represents the video more honestly")
     else:
         winner, wscore = ("A", a["score"]) if a["score"] > b["score"] else ("B", b["score"])
-        lines.append(f"\n🏆 {winner} أعلى بالمقاييس القابلة للقياس ({wscore}/100) — بس ده مؤشر مش ضمان CTR حقيقي")
+        lines.append(f"\n🏆 {winner} scores higher on the measurable properties ({wscore}/100) — an indicator, not a guarantee of real click-through")
     return "\n".join(lines)
 
 
 def register(engine):
     engine.registry.register("thumbnail_analyze", _cmd_thumbnail_analyze,
-                              "thumbnail_analyze <image_path> — تحليل مصغرة (سطوع/تباين/دقة/حجم)")
+                              "thumbnail_analyze <image_path> — analyse a thumbnail (brightness, contrast, resolution, size)")
     engine.registry.register("thumbnail_generate", _cmd_thumbnail_generate,
-                              "thumbnail_generate <bg_image> <title> <out.jpg> — توليد مصغرة 1280x720 بنص تلقائي اللون")
+                              "thumbnail_generate <bg_image> <title> <out.jpg> — build a 1280x720 thumbnail with auto-coloured text")
     engine.registry.register("thumbnail_ab_compare", _cmd_thumbnail_ab_compare,
-                              "thumbnail_ab_compare <image_a> <image_b> — مقارنة مصغرتين على نفس المقاييس")
+                              "thumbnail_ab_compare <image_a> <image_b> — compare two thumbnails on the same measures")

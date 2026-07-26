@@ -102,9 +102,9 @@ def _validate_name(name: str) -> str | None:
     مهم بالذات هنا: approve_plugin بينقل الملف لـ plugins/ اللي بيتحمّل
     ويتنفذ تلقائياً، فاسم فيه path traversal (زي ../../x) خطر حقيقي."""
     if not name or name in (".", ".."):
-        return "❌ اسم الـ plugin لازم يكون غير فاضي ومش '.' أو '..'"
+        return "❌ the plugin name must not be empty, '.' or '..'"
     if any(c in _INVALID_NAME_CHARS for c in name) or ".." in name:
-        return "❌ اسم الـ plugin مينفعش يحتوي على مسارات أو رموز غريبة"
+        return "❌ the plugin name may not contain path separators or odd characters"
     return None
 
 
@@ -135,7 +135,7 @@ def _validate_candidate(code_path: pathlib.Path) -> tuple[bool, str]:
             capture_output=True, text=True, timeout=10,
         )
     except subprocess.TimeoutExpired:
-        return False, "TIMEOUT: الكود علّق لأكتر من 10 ثواني (احتمال infinite loop)"
+        return False, "TIMEOUT: the code hung for over 10 seconds (possible infinite loop)"
     finally:
         harness_path.unlink(missing_ok=True)
     output = (result.stdout or "") + (result.stderr or "")
@@ -156,11 +156,11 @@ def _generate_with_retries(engine, initial_prompt: str, name: str, ask=_ask_olla
             raw = ask(prompt)
         except (urllib.error.URLError, ConnectionError, TimeoutError):
             return False, "", (
-                "⚠  مفيش نموذج محلي شغال (Ollama). ده مجاني بالكامل — نزّله من "
-                f"https://ollama.com وشغّل: ollama pull {DEFAULT_MODEL}"
+                "⚠  No local model running (Ollama). It is completely free — get it from "
+                f"https://ollama.com then run: ollama pull {DEFAULT_MODEL}"
             ), attempt
         except Exception as e:
-            return False, "", f"❌ خطأ في الاتصال بالنموذج: {e}", attempt
+            return False, "", f"❌ could not reach the model: {e}", attempt
 
         code = _clean_code(raw)
         tmp_path = _pending_dir() / f"_draft_{name}.py"
@@ -168,8 +168,8 @@ def _generate_with_retries(engine, initial_prompt: str, name: str, ask=_ask_olla
         ok, msg = _validate_candidate(tmp_path)
         tmp_path.unlink(missing_ok=True)
         engine._log(
-            f"🔧 محاولة {attempt}/{MAX_ATTEMPTS} لـ '{name}': "
-            + ("✅ نجحت" if ok else "❌ فشلت — " + msg[:200]),
+            f"🔧 attempt {attempt}/{MAX_ATTEMPTS} for '{name}': "
+            + ("✅ passed" if ok else "❌ failed — " + msg[:200]),
             "ok" if ok else "warn",
         )
         if ok:
@@ -209,12 +209,12 @@ def _cmd_create_plugin(ctx) -> str:
         return msg  # Ollama unreachable/connection error — msg already explains
 
     _save_candidate(name, code, description, ok, attempts, msg)
-    status = "✅ اتولّدت واتأكد إنها شغالة" if ok else f"⚠  اتولّدت لكن لسه فيها مشكلة بعد {attempts} محاولة"
+    status = "✅ generated and verified working" if ok else f"⚠  generated, but still broken after {attempts} attempts"
     return (
         f"{status} — {name}\n"
-        f"📁 محفوظة في plugins_pending/{name}.py (لسه مش شغالة في التطبيق)\n"
-        f"راجعها بـ: review_pending {name}\n"
-        f"لو تمام: approve_plugin {name}   |   لو عايز ترفضها: reject_plugin {name}"
+        f"📁 saved to plugins_pending/{name}.py (not active in the app yet)\n"
+        f"Review it with: review_pending {name}\n"
+        f"If it looks right: approve_plugin {name}   |   to discard it: reject_plugin {name}"
     )
 
 
@@ -236,7 +236,7 @@ def _cmd_fix_plugin(ctx) -> str:
     pending_path = _pending_dir() / f"{name}.py"
     source_path = live_path or (pending_path if pending_path.is_file() else None)
     if source_path is None:
-        return f"❌ مفيش plugin اسمه {name} في plugins/ ولا plugins_pending/"
+        return f"❌ no plugin named {name} in plugins/ or plugins_pending/"
 
     if not error_text:
         for level, msg in reversed(ctx.engine.log_history):
@@ -244,7 +244,7 @@ def _cmd_fix_plugin(ctx) -> str:
                 error_text = msg
                 break
     if not error_text:
-        return f"❌ مفيش خطأ معروف لـ {name} — اكتب error_text أو شغّل الأمر اللي فشل الأول عشان يتسجل في السجل"
+        return f"❌ no known error for {name} — pass error_text, or run the failing command first so it lands in the log"
 
     code = source_path.read_text(encoding="utf-8")
     prompt = (
@@ -257,14 +257,14 @@ def _cmd_fix_plugin(ctx) -> str:
         return msg
 
     _save_candidate(name, fixed_code, f"fix for: {error_text[:200]}", ok, attempts, msg)
-    status = "✅ اتصلحت واتأكد إنها شغالة" if ok else f"⚠  اتحاولت الإصلاح لكن لسه فيها مشكلة بعد {attempts} محاولة"
-    return f"{status} — النسخة المصلّحة في plugins_pending/{name}.py، راجعها بـ review_pending {name}"
+    status = "✅ repaired and verified working" if ok else f"⚠  repair attempted, but still broken after {attempts} attempts"
+    return f"{status} — the repaired copy is in plugins_pending/{name}.py; review it with review_pending {name}"
 
 
 def _cmd_list_pending(ctx) -> str:
     metas = sorted(_pending_dir().glob("*.meta.json"))
     if not metas:
-        return "مفيش plugins مستنية مراجعة"
+        return "No plugins waiting for review"
     lines = []
     for meta_path in metas:
         try:
@@ -287,16 +287,16 @@ def _cmd_review_pending(ctx) -> str:
     code_path = _pending_dir() / f"{name}.py"
     meta_path = _pending_dir() / f"{name}.meta.json"
     if not code_path.is_file():
-        return f"❌ مفيش plugin مستني اسمه {name}"
+        return f"❌ no pending plugin named {name}"
     try:
         meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else {}
     except (OSError, json.JSONDecodeError):
         meta = {}
     header = (
-        f"📋 {name} — {'✅ اتأكد إنها شغالة' if meta.get('validated') else '⚠ فيها مشكلة'}\n"
-        f"الوصف: {meta.get('description', '?')}\n"
-        f"عدد المحاولات: {meta.get('attempts', '?')}\n"
-        f"نتيجة آخر تحقق: {meta.get('validation_message', '?')}\n"
+        f"📋 {name} — {'✅ verified working' if meta.get('validated') else '⚠ still broken'}\n"
+        f"Description: {meta.get('description', '?')}\n"
+        f"Attempts: {meta.get('attempts', '?')}\n"
+        f"Last check said: {meta.get('validation_message', '?')}\n"
         f"{'─' * 40}\n"
     )
     return header + code_path.read_text(encoding="utf-8")
@@ -315,13 +315,13 @@ def _cmd_approve_plugin(ctx) -> str:
         return name_error
     code_path = _pending_dir() / f"{name}.py"
     if not code_path.is_file():
-        return f"❌ مفيش plugin مستني اسمه {name}"
+        return f"❌ no pending plugin named {name}"
     target_dir = ctx.engine.plugins_dirs[-1]  # جنب الـ exe/كود المصدر (قابل للكتابة)، مش الـ bundle للقراءة بس
     target_path = target_dir / f"{name}.py"
     if target_path.is_file() and not force:
         return (
-            f"⚠️ فيه plugin موجود فعلاً اسمه {name}.py — الموافقة دي هتستبدله بالكامل بالكود المولّد.\n"
-            f"لو متأكد إنك عايز تستبدله، استخدم: approve_plugin {name} --force"
+            f"⚠️ a plugin named {name}.py already exists — approving would replace it entirely with the generated code.\n"
+            f"If you are sure you want to replace it: approve_plugin {name} --force"
         )
     try:
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -329,9 +329,9 @@ def _cmd_approve_plugin(ctx) -> str:
         code_path.unlink()
         (_pending_dir() / f"{name}.meta.json").unlink(missing_ok=True)
     except OSError as e:
-        return f"❌ فشل النقل لـ plugins/: {e}"
+        return f"❌ could not move it into plugins/: {e}"
     ctx.engine.load_plugins()
-    return f"✅ اتنقلت {name} لـ plugins/ واتحمّلت. جرب: help"
+    return f"✅ moved {name} into plugins/ and loaded it. Try: help"
 
 
 def _cmd_reject_plugin(ctx) -> str:
@@ -347,13 +347,13 @@ def _cmd_reject_plugin(ctx) -> str:
         if p.is_file():
             p.unlink()
             removed = True
-    return f"🗑 اتشالت {name} من plugins_pending/" if removed else f"❌ مفيش حاجة اسمها {name}"
+    return f"🗑 removed {name} from plugins_pending/" if removed else f"❌ nothing named {name}"
 
 
 def register(engine):
     engine.registry.register(
         "create_plugin", _cmd_create_plugin,
-        "create_plugin <name> <description> — يولّد plugin جديد ويتأكد إنه شغال (نموذج محلي مجاني)",
+        "create_plugin <name> <description> — generate a new plugin and verify it runs (free local model)",
     )
     engine.registry.register("fix_plugin", _cmd_fix_plugin, "fix_plugin <name> [error] — repair an existing plugin automatically")
     engine.registry.register("list_pending", _cmd_list_pending, "list_pending — generated plugins waiting for your approval")

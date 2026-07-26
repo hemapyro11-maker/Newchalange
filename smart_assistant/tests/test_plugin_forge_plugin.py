@@ -181,7 +181,7 @@ def test_reject_plugin_removes_candidate(monkeypatch, tmp_path, bare_engine):
     pf._save_candidate("x", code, "d", ok, attempts, msg)
 
     result = pf._cmd_reject_plugin(CommandContext(raw="reject_plugin x", args=["x"], engine=bare_engine))
-    assert "اتشالت" in result
+    assert "removed" in result
     assert not (pending / "x.py").exists()
 
 

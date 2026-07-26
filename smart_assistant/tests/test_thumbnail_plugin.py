@@ -38,7 +38,7 @@ def test_analyze_missing_file(make_ctx, tmp_path):
 def test_analyze_ideal_resolution(make_ctx, tmp_path):
     img = _make_image(tmp_path / "thumb.png", size=(1280, 720))
     result = tp._cmd_thumbnail_analyze(make_ctx("thumbnail_analyze", [str(img)]))
-    assert "مطابقة للموصى بيه" in result
+    assert "matches the recommended" in result
     assert "1280x720" in result
 
 
@@ -46,30 +46,30 @@ def test_analyze_ideal_resolution(make_ctx, tmp_path):
 def test_analyze_wrong_aspect_ratio_flagged(make_ctx, tmp_path):
     img = _make_image(tmp_path / "square.png", size=(500, 500))
     result = tp._cmd_thumbnail_analyze(make_ctx("thumbnail_analyze", [str(img)]))
-    assert "بعيدة عن 16:9" in result
+    assert "far from 16:9" in result
 
 
 @requires_pil
 def test_analyze_high_contrast_scores_well(make_ctx, tmp_path):
     img = _make_high_contrast_image(tmp_path / "contrast.png")
     result = tp._cmd_thumbnail_analyze(make_ctx("thumbnail_analyze", [str(img)]))
-    assert "تباين قوي" in result
+    assert "strong contrast" in result
 
 
 @requires_pil
 def test_analyze_flat_color_low_contrast(make_ctx, tmp_path):
     img = _make_image(tmp_path / "flat.png", color="#808080")
     result = tp._cmd_thumbnail_analyze(make_ctx("thumbnail_analyze", [str(img)]))
-    assert "تباين منخفض" in result
+    assert "low contrast" in result
 
 
 @requires_pil
 def test_analyze_reports_dominant_color_and_score(make_ctx, tmp_path):
     img = _make_image(tmp_path / "t.png")
     result = tp._cmd_thumbnail_analyze(make_ctx("thumbnail_analyze", [str(img)]))
-    assert "اللون السائد" in result
+    assert "dominant colour" in result
     import re
-    m = re.search(r"النتيجة: (\d+)/100", result)
+    m = re.search(r"Score: (\d+)/100", result)
     assert m
     assert 0 <= int(m.group(1)) <= 100
 
@@ -78,7 +78,7 @@ def test_analyze_reports_dominant_color_and_score(make_ctx, tmp_path):
 def test_analyze_dark_image_flagged(make_ctx, tmp_path):
     img = _make_image(tmp_path / "dark.png", color="#050505")
     result = tp._cmd_thumbnail_analyze(make_ctx("thumbnail_analyze", [str(img)]))
-    assert "غامقة" in result
+    assert "the image is dark" in result
 
 
 @requires_pil
@@ -86,7 +86,7 @@ def test_analyze_oversized_file_flagged(make_ctx, tmp_path, monkeypatch):
     img = _make_image(tmp_path / "t.png")
     monkeypatch.setattr(tp, "MAX_FILE_SIZE", 10)  # حد صغير جدًا عشان أي ملف حقيقي يتخطاه
     result = tp._cmd_thumbnail_analyze(make_ctx("thumbnail_analyze", [str(img)]))
-    assert "أكبر من حد يوتيوب" in result
+    assert "over YouTube's 2MB limit" in result
 
 
 def test_analyze_without_pil(make_ctx, monkeypatch):
