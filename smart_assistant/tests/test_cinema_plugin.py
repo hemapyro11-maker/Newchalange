@@ -291,7 +291,7 @@ def test_auto_trim_silence_reports_missing_tool(make_ctx, tmp_path, monkeypatch)
     f = tmp_path / "in.mp4"
     f.write_bytes(b"x")
     result = cp._cmd_auto_trim_silence(make_ctx("auto_trim_silence", [str(f), str(tmp_path / "out.mp4")]))
-    assert "auto-editor مش متثبت" in result
+    assert "auto-editor is not installed" in result
     assert "pip install auto-editor" in result
 
 
@@ -312,7 +312,7 @@ def test_auto_trim_silence_detects_exit_zero_but_no_output(make_ctx, tmp_path, m
     f.write_bytes(b"x")
     result = cp._cmd_auto_trim_silence(make_ctx("auto_trim_silence", [str(f), str(tmp_path / "out.mp4")]))
     assert result.startswith("❌")
-    assert "مفيش ملف خرج حقيقي" in result
+    assert "no real output file" in result
 
 
 @requires_auto_editor
@@ -338,7 +338,7 @@ def test_detect_scenes_reports_missing_tool(make_ctx, tmp_path, monkeypatch):
     f = tmp_path / "in.mp4"
     f.write_bytes(b"x")
     result = cp._cmd_detect_scenes(make_ctx("detect_scenes", [str(f)]))
-    assert "PySceneDetect مش متثبت" in result
+    assert "PySceneDetect is not installed" in result
     assert "pip install scenedetect" in result
 
 
@@ -370,7 +370,7 @@ def test_detect_scenes_finds_real_cut(make_ctx, tmp_path):
     )
     result = cp._cmd_detect_scenes(make_ctx("detect_scenes", [str(out)]))
     assert result.startswith("🎬")
-    assert "2 مشهد" in result
+    assert "2 scenes found" in result
 
 
 @requires_scenedetect
@@ -380,7 +380,7 @@ def test_detect_scenes_no_cuts_in_continuous_clip(make_ctx, clip1):
     # المفروض ميلاقيش أي "مشهد" منفصل فيه.
     result = cp._cmd_detect_scenes(make_ctx("detect_scenes", [str(clip1)]))
     assert result.startswith("ℹ️")
-    assert "مفيش تغييرات مشاهد" in result
+    assert "no clear scene changes found" in result
 
 
 # ── upscale_image / upscale_video ────────────────────────────────────────
@@ -417,7 +417,7 @@ def test_upscale_image_reports_missing_tool(make_ctx, tmp_path, monkeypatch):
     f = tmp_path / "in.png"
     f.write_bytes(b"x")
     result = cp._cmd_upscale_image(make_ctx("upscale_image", [str(f), str(tmp_path / "out.png")]))
-    assert "realesrgan-ncnn-vulkan مش متثبت" in result
+    assert "realesrgan-ncnn-vulkan is not installed" in result
 
 
 def test_upscale_image_missing_input(make_ctx, tmp_path, monkeypatch):
@@ -453,7 +453,7 @@ def test_upscale_image_detects_exit_zero_but_no_output(make_ctx, tmp_path, monke
     f.write_bytes(b"x")
     result = cp._cmd_upscale_image(make_ctx("upscale_image", [str(f), str(tmp_path / "out.png")]))
     assert result.startswith("❌")
-    assert "مفيش ملف خرج حقيقي" in result
+    assert "no real output file" in result
 
 
 @requires_realesrgan
@@ -477,7 +477,7 @@ def test_upscale_video_reports_missing_tool(make_ctx, tmp_path, monkeypatch):
     f = tmp_path / "in.mp4"
     f.write_bytes(b"x")
     result = cp._cmd_upscale_video(make_ctx("upscale_video", [str(f), str(tmp_path / "out.mp4")]))
-    assert "realesrgan-ncnn-vulkan مش متثبت" in result
+    assert "realesrgan-ncnn-vulkan is not installed" in result
 
 
 def test_upscale_video_reports_missing_ffmpeg(make_ctx, tmp_path, monkeypatch):
@@ -517,8 +517,8 @@ def test_upscale_video_detects_partial_frame_output(make_ctx, tmp_path, monkeypa
     f.write_bytes(b"x")
     result = cp._cmd_upscale_video(make_ctx("upscale_video", [str(f), str(tmp_path / "out.mp4")]))
     assert result.startswith("❌")
-    assert "فشل التكبير جزئيًا" in result
-    assert "2 فريم بس من أصل 5" in result
+    assert "upscaling only partly finished" in result
+    assert "2 of 5 frames" in result
 
 
 @requires_realesrgan

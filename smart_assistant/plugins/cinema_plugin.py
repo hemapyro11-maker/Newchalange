@@ -56,7 +56,7 @@ def _run_ffmpeg(args: list[str], timeout: int) -> tuple[bool, str]:
     except subprocess.TimeoutExpired:
         return False, f"⏱ timed out after ({timeout}s)"
     except OSError as e:
-        return False, f"❌ تعذر تشغيل {args[0]}: {e}"
+        return False, f"❌ could not run {args[0]}: {e}"
     if result.returncode != 0:
         return False, result.stderr.strip()[-600:]
     return True, result.stdout
@@ -169,13 +169,13 @@ def _cmd_color_grade(ctx) -> str:
     if missing:
         return f"❌ file not found: {missing[0]}"
     if preset not in _COLOR_PRESETS:
-        return f"❌ preset غير معروف: {preset} (available: {', '.join(_COLOR_PRESETS)})"
+        return f"❌ unknown preset: {preset} (available: {', '.join(_COLOR_PRESETS)})"
     ok, err = _run_ffmpeg(
         ["ffmpeg", "-y", "-i", src, "-vf", _COLOR_PRESETS[preset], "-c:a", "copy", dst], timeout=300,
     )
     if not ok:
-        return f"❌ فشل التصحيح اللوني:\n{err}"
-    return f"✅ اتعمل color grading ({preset}) في {dst}"
+        return f"❌ colour grading failed:\n{err}"
+    return f"✅ colour grading ({preset}) written to {dst}"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -199,18 +199,18 @@ def _cmd_transition(ctx) -> str:
     try:
         duration = float(ctx.args[4]) if len(ctx.args) > 4 else 1.0
     except ValueError:
-        return "❌ duration لازم يكون رقم"
+        return "❌ duration must be a number"
     missing = _missing_files(clip1, clip2)
     if missing:
         return f"❌ file not found: {missing[0]}"
     if style not in _TRANSITIONS:
-        return f"❌ style غير معروف: {style} (available: {', '.join(sorted(_TRANSITIONS))})"
+        return f"❌ unknown style: {style} (available: {', '.join(sorted(_TRANSITIONS))})"
 
     clip1_duration = _probe_duration(clip1)
     if clip1_duration is None:
-        return f"❌ تعذر معرفة مدة {clip1}"
+        return f"❌ could not determine the duration of {clip1}"
     if duration >= clip1_duration:
-        return f"❌ duration ({duration}s) لازم يكون أقل من مدة الكليب الأول ({clip1_duration:.2f}s)"
+        return f"❌ duration ({duration}s) must be shorter than the first clip ({clip1_duration:.2f}s)"
     offset = clip1_duration - duration
 
     filter_complex = (
@@ -231,9 +231,9 @@ def _cmd_transition(ctx) -> str:
             timeout=300,
         )
         if not ok:
-            return f"❌ فشل الانتقال:\n{err}"
-        return f"✅ اتعمل انتقال ({style}) في {dst} (بدون صوت — أحد الكليبين مالوش مسار صوت)"
-    return f"✅ اتعمل انتقال ({style}) في {dst}"
+            return f"❌ transition failed:\n{err}"
+        return f"✅ transition ({style}) written to {dst} (silent — one of the clips has no audio track)"
+    return f"✅ transition ({style}) written to {dst}"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -252,23 +252,23 @@ def _cmd_letterbox(ctx) -> str:
     try:
         ratio = float(ctx.args[2]) if len(ctx.args) > 2 else 2.39
     except ValueError:
-        return "❌ ratio لازم يكون رقم"
+        return "❌ ratio must be a number"
     if ratio <= 0:
-        return "❌ ratio لازم يكون أكبر من صفر"
+        return "❌ ratio must be greater than zero"
 
     dims = _probe_dimensions(src)
     if dims is None:
-        return f"❌ تعذر معرفة أبعاد {src}"
+        return f"❌ could not determine the dimensions of {src}"
     width, height = dims
     bar_height = max(0, round((height - width / ratio) / 2))
     if bar_height == 0:
-        return f"⚠  الفيديو أعرض من {ratio}:1 بالفعل — مفيش شريط يتضاف"
+        return f"⚠  the video is already wider than {ratio}:1 — no bars to add"
 
     vf = f"drawbox=x=0:y=0:w=iw:h={bar_height}:color=black:t=fill,drawbox=x=0:y=ih-{bar_height}:w=iw:h={bar_height}:color=black:t=fill"
     ok, err = _run_ffmpeg(["ffmpeg", "-y", "-i", src, "-vf", vf, "-c:a", "copy", dst], timeout=300)
     if not ok:
         return f"❌ failed: {err}"
-    return f"✅ اتعمل letterbox ({ratio}:1) في {dst}"
+    return f"✅ letterboxed ({ratio}:1) to {dst}"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -293,15 +293,15 @@ def _cmd_stabilize(ctx) -> str:
             timeout=300,
         )
         if not ok:
-            return f"❌ فشلت مرحلة تحليل الاهتزاز (pass 1):\n{err}"
+            return f"❌ the shake-analysis pass failed (pass 1):\n{err}"
         ok, err = _run_ffmpeg(
             ["ffmpeg", "-y", "-i", src, "-vf", f"vidstabtransform=smoothing=30:input={transforms}",
              "-c:a", "copy", dst],
             timeout=300,
         )
     if not ok:
-        return f"❌ فشلت مرحلة التثبيت (pass 2):\n{err}"
-    return f"✅ اتعمل تثبيت الفيديو (stabilization) في {dst}"
+        return f"❌ the stabilisation pass failed (pass 2):\n{err}"
+    return f"✅ video stabilised at {dst}"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -310,7 +310,7 @@ def _cmd_stabilize(ctx) -> str:
 
 def _cmd_speed_ramp(ctx) -> str:
     if len(ctx.args) < 3:
-        return "usage: speed_ramp <input> <output> <factor>  (0.5=نص سرعة/بطيء، 2=ضعف السرعة)"
+        return "usage: speed_ramp <input> <output> <factor>  (0.5 = half speed, 2 = double speed)"
     if not shutil.which("ffmpeg"):
         return "❌ ffmpeg not found"
     src, dst, factor_arg = ctx.args[0], ctx.args[1], ctx.args[2]
@@ -320,9 +320,9 @@ def _cmd_speed_ramp(ctx) -> str:
     try:
         factor = float(factor_arg)
     except ValueError:
-        return "❌ factor لازم يكون رقم"
+        return "❌ factor must be a number"
     if factor <= 0:
-        return "❌ factor لازم يكون أكبر من صفر"
+        return "❌ factor must be greater than zero"
 
     vf = f"setpts={1 / factor:.6f}*PTS"
     af = _atempo_chain(factor)
@@ -332,8 +332,8 @@ def _cmd_speed_ramp(ctx) -> str:
         ok, err = _run_ffmpeg(["ffmpeg", "-y", "-i", src, "-vf", vf, "-an", dst], timeout=300)
         if not ok:
             return f"❌ failed: {err}"
-        return f"✅ اتغيرت السرعة (×{factor}) في {dst} (بدون صوت)"
-    return f"✅ اتغيرت السرعة (×{factor}) في {dst}"
+        return f"✅ speed changed (×{factor}) at {dst} (silent)"
+    return f"✅ speed changed (×{factor}) at {dst}"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -362,11 +362,11 @@ def _cmd_pip(ctx) -> str:
     try:
         scale = float(ctx.args[4]) if len(ctx.args) > 4 else 0.3
     except ValueError:
-        return "❌ scale لازم يكون رقم"
+        return "❌ scale must be a number"
     if not (0 < scale <= 1):
-        return "❌ scale لازم يكون بين 0 و1"
+        return "❌ scale must be between 0 and 1"
     if position not in _PIP_POSITIONS:
-        return f"❌ position غير معروف: {position} (available: {', '.join(_PIP_POSITIONS)})"
+        return f"❌ unknown position: {position} (available: {', '.join(_PIP_POSITIONS)})"
 
     filter_complex = f"[1:v]scale=iw*{scale}:ih*{scale}[ov];[0:v][ov]overlay={_PIP_POSITIONS[position]}"
     ok, err = _run_ffmpeg(
@@ -376,7 +376,7 @@ def _cmd_pip(ctx) -> str:
     )
     if not ok:
         return f"❌ failed: {err}"
-    return f"✅ اتعمل Picture-in-Picture ({position}) في {dst}"
+    return f"✅ picture-in-picture ({position}) written to {dst}"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -396,9 +396,9 @@ def _cmd_chroma_key(ctx) -> str:
     try:
         similarity = float(ctx.args[4]) if len(ctx.args) > 4 else 0.3
     except ValueError:
-        return "❌ similarity لازم يكون رقم"
+        return "❌ similarity must be a number"
     if not (0 < similarity <= 1):
-        return "❌ similarity لازم يكون بين 0 و1"
+        return "❌ similarity must be between 0 and 1"
 
     filter_complex = f"[0:v]colorkey=color={color}:similarity={similarity}:blend=0.1[fg];[1:v][fg]overlay"
     ok, err = _run_ffmpeg(
@@ -407,7 +407,7 @@ def _cmd_chroma_key(ctx) -> str:
     )
     if not ok:
         return f"❌ failed: {err}"
-    return f"✅ اتعمل دمج الخلفية (chroma key) في {dst}"
+    return f"✅ chroma key composite written to {dst}"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -416,7 +416,7 @@ def _cmd_chroma_key(ctx) -> str:
 
 def _cmd_master_audio(ctx) -> str:
     if len(ctx.args) < 2:
-        return "usage: master_audio <input> <output> [target_lufs=-16]  (-16 ستريمنج، -23 بث EBU R128)"
+        return "usage: master_audio <input> <output> [target_lufs=-16]  (-16 streaming, -23 broadcast EBU R128)"
     if not shutil.which("ffmpeg"):
         return "❌ ffmpeg not found"
     src, dst = ctx.args[0], ctx.args[1]
@@ -426,16 +426,16 @@ def _cmd_master_audio(ctx) -> str:
     try:
         target = float(ctx.args[2]) if len(ctx.args) > 2 else -16.0
     except ValueError:
-        return "❌ target_lufs لازم يكون رقم"
+        return "❌ target_lufs must be a number"
     if not (-40 <= target <= 0):
-        return "❌ target_lufs لازم يكون بين -40 و0"
+        return "❌ target_lufs must be between -40 and 0"
 
     ok, err = _run_ffmpeg(
         ["ffmpeg", "-y", "-i", src, "-af", f"loudnorm=I={target}:TP=-1.5:LRA=11", dst], timeout=300,
     )
     if not ok:
         return f"❌ failed: {err}"
-    return f"✅ اتعمل audio mastering (target: {target} LUFS) في {dst}"
+    return f"✅ audio mastered (target: {target} LUFS) at {dst}"
 
 
 def _cmd_denoise_audio(ctx) -> str:
@@ -450,7 +450,7 @@ def _cmd_denoise_audio(ctx) -> str:
     ok, err = _run_ffmpeg(["ffmpeg", "-y", "-i", src, "-af", "afftdn", dst], timeout=300)
     if not ok:
         return f"❌ failed: {err}"
-    return f"✅ اتشال الضوضاء من الصوت في {dst}"
+    return f"✅ noise removed from the audio at {dst}"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -466,9 +466,9 @@ def _cmd_title_card(ctx) -> str:
     try:
         duration = float(ctx.args[2]) if len(ctx.args) > 2 else 3.0
     except ValueError:
-        return "❌ duration لازم يكون رقم"
+        return "❌ duration must be a number"
     if duration <= 1.0:
-        return "❌ duration لازم يكون أكبر من 1 ثانية (نصف ثانية fade in + نصف fade out)"
+        return "❌ duration must be over 1 second (half a second fade in, half fade out)"
     size = ctx.args[3] if len(ctx.args) > 3 else "1920x1080"
 
     escaped = text.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
@@ -485,7 +485,7 @@ def _cmd_title_card(ctx) -> str:
     )
     if not ok:
         return f"❌ failed: {err}"
-    return f"✅ اتعمل title card في {dst}"
+    return f"✅ title card written to {dst}"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -494,9 +494,9 @@ def _cmd_title_card(ctx) -> str:
 
 def _cmd_auto_trim_silence(ctx) -> str:
     if len(ctx.args) < 2:
-        return "usage: auto_trim_silence <input> <output> [threshold=4%] — بيقص الصمت/اللقطات الميتة تلقائيًا"
+        return "usage: auto_trim_silence <input> <output> [threshold=4%] — cuts silence and dead air automatically"
     if not shutil.which("auto-editor"):
-        return "❌ auto-editor مش متثبت — نزّله بـ: pip install auto-editor (مجاني ومفتوح المصدر، https://github.com/WyattBlue/auto-editor)"
+        return "❌ auto-editor is not installed — pip install auto-editor (free and open source, https://github.com/WyattBlue/auto-editor)"
     src, dst = ctx.args[0], ctx.args[1]
     missing = _missing_files(src)
     if missing:
@@ -510,8 +510,8 @@ def _cmd_auto_trim_silence(ctx) -> str:
         return f"❌ failed: {err}"
     dst_path = pathlib.Path(dst)
     if not dst_path.is_file() or dst_path.stat().st_size == 0:
-        return "❌ فشل القص — auto-editor خلص من غير خطأ ظاهر بس مفيش ملف خرج حقيقي"
-    return f"✅ اتقص الصمت/اللقطات الميتة تلقائيًا (threshold={threshold}) في {dst}"
+        return "❌ trimming failed — auto-editor exited without an error but produced no real output file"
+    return f"✅ silence and dead air trimmed automatically (threshold={threshold}) at {dst}"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -520,9 +520,9 @@ def _cmd_auto_trim_silence(ctx) -> str:
 
 def _cmd_detect_scenes(ctx) -> str:
     if not ctx.args:
-        return "usage: detect_scenes <video> [threshold=27.0] — يكتشف تغييرات المشاهد (scene cuts) تلقائيًا"
+        return "usage: detect_scenes <video> [threshold=27.0] — finds scene cuts automatically"
     if not _HAS_SCENEDETECT:
-        return "❌ PySceneDetect مش متثبت — نزّله بـ: pip install scenedetect[opencv] (مجاني ومفتوح المصدر)"
+        return "❌ PySceneDetect is not installed — pip install scenedetect[opencv] (free and open source)"
     src = ctx.args[0]
     missing = _missing_files(src)
     if missing:
@@ -530,17 +530,17 @@ def _cmd_detect_scenes(ctx) -> str:
     try:
         threshold = float(ctx.args[1]) if len(ctx.args) > 1 else 27.0
     except ValueError:
-        return "❌ threshold لازم يكون رقم (كل ما قل، كشف أحسّ بتغييرات أبسط)"
+        return "❌ threshold must be a number (lower is more sensitive to subtle cuts)"
 
     try:
         scenes = _scenedetect_detect(src, ContentDetector(threshold=threshold))
     except Exception as e:
-        return f"❌ فشل كشف المشاهد: {e}"
+        return f"❌ scene detection failed: {e}"
 
     if not scenes:
-        return f"ℹ️ مفيش تغييرات مشاهد واضحة اتلقت (threshold={threshold}) — يمكن الفيديو مشهد واحد مستمر"
+        return f"ℹ️ no clear scene changes found (threshold={threshold}) — the video may be one continuous shot"
 
-    lines = [f"🎬 {len(scenes)} مشهد اتلقى (threshold={threshold}):"]
+    lines = [f"🎬 {len(scenes)} scenes found (threshold={threshold}):"]
     for i, (start, end) in enumerate(scenes, start=1):
         lines.append(f"  {i}. {start.get_timecode()} → {end.get_timecode()}  ({end.seconds - start.seconds:.1f}s)")
     return "\n".join(lines)
@@ -552,9 +552,9 @@ def _cmd_detect_scenes(ctx) -> str:
 
 _REALESRGAN_MODELS = ("realesr-animevideov3", "realesrgan-x4plus", "realesrgan-x4plus-anime", "realesrnet-x4plus")
 _REALESRGAN_MISSING_MSG = (
-    "❌ realesrgan-ncnn-vulkan مش متثبت — ملف تنفيذي جاهز (مش pip)، حمّله من:\n"
+    "❌ realesrgan-ncnn-vulkan is not installed — it is a prebuilt binary, not a pip package. Download it from:\n"
     "   https://github.com/xinntao/Real-ESRGAN/releases\n"
-    "   وحطه في PATH. بيشتغل عبر Vulkan (بطيء جدًا من غير GPU حقيقي)."
+    "   and put it on your PATH. It runs on Vulkan (very slow without a real GPU)."
 )
 
 
@@ -568,18 +568,18 @@ def _validate_upscale_args(ctx) -> tuple[str, str, int, str, str | None]:
     try:
         scale = int(ctx.args[2]) if len(ctx.args) > 2 else 4
     except ValueError:
-        return "", "", 0, "", "❌ scale لازم يكون رقم صحيح (2 أو 3 أو 4)"
+        return "", "", 0, "", "❌ scale must be a whole number (2, 3 or 4)"
     if scale not in (2, 3, 4):
-        return "", "", 0, "", "❌ scale لازم يكون 2 أو 3 أو 4"
+        return "", "", 0, "", "❌ scale must be 2, 3 or 4"
     model = ctx.args[3] if len(ctx.args) > 3 else "realesrgan-x4plus"
     if model not in _REALESRGAN_MODELS:
-        return "", "", 0, "", f"❌ model لازم يكون واحد من: {', '.join(_REALESRGAN_MODELS)}"
+        return "", "", 0, "", f"❌ model must be one of: {', '.join(_REALESRGAN_MODELS)}"
     return src, dst, scale, model, None
 
 
 def _cmd_upscale_image(ctx) -> str:
     if len(ctx.args) < 2:
-        return "usage: upscale_image <input> <output> [scale=4] [model=realesrgan-x4plus] — تكبير صورة بالذكاء الاصطناعي (Real-ESRGAN)"
+        return "usage: upscale_image <input> <output> [scale=4] [model=realesrgan-x4plus] — AI image upscaling (Real-ESRGAN)"
     if not shutil.which("realesrgan-ncnn-vulkan"):
         return _REALESRGAN_MISSING_MSG
     src, dst, scale, model, err = _validate_upscale_args(ctx)
@@ -596,13 +596,13 @@ def _cmd_upscale_image(ctx) -> str:
     # الضمانة الحقيقية الوحيدة إن الملف طلع فعلاً وله حجم حقيقي.
     dst_path = pathlib.Path(dst)
     if not dst_path.is_file() or dst_path.stat().st_size == 0:
-        return "❌ فشل التكبير — الأداة خلصت من غير خطأ ظاهر بس مفيش ملف خرج حقيقي (تأكد من اسم الموديل)"
-    return f"✅ اتكبرت الصورة (x{scale}, {model}) في {dst}"
+        return "❌ upscaling failed — the tool exited without an error but produced no real output file (check the model name)"
+    return f"✅ image upscaled (x{scale}, {model}) at {dst}"
 
 
 def _cmd_upscale_video(ctx) -> str:
     if len(ctx.args) < 2:
-        return "usage: upscale_video <input> <output> [scale=4] [model=realesrgan-x4plus] — تكبير فيديو فريم فريم (بطيء جدًا من غير GPU)"
+        return "usage: upscale_video <input> <output> [scale=4] [model=realesrgan-x4plus] — upscale video frame by frame (very slow without a GPU)"
     if not shutil.which("realesrgan-ncnn-vulkan"):
         return _REALESRGAN_MISSING_MSG
     if not shutil.which("ffmpeg"):
@@ -620,10 +620,10 @@ def _cmd_upscale_video(ctx) -> str:
 
         ok, err = _run_ffmpeg(["ffmpeg", "-y", "-i", src, str(frames_in / "frame_%06d.png")], timeout=600)
         if not ok:
-            return f"❌ فشل استخراج الفريمات: {err}"
+            return f"❌ frame extraction failed: {err}"
         frames_in_count = sum(1 for _ in frames_in.iterdir())
         if frames_in_count == 0:
-            return "❌ فشل استخراج الفريمات — مفيش فريمات اتولدت"
+            return "❌ frame extraction failed — no frames were produced"
 
         # فريم فريم عبر Vulkan (زي upscale_image بالظبط) — بطيء جدًا من
         # غير GPU حقيقي، فمهلة أطول بكتير من باقي أوامر الملف ده.
@@ -632,7 +632,7 @@ def _cmd_upscale_video(ctx) -> str:
             timeout=7200,
         )
         if not ok:
-            return f"❌ فشل التكبير: {err}"
+            return f"❌ upscaling failed: {err}"
         # مش كفاية نتأكد إن فيه فريم واحد على الأقل — realesrgan-ncnn-vulkan
         # ممكن يعلّق/يفشل نص الطريق (اتجرب فعليًا إنه غير مستقر تحت
         # Vulkan software rendering) وبرضو يرجع exit code صفر، فلو عدد
@@ -640,11 +640,11 @@ def _cmd_upscale_video(ctx) -> str:
         # demuxer بيوقف عند أول اسم فريم ناقص بالترتيب) من غير أي تحذير.
         frames_out_count = sum(1 for _ in frames_out.iterdir())
         if frames_out_count == 0:
-            return "❌ فشل التكبير — الأداة خلصت من غير خطأ ظاهر بس مفيش فريمات خرج حقيقية"
+            return "❌ upscaling failed — the tool exited without an error but produced no real output frames"
         if frames_out_count < frames_in_count:
             return (
-                f"❌ فشل التكبير جزئيًا — اتكبر {frames_out_count} فريم بس من أصل {frames_in_count} "
-                "(الأداة وقفت نص الطريق من غير خطأ ظاهر). جرب تاني أو على مقطع أقصر."
+                f"❌ upscaling only partly finished — {frames_out_count} of {frames_in_count} frames "
+                "(the tool stopped halfway with no visible error). Try again, or on a shorter clip."
             )
 
         ok, err = _run_ffmpeg(
@@ -654,11 +654,11 @@ def _cmd_upscale_video(ctx) -> str:
             timeout=600,
         )
         if not ok:
-            return f"❌ فشل تجميع الفيديو: {err}"
+            return f"❌ reassembling the video failed: {err}"
 
     if not pathlib.Path(dst).is_file():
-        return "❌ فشل تجميع الفيديو النهائي"
-    return f"✅ اتكبر الفيديو (x{scale}, {model}) في {dst}"
+        return "❌ could not reassemble the final video"
+    return f"✅ video upscaled (x{scale}, {model}) at {dst}"
 
 
 def register(engine):
