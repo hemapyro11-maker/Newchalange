@@ -42,6 +42,12 @@ echo ====================================
 :: (شوف الملاحظات تحت) لأنه مفيش نموذج قياسي واحد نقدر نحطه هنا.
 :: openai-whisper لسه عن قصد **مش** هنا زي ما هو موضح فوق — بيتنادى
 :: بس عن طريق subprocess (أمر whisper CLI)، مش import مباشر.
+:: sherpa-onnx: محرك النطق المحلي الأساسي دلوقتي (Apache-2.0). نيزوكو
+:: بتعمل له import مباشر فمحتاج collect-all زي faster-whisper. مبني
+:: على onnxruntime اللي متجمّع أصلاً تحت، فالزيادة في الحجم محدودة —
+:: مش زي torch اللي خلانا نستبعد pyannote/Coqui/silero. نماذج الأصوات
+:: نفسها (~65MB للغة) **مش** بتتضم هنا — بتتحمّل أول استخدام وتتخزن
+:: في voice_cache/ بنفس منطق أصوات Piper بالظبط.
 :: CTkToolTip: تلميحات (tooltips) لأزرار main_gui.py — تحسين واجهة
 :: اختياري بمكتبة خفيفة جدًا (مفيش أي dependencies ليها) من غير أي
 :: مخاطرة حقيقية. مختلفة عن باقي الحزم فوق في حاجة واحدة: main_gui.py
@@ -78,7 +84,7 @@ echo ====================================
 :: الحالتين — `_record_until_silence` بترجع (None, False) لو النموذج
 :: مش متثبت والنداء اللي فوقها بيرجع للمدة الثابتة، فمفيش أي كسر.
 :: ═══════════════════════════════════════════════════════════════
-py -m pip install customtkinter CTkToolTip pyinstaller mcp typer capstone Pillow pandas matplotlib edge-tts piper-tts sounddevice faster-whisper vosk scenedetect[opencv] python-telegram-bot discord.py keyring --quiet
+py -m pip install customtkinter CTkToolTip pyinstaller mcp typer capstone Pillow pandas matplotlib edge-tts sherpa-onnx piper-tts sounddevice faster-whisper vosk scenedetect[opencv] python-telegram-bot discord.py keyring --quiet
 
 :: بناء الـ EXE
 py -m PyInstaller ^
@@ -104,6 +110,7 @@ py -m PyInstaller ^
     --collect-all pandas ^
     --collect-all matplotlib ^
     --collect-all edge_tts ^
+    --collect-all sherpa_onnx ^
     --collect-all piper ^
     --collect-all onnxruntime ^
     --collect-all sounddevice ^

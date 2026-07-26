@@ -140,6 +140,6 @@ def _cmd_csv_correlate(ctx) -> str:
 
 
 def register(engine):
-    engine.registry.register("csv_describe", _cmd_csv_describe, "csv_describe <file.csv> — إحصائيات وصفية حقيقية (pandas)")
-    engine.registry.register("csv_plot", _cmd_csv_plot, "csv_plot <file.csv> <column> <out.png> [kind] — رسم بياني (hist/line/bar/box)")
-    engine.registry.register("csv_correlate", _cmd_csv_correlate, "csv_correlate <file.csv> [out.png] — مصفوفة الارتباط بين الأعمدة")
+    engine.registry.register("csv_describe", _cmd_csv_describe, "csv_describe <file.csv> — real descriptive statistics (pandas)")
+    engine.registry.register("csv_plot", _cmd_csv_plot, "csv_plot <file.csv> <column> <out.png> [kind] — plot a column (hist/line/bar/box)")
+    engine.registry.register("csv_correlate", _cmd_csv_correlate, "csv_correlate <file.csv> [out.png] — correlation matrix across columns")

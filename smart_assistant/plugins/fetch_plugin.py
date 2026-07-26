@@ -43,4 +43,4 @@ def _cmd_fetch(ctx) -> str:
 
 
 def register(engine):
-    engine.registry.register("fetch", _cmd_fetch, "fetch <url> — تحميل صفحة ويب وعرض نصها")
+    engine.registry.register("fetch", _cmd_fetch, "fetch <url> — download a web page and show its text")

@@ -190,7 +190,7 @@ def register(engine):
     except ImportError:
         def _cmd_missing(ctx):
             return "❌ باكدج mcp مش متثبت — ثبّته بـ: pip install mcp"
-        engine.registry.register("connectors", _cmd_missing, "MCP Connectors (يحتاج: pip install mcp)")
+        engine.registry.register("connectors", _cmd_missing, "MCP connectors (needs: pip install mcp)")
         return
 
     existing_manager = getattr(engine, "connector_manager", None)

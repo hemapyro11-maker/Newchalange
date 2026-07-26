@@ -65,8 +65,29 @@ def isolated_voice_cache(tmp_path, monkeypatch):
     return cache_dir
 
 
+@pytest.fixture(autouse=True)
+def _no_network(monkeypatch):
+    """مفيش أي اختبار بيلمس الشبكة.
+
+    باقي المحركات بتتقفل بـ `shutil.which`، لكن sherpa مكتبة بايثون —
+    فلو مثبتة على جهاز اللي بيشغّل الاختبارات كانت هتشتغل فعلاً وتنزّل
+    نموذج 65 ميجا. بنقفل عند الحدود الحقيقية (`urlopen`) مش عند دالة
+    معيّنة، فالمنع بيشمل أي مسار تنزيل جديد يتضاف بعدين كمان. اللي
+    عايز ينزّل في اختباره بيستبدلها صراحة.
+    """
+    def _blocked(*args, **kwargs):
+        raise vp.urllib.error.URLError("network blocked in tests")
+
+    monkeypatch.setattr(vp.urllib.request, "urlopen", _blocked)
+    vp._sherpa_cache.clear()
+    yield
+    vp._sherpa_cache.clear()
+
+
 def _deny_all_backends(monkeypatch):
     monkeypatch.setattr(vp.shutil, "which", lambda name: None)
+    monkeypatch.setattr(vp, "sherpa_available", lambda: False)
+    monkeypatch.setattr(vp, "_load_sherpa", lambda lang="ar": None)
 
 
 # ── speak: usage / no backends ──────────────────────────────────────────
@@ -251,7 +272,7 @@ def test_voice_status_reports_all_missing(make_ctx, monkeypatch):
     _deny_all_backends(monkeypatch)
     result = vp._cmd_voice_status(make_ctx("voice_status", []))
     assert result.count("❌") == 4
-    assert "مفيش أي محرك نطق متثبت" in result
+    assert "No speech engine installed" in result
 
 
 def test_voice_status_reports_available_backends(make_ctx, monkeypatch):
@@ -259,10 +280,153 @@ def test_voice_status_reports_available_backends(make_ctx, monkeypatch):
         return f"/usr/bin/{name}" if name in ("espeak-ng", "ffplay") else None
 
     monkeypatch.setattr(vp.shutil, "which", fake_which)
+    monkeypatch.setattr(vp, "sherpa_available", lambda: False)
     result = vp._cmd_voice_status(make_ctx("voice_status", []))
     assert "✅ espeak-ng" in result
     assert "❌ edge-tts" in result
     assert "pip install edge-tts" in result
+
+
+def test_voice_status_warns_that_the_piper_binary_is_the_archived_one(
+    make_ctx, monkeypatch
+):
+    """Piper الأصلي اتأرشف والوريث GPL — لازم الحالة تقول كده بدل ما
+    المستخدم يفضل يبني على مكتبة مش هتتصلح."""
+    monkeypatch.setattr(
+        vp.shutil, "which",
+        lambda name: f"/usr/bin/{name}" if name == "piper" else None,
+    )
+    result = vp._cmd_voice_status(make_ctx("voice_status", []))
+    assert "archived" in result
+    assert "GPL-3.0" in result
+
+
+def test_voice_status_says_sherpa_is_tried_before_piper(make_ctx, monkeypatch):
+    monkeypatch.setattr(vp.shutil, "which", lambda name: None)
+    result = vp._cmd_voice_status(make_ctx("voice_status", []))
+    assert result.index("sherpa-onnx") < result.index("Piper binary")
+
+
+# ── sherpa-onnx: المحرك المصان اللي بيحل محل Piper المؤرشف ──────────
+
+def _make_tar(path, entries, symlink=None):
+    """بيبني tar.bz2 فيه المسارات دي بالظبط."""
+    import io
+    import tarfile as tf
+    with tf.open(path, "w:bz2") as tar:
+        for name in entries:
+            data = b"x" * 16
+            info = tf.TarInfo(name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+        if symlink:
+            info = tf.TarInfo(symlink[0])
+            info.type = tf.SYMTYPE
+            info.linkname = symlink[1]
+            tar.addfile(info)
+
+
+def test_extract_accepts_a_normal_archive(tmp_path):
+    archive = tmp_path / "ok.tar.bz2"
+    _make_tar(archive, ["voice/model.onnx", "voice/tokens.txt"])
+    dest = tmp_path / "out"
+    dest.mkdir()
+    assert vp._safe_extract(archive, dest) is True
+    assert (dest / "voice" / "model.onnx").is_file()
+
+
+def test_extract_refuses_paths_that_escape_the_directory(tmp_path):
+    """أرشيف متحمّل من الإنترنت ممكن يكون فيه ../.. — الفك من غير فحص
+    ثغرة معروفة، مش احتمال نظري."""
+    archive = tmp_path / "evil.tar.bz2"
+    _make_tar(archive, ["../escaped.txt"])
+    dest = tmp_path / "out"
+    dest.mkdir()
+    assert vp._safe_extract(archive, dest) is False
+    assert not (tmp_path / "escaped.txt").exists()
+
+
+def test_extract_refuses_symlinks(tmp_path):
+    archive = tmp_path / "link.tar.bz2"
+    _make_tar(archive, ["voice/model.onnx"], symlink=("voice/evil", "/etc/passwd"))
+    dest = tmp_path / "out"
+    dest.mkdir()
+    assert vp._safe_extract(archive, dest) is False
+
+
+def test_extract_survives_a_corrupt_archive(tmp_path):
+    archive = tmp_path / "bad.tar.bz2"
+    archive.write_bytes(b"not an archive at all")
+    dest = tmp_path / "out"
+    dest.mkdir()
+    assert vp._safe_extract(archive, dest) is False
+
+
+def test_cached_voice_is_not_downloaded_again(monkeypatch, isolated_voice_cache):
+    voice = vp._VOICES["ar"]
+    d = isolated_voice_cache / voice["sherpa_bundle"]
+    d.mkdir(parents=True)
+    (d / voice["sherpa_model"]).write_bytes(b"model")
+    (d / "tokens.txt").write_text("tokens")
+
+    calls = []
+    monkeypatch.setattr(vp, "_download", lambda url, dest: calls.append(url))
+    assert vp._ensure_sherpa_voice("ar") == d
+    assert calls == []
+
+
+def test_missing_sherpa_package_is_not_an_error(monkeypatch):
+    """sherpa اختياري — من غيره السلسلة بتكمّل للمحرك اللي بعده."""
+    monkeypatch.setitem(sys.modules, "sherpa_onnx", None)
+    vp._sherpa_cache.clear()
+    assert vp._load_sherpa("ar") is None
+
+
+def test_sherpa_backend_reports_failure_when_model_is_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(vp, "_load_sherpa", lambda lang="ar": None)
+    assert vp._synthesize_sherpa("أهلاً", tmp_path / "o.wav", "ar") is False
+
+
+def test_sherpa_writes_a_real_wav(tmp_path, monkeypatch):
+    class _Audio:
+        samples = [0.25] * 2048
+        sample_rate = 22050
+
+    class _FakeTts:
+        def generate(self, text, sid=0, speed=1.0):
+            return _Audio()
+
+    monkeypatch.setattr(vp, "_load_sherpa", lambda lang="ar": _FakeTts())
+    out = tmp_path / "o.wav"
+    assert vp._synthesize_sherpa("أهلاً بيك", out, "ar") is True
+    with wave.open(str(out), "rb") as wf:
+        assert wf.getframerate() == 22050
+        assert wf.getnframes() == 2048
+        assert wf.getsampwidth() == 2
+
+
+def test_sherpa_rejects_empty_audio(tmp_path, monkeypatch):
+    class _Audio:
+        samples = []
+        sample_rate = 22050
+
+    class _FakeTts:
+        def generate(self, text, sid=0, speed=1.0):
+            return _Audio()
+
+    monkeypatch.setattr(vp, "_load_sherpa", lambda lang="ar": _FakeTts())
+    assert vp._synthesize_sherpa("x", tmp_path / "o.wav", "ar") is False
+
+
+def test_sherpa_is_tried_before_the_archived_piper_binary():
+    order = [name for _label, name, _ext, _key in vp._BACKENDS]
+    assert order.index("_synthesize_sherpa") < order.index("_synthesize_piper")
+
+
+def test_every_language_has_a_sherpa_voice():
+    for lang, voice in vp._VOICES.items():
+        assert voice["sherpa_bundle"], lang
+        assert voice["sherpa_model"].endswith(".onnx"), lang
 
 
 # ── STT: _record_audio ──────────────────────────────────────────────────

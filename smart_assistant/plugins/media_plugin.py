@@ -214,11 +214,11 @@ def _cmd_overlay_text(ctx) -> str:
 
 
 def register(engine):
-    engine.registry.register("probe", _cmd_probe, "تحليل ملف فيديو/صوت (ffprobe) واكتشاف المشاكل")
-    engine.registry.register("convert", _cmd_convert, "تحويل صيغة ملف ميديا (ffmpeg)")
-    engine.registry.register("trim", _cmd_trim, "قص جزء من فيديو أو صوت")
-    engine.registry.register("merge_av", _cmd_merge_av, "دمج فيديو مع مسار صوت خارجي")
-    engine.registry.register("concat", _cmd_concat, "دمج/لصق عدة ملفات فيديو أو صوت في ملف واحد")
-    engine.registry.register("extract_audio", _cmd_extract_audio, "استخراج الصوت من فيديو لملف mp3")
-    engine.registry.register("thumbnail", _cmd_thumbnail, "thumbnail <video> <sec> <out.jpg> — أخذ صورة من فيديو")
-    engine.registry.register("overlay_text", _cmd_overlay_text, "overlay_text <video> <text> <out> — إضافة نص/واترمارك على فيديو")
+    engine.registry.register("probe", _cmd_probe, "probe <file> — inspect a video/audio file (ffprobe) and flag problems")
+    engine.registry.register("convert", _cmd_convert, "convert <in> <out> — convert a media file to another format (ffmpeg)")
+    engine.registry.register("trim", _cmd_trim, "trim <in> <start> <duration> <out> — cut a section out of video or audio")
+    engine.registry.register("merge_av", _cmd_merge_av, "merge_av <video> <audio> <out> — attach an external audio track to a video")
+    engine.registry.register("concat", _cmd_concat, "concat <out> <files...> — join several video or audio files into one")
+    engine.registry.register("extract_audio", _cmd_extract_audio, "extract_audio <video> <out.mp3> — pull the audio out of a video")
+    engine.registry.register("thumbnail", _cmd_thumbnail, "thumbnail <video> <sec> <out.jpg> — grab a still frame from a video")
+    engine.registry.register("overlay_text", _cmd_overlay_text, "overlay_text <video> <text> <out> — burn text or a watermark onto a video")

@@ -219,7 +219,7 @@ def _cmd_file_perms(ctx) -> str:
 
 
 def register(engine):
-    engine.registry.register("hash_file", _cmd_hash_file, "hash_file <file> [algo] — حساب checksum لملف (تحقق سلامة)")
-    engine.registry.register("port_scan", _cmd_port_scan, "port_scan <host> <start> <end> — فحص منافذ TCP (لأجهزتك بس، حد أقصى 1024 بورت)")
-    engine.registry.register("tls_check", _cmd_tls_check, "tls_check <host> [port=443] [--insecure] — فحص شهادة TLS (تاريخ انتهاء، مُصدر، SAN)")
-    engine.registry.register("file_perms", _cmd_file_perms, "file_perms <path> — تدقيق صلاحيات ملفات (world-writable, SUID/SGID, ملفات حساسة مقروءة)")
+    engine.registry.register("hash_file", _cmd_hash_file, "hash_file <file> [algo] — checksum a file to verify its integrity")
+    engine.registry.register("port_scan", _cmd_port_scan, "port_scan <host> <start> <end> — scan TCP ports (your own machines only, 1024 ports max)")
+    engine.registry.register("tls_check", _cmd_tls_check, "tls_check <host> [port=443] [--insecure] — inspect a TLS certificate (expiry, issuer, SAN)")
+    engine.registry.register("file_perms", _cmd_file_perms, "file_perms <path> — audit file permissions (world-writable, SUID/SGID, readable secrets)")

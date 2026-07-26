@@ -149,7 +149,7 @@ def _cmd_archive_list(ctx) -> str:
 
 
 def register(engine):
-    engine.registry.register("identify", _cmd_identify, "تحديد نوع الملف من الـ magic bytes")
-    engine.registry.register("hexdump", _cmd_hexdump, "hexdump <file> [offset] [length] — عرض بايتات الملف")
-    engine.registry.register("strings", _cmd_strings, "strings <file> [min_len] — استخراج النصوص المقروءة من ملف ثنائي")
-    engine.registry.register("archive_list", _cmd_archive_list, "عرض محتويات أرشيف zip/tar بدون فك ضغط")
+    engine.registry.register("identify", _cmd_identify, "identify <file> — determine a file's real type from its magic bytes")
+    engine.registry.register("hexdump", _cmd_hexdump, "hexdump <file> [offset] [length] — show a file's raw bytes")
+    engine.registry.register("strings", _cmd_strings, "strings <file> [min_len] — pull readable text out of a binary")
+    engine.registry.register("archive_list", _cmd_archive_list, "archive_list <file> — list a zip/tar's contents without extracting it")

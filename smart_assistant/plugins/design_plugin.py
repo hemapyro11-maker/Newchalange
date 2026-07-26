@@ -110,5 +110,5 @@ def _cmd_app_icons(ctx) -> str:
 
 
 def register(engine):
-    engine.registry.register("make_logo", _cmd_make_logo, "make_logo <text> <output.png> [size] [bg] [fg] — لوجو بحروف أولى")
-    engine.registry.register("app_icons", _cmd_app_icons, "app_icons <source.png> <out_dir> — توليد كل أحجام أيقونات iOS/Android")
+    engine.registry.register("make_logo", _cmd_make_logo, "make_logo <text> <output.png> [size] [bg] [fg] — initials logo")
+    engine.registry.register("app_icons", _cmd_app_icons, "app_icons <source.png> <out_dir> — generate every iOS/Android icon size")

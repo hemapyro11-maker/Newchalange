@@ -743,10 +743,10 @@ def _cmd_security_report(ctx) -> str:
 
 
 def register(engine):
-    engine.registry.register("code_scan", _cmd_code_scan, "code_scan <path> [--fix] — فحص أمان/جودة كود بايثون (AST + bandit اختياري)، مع إصلاح تلقائي للحالات الآمنة الواضحة")
-    engine.registry.register("vuln_scan", _cmd_vuln_scan, "vuln_scan <path> — أسرار مكشوفة + ثغرات مكتبات معروفة (pip-audit/npm audit) + صلاحيات ملفات")
-    engine.registry.register("virus_scan", _cmd_virus_scan, "virus_scan <path> [--no-quarantine] — فحص فيروسات/spyware حقيقي عبر ClamAV، مع حجر صحي تلقائي")
-    engine.registry.register("quarantine_file", _cmd_quarantine_file, "quarantine_file <path> [سبب] — نقل ملف مشبوه للحجر الصحي يدويًا")
-    engine.registry.register("quarantine_list", _cmd_quarantine_list, "quarantine_list — عرض كل الملفات في الحجر الصحي")
-    engine.registry.register("quarantine_restore", _cmd_quarantine_restore, "quarantine_restore <id> [مسار_بديل] — استعادة ملف من الحجر الصحي")
-    engine.registry.register("security_report", _cmd_security_report, "security_report <path> — تقرير أمان شامل: كود + ثغرات + فيروسات في أمر واحد")
+    engine.registry.register("code_scan", _cmd_code_scan, "code_scan <path> [--fix] — Python security and quality scan (AST plus optional bandit), auto-fixing only the clearly safe cases")
+    engine.registry.register("vuln_scan", _cmd_vuln_scan, "vuln_scan <path> — exposed secrets, known dependency vulnerabilities (pip-audit/npm audit), and file permissions")
+    engine.registry.register("virus_scan", _cmd_virus_scan, "virus_scan <path> [--no-quarantine] — real virus and spyware scan via ClamAV, quarantining automatically")
+    engine.registry.register("quarantine_file", _cmd_quarantine_file, "quarantine_file <path> [reason] — move a suspicious file to quarantine yourself")
+    engine.registry.register("quarantine_list", _cmd_quarantine_list, "quarantine_list — everything currently in quarantine")
+    engine.registry.register("quarantine_restore", _cmd_quarantine_restore, "quarantine_restore <id> [destination] — restore a file out of quarantine")
+    engine.registry.register("security_report", _cmd_security_report, "security_report <path> — full security report: code, vulnerabilities and viruses in one command")

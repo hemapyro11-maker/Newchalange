@@ -430,9 +430,9 @@ def _cmd_disasm(ctx) -> str:
 
 
 def register(engine):
-    engine.registry.register("entropy", _cmd_entropy, "entropy <file> [chunk] — كشف مناطق مضغوطة/مشفّرة/packed")
-    engine.registry.register("elf_info", _cmd_elf_info, "elf_info <file> — تحليل بنية ملف ELF (لينكس)")
-    engine.registry.register("pe_info", _cmd_pe_info, "pe_info <file> — تحليل بنية ملف PE (ويندوز exe/dll) + imports")
+    engine.registry.register("entropy", _cmd_entropy, "entropy <file> [chunk] — find compressed, encrypted or packed regions")
+    engine.registry.register("elf_info", _cmd_elf_info, "elf_info <file> — analyse an ELF binary's structure (Linux)")
+    engine.registry.register("pe_info", _cmd_pe_info, "pe_info <file> — analyse a PE binary's structure (Windows exe/dll) plus imports")
     if CAPSTONE_AVAILABLE:
         engine.registry.register(
             "disasm", _cmd_disasm,

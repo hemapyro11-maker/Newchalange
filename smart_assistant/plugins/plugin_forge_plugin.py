@@ -355,8 +355,8 @@ def register(engine):
         "create_plugin", _cmd_create_plugin,
         "create_plugin <name> <description> — يولّد plugin جديد ويتأكد إنه شغال (نموذج محلي مجاني)",
     )
-    engine.registry.register("fix_plugin", _cmd_fix_plugin, "fix_plugin <name> [error] — يصلح plugin موجود تلقائياً")
-    engine.registry.register("list_pending", _cmd_list_pending, "عرض الـ plugins المولّدة المستنية موافقتك")
-    engine.registry.register("review_pending", _cmd_review_pending, "review_pending <name> — عرض كود plugin مستني قبل الموافقة")
-    engine.registry.register("approve_plugin", _cmd_approve_plugin, "approve_plugin <name> [--force] — تفعيل plugin بعد مراجعتك (بيرفض يستبدل plugin موجود من غير --force)")
-    engine.registry.register("reject_plugin", _cmd_reject_plugin, "reject_plugin <name> — رفض/حذف plugin مستني")
+    engine.registry.register("fix_plugin", _cmd_fix_plugin, "fix_plugin <name> [error] — repair an existing plugin automatically")
+    engine.registry.register("list_pending", _cmd_list_pending, "list_pending — generated plugins waiting for your approval")
+    engine.registry.register("review_pending", _cmd_review_pending, "review_pending <name> — read a pending plugin's code before approving it")
+    engine.registry.register("approve_plugin", _cmd_approve_plugin, "approve_plugin <name> [--force] — activate a plugin after you reviewed it (refuses to replace an existing one without --force)")
+    engine.registry.register("reject_plugin", _cmd_reject_plugin, "reject_plugin <name> — reject and delete a pending plugin")

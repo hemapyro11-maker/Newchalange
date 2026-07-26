@@ -85,4 +85,4 @@ def _cmd_todo(ctx) -> str:
 
 
 def register(engine):
-    engine.registry.register("todo", _cmd_todo, "todo [list|add <text>|done <id>|clear] — قائمة مهام محلية")
+    engine.registry.register("todo", _cmd_todo, "todo [list|add <text>|done <id>|clear] — a local task list")

@@ -95,6 +95,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import urllib.error
 import urllib.request
@@ -126,14 +127,27 @@ _VOICES = {
         "espeak": "ar",
         "piper_name": "ar_JO-kareem-medium",
         "piper_base": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/ar/ar_JO/kareem/medium/ar_JO-kareem-medium",
+        "sherpa_bundle": "vits-piper-ar_JO-kareem-medium",
+        "sherpa_model": "ar_JO-kareem-medium.onnx",
+        "sherpa_mb": 67,
     },
     "en": {
         "edge": "en-US-AriaNeural",           # أمريكي أنثوي طبيعي
         "espeak": "en-us",
         "piper_name": "en_US-amy-medium",
         "piper_base": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/amy/medium/en_US-amy-medium",
+        "sherpa_bundle": "vits-piper-en_US-amy-medium",
+        "sherpa_model": "en_US-amy-medium.onnx",
+        "sherpa_mb": 64,
     },
 }
+
+# نماذج sherpa-onnx الجاهزة. دي **نفس** نماذج Piper الأصلية بترخيص
+# MIT، معادة التغليف مع tokens.txt وبيانات espeak-ng اللي المحرك
+# محتاجها — مش النسخة الجديدة بترخيص GPL-3.0.
+_SHERPA_BASE = (
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/"
+)
 
 # للتوافق مع الكود القديم/الاختبارات اللي بتشاور على الاسم ده
 EDGE_VOICE = _VOICES["ar"]["edge"]
@@ -318,6 +332,120 @@ def _synthesize_piper(text: str, out_path: pathlib.Path, lang: str = "ar") -> bo
     return proc.returncode == 0 and out_path.is_file() and out_path.stat().st_size > 0
 
 
+# ── sherpa-onnx: محرك نطق محلي مصان ─────────────────────────────────
+# ليه ده موجود: Piper الأصلي (رخصة MIT) اتأرشف read-only في أكتوبر
+# 2025، والتطوير انتقل لـ OHF-Voice/piper1-gpl بترخيص GPL-3.0. يعني
+# إحنا واقفين على مكتبة مش هتتصلح تاني.
+#
+# sherpa-onnx (Apache-2.0، من k2-fsa) بيشغّل **نفس نماذج Piper الأصلية**
+# من غير ما نحتاج برنامج piper نفسه — فبنكسب محرك مصان ونفضل على
+# النماذج بترخيصها المتساهل. وكمان بيشتغل كمكتبة بايثون مباشرة بدل
+# subprocess، فأسرع وأنضف.
+
+_sherpa_cache: dict[str, object] = {}
+
+
+def _safe_extract(archive: pathlib.Path, dest: pathlib.Path) -> bool:
+    """بيفك أرشيف متحمّل من الإنترنت جوه `dest` **بس**.
+
+    أرشيف خبيث ممكن يكون فيه مسار زي `../../etc/passwd` أو رابط رمزي
+    بيطلع بره المجلد. بنتحقق من كل مُدخل قبل الفك بدل ما نثق في
+    الملف — `tarfile.extractall` من غير فحص كانت ثغرة معروفة.
+    """
+    root = dest.resolve()
+    try:
+        with tarfile.open(archive, "r:bz2") as tar:
+            for member in tar.getmembers():
+                target = (root / member.name).resolve()
+                if not target.is_relative_to(root):
+                    return False
+                if member.issym() or member.islnk():
+                    return False
+            tar.extractall(dest)
+    except (tarfile.TarError, OSError, ValueError):
+        return False
+    return True
+
+
+def _ensure_sherpa_voice(lang: str = "ar") -> pathlib.Path | None:
+    """بينزّل حزمة صوت sherpa مرة واحدة ويفكها. بيرجع مجلدها أو None."""
+    voice = _voice_for(lang)
+    bundle = voice.get("sherpa_bundle")
+    if not bundle:
+        return None
+    out_dir = _voice_cache_dir() / bundle
+    if (out_dir / voice["sherpa_model"]).is_file() and (out_dir / "tokens.txt").is_file():
+        return out_dir
+
+    archive = _voice_cache_dir() / f"{bundle}.tar.bz2"
+    if not _download(f"{_SHERPA_BASE}{bundle}.tar.bz2", archive):
+        return None
+    ok = _safe_extract(archive, _voice_cache_dir())
+    archive.unlink(missing_ok=True)
+    if not ok or not (out_dir / voice["sherpa_model"]).is_file():
+        return None
+    return out_dir
+
+
+def _load_sherpa(lang: str = "ar"):
+    """بيبني محرك النطق مرة واحدة لكل لغة (بناؤه تقيل، نطقه رخيص)."""
+    if lang in _sherpa_cache:
+        return _sherpa_cache[lang]
+    try:
+        import sherpa_onnx
+    except ImportError:
+        return None
+    voice_dir = _ensure_sherpa_voice(lang)
+    if voice_dir is None:
+        return None
+    try:
+        tts = sherpa_onnx.OfflineTts(
+            sherpa_onnx.OfflineTtsConfig(
+                model=sherpa_onnx.OfflineTtsModelConfig(
+                    vits=sherpa_onnx.OfflineTtsVitsModelConfig(
+                        model=str(voice_dir / _voice_for(lang)["sherpa_model"]),
+                        tokens=str(voice_dir / "tokens.txt"),
+                        data_dir=str(voice_dir / "espeak-ng-data"),
+                    ),
+                    num_threads=1,
+                )
+            )
+        )
+    except Exception:  # noqa: BLE001 - أي فشل = المحرك ده مش متاح، نكمّل للي بعده
+        return None
+    _sherpa_cache[lang] = tts
+    return tts
+
+
+def _synthesize_sherpa(text: str, out_path: pathlib.Path, lang: str = "ar") -> bool:
+    tts = _load_sherpa(lang)
+    if tts is None:
+        return False
+    try:
+        import numpy as np
+
+        audio = tts.generate(text, sid=0, speed=1.0)
+        if not len(audio.samples):
+            return False
+        pcm = (np.array(audio.samples, dtype=np.float32) * 32767).astype(np.int16)
+        with wave.open(str(out_path), "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(audio.sample_rate)
+            wf.writeframes(pcm.tobytes())
+    except Exception:  # noqa: BLE001
+        return False
+    return out_path.is_file() and out_path.stat().st_size > 0
+
+
+def sherpa_available() -> bool:
+    try:
+        import sherpa_onnx  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 def _synthesize_espeak(text: str, out_path: pathlib.Path, lang: str = "ar") -> bool:
     if not shutil.which("espeak-ng"):
         return False
@@ -336,10 +464,13 @@ def _synthesize_espeak(text: str, out_path: pathlib.Path, lang: str = "ar") -> b
 # بنخزّن **أسماء** الدوال مش الدوال نفسها، وبنجيبها وقت النداء.
 # لو خزّنّا المرجع نفسه هنا، القايمة بتتجمّد على النسخة الموجودة وقت
 # الاستيراد — فمينفعش تستبدل محرك (لا في اختبار ولا في تخصيص).
+# العنصر الرابع هو مفتاح اسم الصوت في `_VOICES` — بيخلي إضافة محرك
+# جديد تعديل في مكان واحد بدل اتنين.
 _BACKENDS = [
-    ("edge-tts", "_synthesize_edge", ".mp3"),
-    ("Piper", "_synthesize_piper", ".wav"),
-    ("espeak-ng", "_synthesize_espeak", ".wav"),
+    ("edge-tts", "_synthesize_edge", ".mp3", "edge"),
+    ("sherpa-onnx", "_synthesize_sherpa", ".wav", "piper_name"),
+    ("Piper", "_synthesize_piper", ".wav", "piper_name"),
+    ("espeak-ng", "_synthesize_espeak", ".wav", "espeak"),
 ]
 
 
@@ -347,13 +478,11 @@ def _synthesize_with_fallback(text: str, tmp_dir: pathlib.Path,
                               lang: str | None = None) -> tuple[pathlib.Path, str] | None:
     lang = lang or _detect_lang(text)
     voice = _voice_for(lang)
-    for label, fn_name, ext in _BACKENDS:
+    for label, fn_name, ext, voice_key in _BACKENDS:
         synth_fn = globals()[fn_name]
         out_path = tmp_dir / f"speech{ext}"
         if synth_fn(text, out_path, lang):
-            name = {"edge-tts": voice["edge"], "Piper": voice["piper_name"],
-                    "espeak-ng": voice["espeak"]}[label]
-            return out_path, f"{label} ({name})"
+            return out_path, f"{label} ({voice.get(voice_key, lang)})"
     return None
 
 
@@ -401,31 +530,60 @@ def _cmd_speak(ctx) -> str:
 
 
 def _cmd_voice_status(ctx) -> str:
-    lines = ["🔊 حالة محركات النطق (نيزوكو):"]
+    lines = ["🔊 Speech engines, in the order they are tried:"]
 
     edge_ok = shutil.which("edge-tts") is not None
     lines.append(
         f"  {'✅' if edge_ok else '❌'} edge-tts"
-        + (f" — الصوت: {EDGE_VOICE} (محتاج إنترنت وقت الاستخدام)" if edge_ok else " — pip install edge-tts")
+        + (f" — voice: {EDGE_VOICE} (needs internet at speak time)"
+           if edge_ok else " — pip install edge-tts")
+    )
+
+    sherpa_ok = sherpa_available()
+    cached = [
+        lang for lang, v in _VOICES.items()
+        if (_voice_cache_dir() / v["sherpa_bundle"] / v["sherpa_model"]).is_file()
+    ]
+    if not sherpa_ok:
+        sherpa_note = " — pip install sherpa-onnx"
+    elif cached:
+        sherpa_note = f" — voices ready offline: {', '.join(sorted(cached))}"
+    else:
+        sherpa_note = " — downloads ~65MB per language on first use, once"
+    lines.append(
+        f"  {'✅' if sherpa_ok else '❌'} sherpa-onnx (maintained, Apache-2.0, fully offline){sherpa_note}"
     )
 
     piper_ok = shutil.which("piper") is not None
     voice_cached = (_voice_cache_dir() / f"{PIPER_VOICE_NAME}.onnx").is_file()
-    piper_note = ""
     if piper_ok:
-        piper_note = " — الصوت محفوظ محليًا (offline)" if voice_cached else " — هيتحمّل أول استخدام (~60MB، مرة واحدة بس)"
+        piper_note = (" — voice cached offline" if voice_cached
+                      else " — downloads ~60MB on first use, once")
     else:
-        piper_note = " — pip install piper-tts"
-    lines.append(f"  {'✅' if piper_ok else '❌'} Piper ({PIPER_VOICE_NAME}){piper_note}")
+        piper_note = " — optional; sherpa-onnx above runs the same voices"
+    lines.append(
+        f"  {'⚠️' if piper_ok else '⬜'} Piper binary ({PIPER_VOICE_NAME}){piper_note}"
+    )
 
     espeak_ok = shutil.which("espeak-ng") is not None
-    lines.append(f"  {'✅' if espeak_ok else '❌'} espeak-ng" + ("" if espeak_ok else " — apt install espeak-ng (أو من espeak-ng.github.io)"))
+    lines.append(
+        f"  {'✅' if espeak_ok else '❌'} espeak-ng (last resort, robotic but always works)"
+        + ("" if espeak_ok else " — apt install espeak-ng (or espeak-ng.github.io)")
+    )
 
     ffplay_ok = shutil.which("ffplay") is not None
-    lines.append(f"  {'✅' if ffplay_ok else '❌'} ffplay لتشغيل الصوت (جزء من FFmpeg)")
+    lines.append(
+        f"  {'✅' if ffplay_ok else '❌'} ffplay to play the audio (part of FFmpeg)"
+    )
 
-    if not (edge_ok or piper_ok or espeak_ok):
-        lines.append("\n⚠️ مفيش أي محرك نطق متثبت — أمر speak مش هيشتغل خالص.")
+    if not (edge_ok or sherpa_ok or piper_ok or espeak_ok):
+        lines.append("\n⚠️ No speech engine installed — `speak` will not work at all.")
+    elif piper_ok:
+        lines.append(
+            "\n⚠️ The original Piper repo (MIT) was archived in Oct 2025 and its\n"
+            "   successor is GPL-3.0. sherpa-onnx runs the same MIT voices and is\n"
+            "   still maintained — it is tried first, so Piper here is just a fallback."
+        )
 
     return "\n".join(lines)
 
@@ -1008,14 +1166,14 @@ def _cmd_stt_status(ctx) -> str:
 
 
 def register(engine):
-    engine.registry.register("speak", _cmd_speak, "speak <نص> — نطق نص بصوت نيزوكو (edge-tts أنثوي مصري → Piper محلي → espeak-ng احتياطي)")
-    engine.registry.register("voice_status", _cmd_voice_status, "voice_status — عرض حالة محركات النطق المتاحة")
+    engine.registry.register("speak", _cmd_speak, "speak <text> — say something in Nezuko's voice (edge-tts → sherpa-onnx offline → espeak-ng fallback)")
+    engine.registry.register("voice_status", _cmd_voice_status, "voice_status — which speech engines are available")
     engine.registry.register("listen", _cmd_listen, "listen [seconds] — record from the mic and transcribe it (does not run anything)")
     engine.registry.register("listen_run", _cmd_listen_run, "listen_run [seconds] — like listen, but runs what you said as a command")
     engine.registry.register("stt_status", _cmd_stt_status, "stt_status — which listening engines are available")
-    engine.registry.register("separate_vocals", _cmd_separate_vocals, "separate_vocals <audio> <out_dir> [mode=all|vocals] — فصل المسارات الصوتية (Demucs)")
-    engine.registry.register("diarize_set_token", _cmd_diarize_set_token, "diarize_set_token <hf_token> — تسجيل توكن Hugging Face لتحديد المتكلمين")
-    engine.registry.register("diarize_key_status", _cmd_diarize_key_status, "diarize_key_status — هل فيه توكن Hugging Face متظبط؟")
-    engine.registry.register("diarize", _cmd_diarize, "diarize <audio> — يحدد مين اتكلم وإمتى (speaker diarization، pyannote.audio)")
-    engine.registry.register("clone_voice_agree_license", _cmd_clone_voice_agree_license, "clone_voice_agree_license — موافقة صريحة (مرة واحدة) على ترخيص نموذج استنساخ الصوت")
-    engine.registry.register("clone_voice", _cmd_clone_voice, "clone_voice <reference.wav> <text> <output.wav> [language=ar] — استنساخ صوت من عينة صوتية (Coqui XTTS-v2)")
+    engine.registry.register("separate_vocals", _cmd_separate_vocals, "separate_vocals <audio> <out_dir> [mode=all|vocals] — split an audio file into stems (Demucs)")
+    engine.registry.register("diarize_set_token", _cmd_diarize_set_token, "diarize_set_token <hf_token> — save a Hugging Face token for speaker diarization")
+    engine.registry.register("diarize_key_status", _cmd_diarize_key_status, "diarize_key_status — is a Hugging Face token configured?")
+    engine.registry.register("diarize", _cmd_diarize, "diarize <audio> — work out who spoke when (speaker diarization, pyannote.audio)")
+    engine.registry.register("clone_voice_agree_license", _cmd_clone_voice_agree_license, "clone_voice_agree_license — accept the voice-cloning model's licence, once, explicitly")
+    engine.registry.register("clone_voice", _cmd_clone_voice, "clone_voice <reference.wav> <text> <output.wav> [language=ar] — clone a voice from a sample (Coqui XTTS-v2)")

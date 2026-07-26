@@ -124,6 +124,6 @@ def load_macros(engine):
 
 
 def register(engine):
-    engine.registry.register("macros", _cmd_macros, "عرض الـ macros المتاحة (أوامر مخصصة)")
-    engine.registry.register("reload_macros", _cmd_reload_macros, "إعادة تحميل الـ macros من مجلد commands/")
+    engine.registry.register("macros", _cmd_macros, "macros — list your custom commands")
+    engine.registry.register("reload_macros", _cmd_reload_macros, "reload_macros — reload custom commands from commands/")
     load_macros(engine)

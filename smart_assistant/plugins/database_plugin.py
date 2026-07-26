@@ -323,9 +323,9 @@ def _cmd_db_indexes(ctx) -> str:
 
 
 def register(engine):
-    engine.registry.register("db_schema", _cmd_db_schema, "db_schema <file.sqlite> — عرض كل الجداول وأعمدتها")
-    engine.registry.register("db_query", _cmd_db_query, "db_query <file.sqlite> <SQL> — تنفيذ استعلام SQL")
-    engine.registry.register("db_export_csv", _cmd_db_export_csv, "db_export_csv <file.sqlite> <table> <out.csv> — تصدير جدول لملف CSV")
-    engine.registry.register("db_migration_status", _cmd_db_migration_status, "db_migration_status <file.sqlite> <migrations_dir> — حالة كل هجرة (متطبقة/معلقة/checksum mismatch)")
-    engine.registry.register("db_migrate", _cmd_db_migrate, "db_migrate <file.sqlite> <migrations_dir> — تطبيق الهجرات المعلقة بالترتيب داخل transaction")
-    engine.registry.register("db_indexes", _cmd_db_indexes, "db_indexes <file.sqlite> [table] — عرض الـ indexes وتنبيه لأعمدة foreign key من غير index")
+    engine.registry.register("db_schema", _cmd_db_schema, "db_schema <file.sqlite> — every table and its columns")
+    engine.registry.register("db_query", _cmd_db_query, "db_query <file.sqlite> <SQL> — run an SQL query")
+    engine.registry.register("db_export_csv", _cmd_db_export_csv, "db_export_csv <file.sqlite> <table> <out.csv> — export a table to CSV")
+    engine.registry.register("db_migration_status", _cmd_db_migration_status, "db_migration_status <file.sqlite> <migrations_dir> — per-migration state (applied/pending/checksum mismatch)")
+    engine.registry.register("db_migrate", _cmd_db_migrate, "db_migrate <file.sqlite> <migrations_dir> — apply pending migrations in order, inside a transaction")
+    engine.registry.register("db_indexes", _cmd_db_indexes, "db_indexes <file.sqlite> [table] — list indexes and flag unindexed foreign keys")
