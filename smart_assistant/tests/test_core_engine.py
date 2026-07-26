@@ -728,7 +728,7 @@ def test_old_messages_become_notes_instead_of_being_dropped(
             text="المستخدم شغال على مشروع نيزوكو", provider="f", label="F"
         ),
     )
-    bare_engine.chat_history = _long_history(20)
+    bare_engine.chat_history = _long_history(core_engine._MAX_CHAT_TURNS)
     bare_engine._compact_history(brain.get_brain())
 
     assert bare_engine.chat_history[0]["role"] == "system"
@@ -747,7 +747,7 @@ def test_compaction_does_not_run_below_the_threshold(bare_engine, monkeypatch):
             brain.BrainReply(text="ملخص", provider="f", label="F"),
         ][1],
     )
-    bare_engine.chat_history = _long_history(5)
+    bare_engine.chat_history = _long_history(3)
     bare_engine._compact_history(brain.get_brain())
     assert calls == []
 
@@ -765,7 +765,7 @@ def test_earlier_notes_are_folded_into_the_new_ones(bare_engine, monkeypatch):
     )
     bare_engine.chat_history = [
         {"role": "system", "content": "ملاحظات قديمة: بيشتغل على الصوت"},
-        *_long_history(20),
+        *_long_history(core_engine._MAX_CHAT_TURNS),
     ]
     bare_engine._compact_history(brain.get_brain())
     assert "بيشتغل على الصوت" in seen["prompt"]
@@ -779,7 +779,7 @@ def test_failed_compaction_still_trims_instead_of_growing_forever(
         brain.Brain, "chat",
         lambda self, messages, **kw: brain.BrainReply(text="", error="مفيش نت"),
     )
-    bare_engine.chat_history = _long_history(20)
+    bare_engine.chat_history = _long_history(core_engine._MAX_CHAT_TURNS)
     bare_engine._compact_history(brain.get_brain())
     assert len(bare_engine.chat_history) == core_engine._COMPACT_KEEP
 

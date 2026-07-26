@@ -30,6 +30,7 @@ import brain
 import hooks
 import intents
 import permissions
+import repomap
 import sessions
 import styles
 from i18n import Translator
@@ -77,14 +78,23 @@ _CONFIRM_ALWAYS = {"a", "always", "دايما", "دايمًا", "اسمح"}
 # أقصى عدد رسائل بنحتفظ بيها حرفيًا في محادثة المخ. لما نعدّيه بنلخّص
 # الجزء القديم بدل ما نرميه (شوف `_compact_history`) — brain.py بيقصّ
 # كمان حسب سياق المزوّد النشط، ده حد أعلى إضافي.
-_MAX_CHAT_TURNS = 30
+# الرقم ده كان 30 وهو **حد حطيناه بإيدنا** مش حد تقني: جيميناي بيدي
+# مليون توكن، والقص عند 30 دور كان بيرمي 97% من السياق المتاح. رفعناه
+# لـ 120 — لسه تحت سقف أي مزوّد (brain.py بيقصّ حسب سياق المزوّد
+# النشط برضه)، بس بيخلي جلسة شغل كاملة تفضل في الذاكرة حرفيًا.
+_MAX_CHAT_TURNS = 120
 # بعد الضغط بنسيب العدد ده من الرسايل حرفي، والباقي بيتحول لملخص.
-# لازم يبقى أصغر بكتير من الحد فوق عشان الضغط يحصل نادر (كل ~18 رسالة
-# مش كل رسالة) — كل ضغط بيكلّف نداء نموذج واحد.
-_COMPACT_KEEP = 12
-# أقصى عدد أوامر متسلسلة في طلب واحد. كل خطوة = نداء نموذج، فالسقف ده
-# هو اللي بيمنع حلقة لا نهائية تولّع الحصة.
-_MAX_TOOL_STEPS = 4
+# لازم يبقى أصغر بكتير من الحد فوق عشان الضغط يحصل نادر — كل ضغط
+# بيكلّف نداء نموذج واحد.
+_COMPACT_KEEP = 60
+# أقصى عدد أوامر متسلسلة في طلب واحد. كان 4، وده كان قليل أوي لشغل
+# كود حقيقي: "شغّل الاختبارات → اقرا الخطأ → صلّح → شغّل تاني → أكّد"
+# لوحدها خمس خطوات. السقف موجود عشان حلقة غلط متولّعش الحصة، فرفعناه
+# لـ 16 وسبنا كل خطوة بتاخد تأكيد منفصل.
+_MAX_TOOL_STEPS = 16
+# ميزانية خريطة المشروع بالحروف. ~6000 حرف ≈ 2000 توكن — تمن معقول
+# مقابل إن المخ يشوف المشروع كله بدل ما يخمّن أسماء.
+_REPOMAP_BUDGET = 6000
 
 _SYSTEM_PROMPT = (
     "You are Nezuko, an assistant running inside an app on the user's own "
@@ -141,6 +151,16 @@ _HARD_MARKERS = (
 
 # رقم + عملية حسابية = مسألة، حتى من غير أي كلمة مفتاحية
 _MATH_RE = re.compile(r"\d\s*[-+*/^%×÷]\s*\d|\d+\s*%|=\s*\d")
+
+# مؤشرات إن الكلام عن كود المشروع نفسه — وقتها بنبعت خريطة المشروع
+_CODE_MARKERS = (
+    "code", "function", "class", "module", "file", "bug", "error",
+    "refactor", "test", "import", "traceback", "exception", "crash",
+    "كود", "دالة", "داله", "كلاس", "ملف", "باج", "خطا", "غلط",
+    "اختبار", "تست", "يكسر", "بيكسر", "صلح", "صلّح",
+)
+# اسم ملف أو معرّف بصيغة كود (snake_case / dotted / CamelCase)
+_SYMBOLish = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*")
 
 
 @dataclass
@@ -223,6 +243,10 @@ class AssistantEngine:
         self.plugins_dirs = plugins_dirs or default_plugin_dirs()
         self._loaded_plugins: list[str] = []
         self.skills_path = default_state_dir() / "skills.json"
+        # المشروع اللي بنشتغل عليه — منه بتتبني خريطة الكود. المجلد
+        # الحالي هو الافتراضي المعقول (إنت شغّلت نيزوكو من جوه
+        # مشروعك)، وينفع تغيّره بأمر `project`.
+        self.project_dir = pathlib.Path.cwd()
         self.skills = self._load_skills()
         self._queue: queue.Queue[tuple[str, object | None]] = queue.Queue()
         self._stop_flag = threading.Event()
@@ -642,6 +666,36 @@ class AssistantEngine:
         # سؤال طويل غالبًا فيه شروط متعددة لازم تتحل بالترتيب
         return len(text) > 220 and "?" in text + "؟"
 
+    @staticmethod
+    def _looks_like_code_work(text: str) -> bool:
+        """الكلام ده عن كود المشروع؟
+
+        بنبعت خريطة المشروع في الحالة دي بس — الخريطة بتاخد ~2000 توكن
+        من السياق، وحطّها في "إزيك" هدر خالص.
+        """
+        low = intents.normalize(text)
+        if any(m in low for m in _CODE_MARKERS):
+            return True
+        # امتداد ملف مذكور صراحة
+        return bool(re.search(r"\.\w{1,4}\b", text) and "/" in text or ".py" in low)
+
+    def _repo_context(self, text: str) -> str:
+        """خريطة المشروع، مرتّبة حوالين الأسماء اللي إنت ذكرتها.
+
+        دي اللي بتخلي شغل الكود ممكن أصلاً: من غيرها المخ شايف الرسالة
+        بس، فبيخمّن أسماء دوال مش موجودة أو بيطلب منك تلزق الملف. مع
+        الخريطة بيشوف بنية المشروع كلها في ~2000 توكن.
+        """
+        if not self._looks_like_code_work(text):
+            return ""
+        mentioned = set(_SYMBOLish.findall(text))
+        try:
+            return repomap.build(
+                self.project_dir, mentioned=mentioned, budget_chars=_REPOMAP_BUDGET
+            )
+        except Exception:  # noqa: BLE001 - الخريطة تحسين، مش شرط للرد
+            return ""
+
     def _summary_text(self) -> str:
         """ملخص الجزء القديم من المحادثة، لو اتضغط قبل كده."""
         if self.chat_history and self.chat_history[0].get("role") == "system":
@@ -717,25 +771,37 @@ class AssistantEngine:
 
         style = styles.prompt_for()
         summary = self._summary_text()
+        repo = self._repo_context(text)
+        hard = self._looks_hard(text)
         messages = [
             {"role": "system", "content": (
                 _SYSTEM_PROMPT
                 + (f"\n{style}\n" if style else "")
-                + (_THINK_HINT if self._looks_hard(text) else "")
+                + (_THINK_HINT if hard else "")
                 + (f"\n{summary}\n" if summary else "")
-                + "\nالأوامر المتاحة:\n" + self._tool_catalog()
+                + (f"\n{repo}\n" if repo else "")
+                + "\nAvailable commands:\n" + self._tool_catalog()
             )},
             *self._live_turns()[-_MAX_CHAT_TURNS:],
             {"role": "user", "content": text},
         ]
         cfg = brain.load_config()
-        # الوضع العميق: يدوي دايمًا، أو تلقائي في الأسئلة الصعبة بس لو
-        # المستخدم فعّل auto_deep. مخليينه مقفول افتراضيًا عن قصد —
-        # بيستهلك ~4 أضعاف الحصة، وده قرار المستخدم مش قرارنا.
+        # تلات مسارات، من الأرخص للأغلى:
+        #   عادي   — نداء واحد
+        #   محقّق  — 4 نداءات، النموذج بيراجع نفسه (CoVe)
+        #   عميق   — 4 نداءات، كذا نموذج + مُجمِّع (MoA)
+        # الاتنين الأخيرين للأسئلة الصعبة بس، ومحتاجين تفعيل صريح —
+        # الحصة مجانية بس مش لا نهائية، والقرار قرار المستخدم.
         go_deep = bool(cfg.get("deep_mode")) or (
-            bool(cfg.get("auto_deep")) and self._looks_hard(text)
+            bool(cfg.get("auto_deep")) and hard
         )
-        reply = b.deep_chat(messages) if go_deep else b.chat(messages)
+        verify = (not go_deep) and bool(cfg.get("verify_mode")) and hard
+        if go_deep:
+            reply = b.deep_chat(messages)
+        elif verify:
+            reply = b.verified_chat(messages)
+        else:
+            reply = b.chat(messages)
 
         if not reply:
             self._log(f"❌ المخ مردش: {reply.error}", "error")

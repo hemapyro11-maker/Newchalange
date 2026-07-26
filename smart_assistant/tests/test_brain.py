@@ -581,3 +581,78 @@ def test_ready_is_true_when_any_provider_available():
     cfg["enabled"] = []
     brain.save_config(cfg)
     assert brain.get_brain().ready() is False
+
+
+# ── المراجعة الذاتية (Chain-of-Verification) ─────────────────────────
+
+def _scripted(monkeypatch, replies):
+    """بيرجّع الردود دي بالترتيب، ويسجّل كل نداء."""
+    calls = []
+    seq = list(replies)
+
+    def fake_chat(self, messages, **kw):
+        calls.append(messages)
+        text = seq.pop(0) if seq else ""
+        return brain.BrainReply(text=text, provider="f", label="F")
+
+    monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
+    monkeypatch.setattr(brain.Brain, "chat", fake_chat)
+    return calls
+
+
+def test_verified_chat_runs_draft_check_answer_revise(monkeypatch):
+    calls = _scripted(monkeypatch, ["draft", "q1\nq2", "a1\na2", "corrected"])
+    reply = brain.get_brain().verified_chat([{"role": "user", "content": "س"}])
+    assert reply.text == "corrected"
+    assert len(calls) == 4
+
+
+def test_verified_reply_is_labelled_as_verified(monkeypatch):
+    _scripted(monkeypatch, ["draft", "q", "a", "final"])
+    reply = brain.get_brain().verified_chat([{"role": "user", "content": "س"}])
+    assert "verified" in reply.label
+
+
+def test_verification_questions_see_the_draft(monkeypatch):
+    calls = _scripted(monkeypatch, ["the sky is green", "q", "a", "final"])
+    brain.get_brain().verified_chat([{"role": "user", "content": "what colour"}])
+    assert "the sky is green" in calls[1][-1]["content"]
+
+
+def test_the_rewrite_sees_both_questions_and_answers(monkeypatch):
+    calls = _scripted(monkeypatch, ["draft", "is it green?", "no, blue", "final"])
+    brain.get_brain().verified_chat([{"role": "user", "content": "س"}])
+    last = calls[3][-1]["content"]
+    assert "is it green?" in last
+    assert "no, blue" in last
+
+
+def test_a_failed_draft_short_circuits(monkeypatch):
+    """لو المسودة نفسها فشلت مفيش حاجة نتحقق منها — منهدرش 3 نداءات."""
+    calls = []
+    monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
+    monkeypatch.setattr(
+        brain.Brain, "chat",
+        lambda self, messages, **kw: [
+            calls.append(1), brain.BrainReply(text="", error="down")][1],
+    )
+    reply = brain.get_brain().verified_chat([{"role": "user", "content": "س"}])
+    assert not reply
+    assert len(calls) == 1
+
+
+def test_falls_back_to_the_draft_when_checks_fail(monkeypatch):
+    """التحقق تحسين مش شرط — لو وقع في النص، بنرجّع المسودة."""
+    _scripted(monkeypatch, ["the draft", ""])
+    reply = brain.get_brain().verified_chat([{"role": "user", "content": "س"}])
+    assert reply.text == "the draft"
+
+
+def test_falls_back_to_the_draft_when_the_rewrite_is_empty(monkeypatch):
+    _scripted(monkeypatch, ["the draft", "q", "a", ""])
+    reply = brain.get_brain().verified_chat([{"role": "user", "content": "س"}])
+    assert reply.text == "the draft"
+
+
+def test_verify_mode_is_off_by_default():
+    assert brain._default_config()["verify_mode"] is False

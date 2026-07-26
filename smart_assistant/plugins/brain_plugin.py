@@ -135,9 +135,18 @@ def _cmd_brain_mode(ctx) -> str:
             cur = "deep (always)"
         elif cfg.get("auto_deep"):
             cur = "auto (deep only when the question needs working out)"
+        elif cfg.get("verify_mode"):
+            cur = "verify (checks its own answer on hard questions)"
         else:
             cur = "normal"
-        return f"Current mode: {cur}\nusage: brain_mode normal|auto|deep"
+        return (
+            f"Current mode: {cur}\n"
+            "usage: brain_mode normal|verify|auto|deep\n"
+            "  normal — 1 call, fastest\n"
+            "  verify — 4 calls on hard questions, answers then checks itself\n"
+            "  auto   — 4 calls on hard questions, several models merged\n"
+            "  deep   — 4 calls on every question"
+        )
     mode = ctx.args[0].lower()
     if mode in ("deep", "عميق"):
         cfg["deep_mode"] = True
@@ -149,14 +158,29 @@ def _cmd_brain_mode(ctx) -> str:
     if mode in ("auto", "تلقائي", "تلقاءي"):
         cfg["deep_mode"] = False
         cfg["auto_deep"] = True
+        cfg["verify_mode"] = False
         brain.save_config(cfg)
         return (
             "🎯 Auto mode — normal speed for ordinary messages, deep mode only for\n"
             "questions that need working out (why/compare/calculate/debug).\n"
             "Costs the extra quota on those questions only, not on every message."
         )
+    if mode in ("verify", "verified", "تحقق", "مراجعه", "مراجعة"):
+        cfg["deep_mode"] = False
+        cfg["auto_deep"] = False
+        cfg["verify_mode"] = True
+        brain.save_config(cfg)
+        return (
+            "🔍 Verify mode — on hard questions Nezuko answers, then writes\n"
+            "verification questions against its own answer, answers those\n"
+            "independently, and rewrites what the checks contradict.\n"
+            "Published research puts this at 50-70% fewer hallucinations.\n"
+            "Costs 4 calls instead of 1 — but the quota is free, so the real\n"
+            "price is time, not money."
+        )
     cfg["deep_mode"] = False
     cfg["auto_deep"] = False
+    cfg["verify_mode"] = False
     brain.save_config(cfg)
     return "⚡ Normal mode — one model, faster and cheaper."
 

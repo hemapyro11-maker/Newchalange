@@ -26,7 +26,13 @@ def isolate_state_dir(tmp_path, monkeypatch):
 @pytest.fixture
 def bare_engine(tmp_path):
     """Engine من غير أي plugins (plugins_dirs فاضي) — لاختبار core_engine لوحده."""
-    return AssistantEngine(plugins_dirs=[tmp_path / "no_plugins_here"])
+    engine = AssistantEngine(plugins_dirs=[tmp_path / "no_plugins_here"])
+    # المشروع اللي بتتبني منه خريطة الكود لازم يبقى معزول: الافتراضي
+    # هو المجلد الحالي، فأي اختبار بيقول "ملف" أو "file" كان بيمسح
+    # الريبو الحقيقي كله — بطيء، ومش عزل حقيقي.
+    engine.project_dir = tmp_path / "empty_project"
+    engine.project_dir.mkdir(exist_ok=True)
+    return engine
 
 
 @pytest.fixture

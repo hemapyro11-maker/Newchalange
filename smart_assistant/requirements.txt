@@ -26,3 +26,8 @@ scenedetect[opencv]>=0.6.4
 python-telegram-bot>=21.0
 discord.py>=2.3.0
 keyring>=24.0.0
+# tree-sitter: بيبني خريطة مرتّبة للمشروع (repomap.py) عشان المخ يشوف
+# البنية كلها بدل ما يخمّن أسماء دوال. اختياري — من غيره الخريطة
+# بترجع فاضية وكل حاجة تانية شغالة.
+tree-sitter>=0.23.0
+tree-sitter-language-pack>=0.7.0

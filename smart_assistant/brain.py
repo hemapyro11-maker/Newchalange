@@ -188,6 +188,9 @@ def _default_config() -> dict:
         # افتراضيًا عن قصد: الوضع العميق بيستهلك ~4 أضعاف الحصة،
         # وقرار صرف الحصة قرار المستخدم مش قرار البرنامج.
         "auto_deep": False,
+        # مراجعة ذاتية (CoVe) على الأسئلة الصعبة. 4 نداءات بدل واحد،
+        # بس الحصة مجانية — التكلفة الحقيقية وقت مش فلوس.
+        "verify_mode": False,
         "keys": {},          # نص عادي — احتياطي بس لو keyring مش متاح
     }
 
@@ -529,6 +532,77 @@ class Brain:
         # المُجمِّع فشل — نرجّع أحسن مسودة بدل ما نفشل تمامًا
         label, text = drafts[0]
         return BrainReply(text=text, provider="deep", label=f"{label} (بدون دمج)")
+
+    def verified_chat(self, messages: list[dict]) -> BrainReply:
+        """يجاوب، بعدين يراجع إجابته بنفسه، بعدين يصححها.
+
+        Chain-of-Verification (CoVe): النموذج بيكتب مسودة، وبعدين يكتب
+        أسئلة تحقق عن ادعاءاته، ويجاوبها، وبعدين يعيد كتابة الإجابة على
+        ضوء اللي طلع. البحث المنشور بيقول إنها بتقلل الهلوسة 50-70%
+        وبتزوّد دقة سلاسل الاستدلال ~8 نقاط مئوية.
+
+        **ليه ده منطقي هنا بالذات:** الطريقة دي بتكلّف 3 نداءات بدل
+        واحد. ده غالي لو بتدفع بالنداء — لكن حصة نيزوكو مجانية، فالتكلفة
+        الحقيقية هي الوقت بس. يعني نيزوكو تقدر تراجع نفسها على كل سؤال
+        صعب، وده مكسب حقيقي مش تقليد.
+
+        بترجع لأول مسودة لو أي مرحلة فشلت — التحقق تحسين، مش شرط.
+        """
+        draft = self.chat(messages, temperature=0.4)
+        if not draft:
+            return draft
+
+        question = next(
+            (m["content"] for m in reversed(messages) if m.get("role") == "user"), ""
+        )
+
+        checks = self.chat([
+            {"role": "system", "content": (
+                "You check answers for mistakes. Given a question and a draft "
+                "answer, write 2-4 short verification questions that would "
+                "expose an error in the draft if one exists. Target the "
+                "specific claims, numbers, names and steps it asserts — not "
+                "its tone or style. One question per line, nothing else."
+            )},
+            {"role": "user", "content": f"Question:\n{question}\n\nDraft answer:\n{draft.text}"},
+        ], temperature=0.3)
+        if not checks or not checks.text.strip():
+            return draft
+
+        answers = self.chat([
+            {"role": "system", "content": (
+                "Answer each verification question briefly and independently. "
+                "Do not try to defend any earlier answer — judge each question "
+                "on its own. If something cannot be verified, say so plainly."
+            )},
+            {"role": "user", "content": checks.text.strip()},
+        ], temperature=0.2)
+        if not answers:
+            return draft
+
+        final = self.chat([
+            {"role": "system", "content": (
+                "Rewrite the draft answer using the verification results.\n"
+                "- Correct anything the checks contradict.\n"
+                "- Drop claims the checks could not confirm.\n"
+                "- Keep everything the checks confirmed.\n"
+                "- Answer in the same language as the question.\n"
+                "Return the corrected answer only — no commentary about the "
+                "revision, and no mention that a check happened."
+            )},
+            {"role": "user", "content": (
+                f"Question:\n{question}\n\nDraft:\n{draft.text}\n\n"
+                f"Verification questions:\n{checks.text}\n\n"
+                f"Verification results:\n{answers.text}"
+            )},
+        ], temperature=0.3)
+        if not final or not final.text.strip():
+            return draft
+
+        return BrainReply(
+            text=final.text, provider=final.provider,
+            label=f"{final.label} (verified)", is_local=final.is_local,
+        )
 
     # ── تقرير الحالة ─────────────────────────────────────────────
     def status(self) -> list[dict]:
