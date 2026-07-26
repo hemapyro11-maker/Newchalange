@@ -67,9 +67,9 @@ def _yt_get(endpoint: str, params: dict) -> dict:
     key = _api_key()
     if not key:
         raise YouTubeAPIError(
-            "مفيش مفتاح YouTube API متظبط. هات واحد مجاني من "
-            "https://console.cloud.google.com (فعّل YouTube Data API v3) "
-            "وسجّله بـ: youtube_set_key <المفتاح>"
+            "No YouTube API key configured. Get one free at "
+            "https://console.cloud.google.com (enable YouTube Data API v3) "
+            "then save it with: youtube_set_key <key>"
         )
     q = dict(params)
     q["key"] = key
@@ -97,7 +97,7 @@ def _fmt_int(n) -> str:
     try:
         return f"{int(n):,}"
     except (TypeError, ValueError):
-        return "؟"
+        return "?"
 
 
 # ── youtube_search ─────────────────────────────────────────────────────
@@ -112,14 +112,14 @@ def _cmd_youtube_search(ctx) -> str:
             try:
                 max_results = int(arg[4:])
             except ValueError:
-                return "❌ max لازم يكون رقم"
+                return "❌ max must be a number"
         else:
             query_parts.append(arg)
     query = " ".join(query_parts)
     if not query:
         return "usage: youtube_search <query> [max=10]"
     if not (1 <= max_results <= 25):
-        return "❌ max لازم يكون بين 1 و25"
+        return "❌ max must be between 1 and 25"
 
     try:
         search_data = _yt_get("search", {
@@ -136,16 +136,16 @@ def _cmd_youtube_search(ctx) -> str:
         return f"❌ {e}"
 
     if not items:
-        return f"🔍 مفيش نتائج لـ: {query}"
+        return f"🔍 no results for: {query}"
 
-    lines = [f"🔍 نتائج البحث عن: {query} ({len(items)})"]
+    lines = [f"🔍 Search results for: {query} ({len(items)})"]
     for it in items:
         vid = it.get("id", {}).get("videoId", "")
         snippet = it.get("snippet", {})
         views = stats_by_id.get(vid, {}).get("viewCount")
         views_str = f" — 👁 {_fmt_int(views)}" if views is not None else ""
-        lines.append(f"  🎬 {snippet.get('title', '؟')}")
-        lines.append(f"     {snippet.get('channelTitle', '؟')}{views_str} — https://youtu.be/{vid}")
+        lines.append(f"  🎬 {snippet.get('title', '?')}")
+        lines.append(f"     {snippet.get('channelTitle', '?')}{views_str} — https://youtu.be/{vid}")
     return "\n".join(lines)
 
 
@@ -164,9 +164,9 @@ def _cmd_trending_videos(ctx) -> str:
             try:
                 max_results = int(arg[4:])
             except ValueError:
-                return "❌ max لازم يكون رقم"
+                return "❌ max must be a number"
     if not (1 <= max_results <= 50):
-        return "❌ max لازم يكون بين 1 و50"
+        return "❌ max must be between 1 and 50"
 
     params = {
         "part": "snippet,statistics", "chart": "mostPopular",
@@ -181,13 +181,13 @@ def _cmd_trending_videos(ctx) -> str:
 
     items = data.get("items", [])
     if not items:
-        return f"📈 مفيش فيديوهات ترند لمنطقة {region}"
+        return f"📈 no trending videos for region {region}"
 
-    lines = [f"📈 الترند دلوقتي في {region} ({len(items)}):"]
+    lines = [f"📈 Trending right now in {region} ({len(items)}):"]
     for i, it in enumerate(items, 1):
         snippet = it.get("snippet", {})
         stats = it.get("statistics", {})
-        lines.append(f"  {i}. {snippet.get('title', '؟')} — {snippet.get('channelTitle', '؟')}")
+        lines.append(f"  {i}. {snippet.get('title', '?')} — {snippet.get('channelTitle', '?')}")
         lines.append(f"     👁 {_fmt_int(stats.get('viewCount'))}  👍 {_fmt_int(stats.get('likeCount'))}")
     return "\n".join(lines)
 
@@ -213,14 +213,14 @@ def _cmd_keyword_ideas(ctx) -> str:
     ar_ideas = [tpl.format(t=topic) for tpl in _KEYWORD_TEMPLATES_AR]
     en_ideas = [tpl.format(t=topic) for tpl in _KEYWORD_TEMPLATES_EN]
 
-    lines = [f"💡 أفكار كلمات مفتاحية لـ: {topic}", "\n  عربي:"]
+    lines = [f"💡 Keyword ideas for: {topic}", "\n  Arabic:"]
     lines += [f"   • {idea}" for idea in ar_ideas]
     lines.append("\n  English:")
     lines += [f"   • {idea}" for idea in en_ideas]
     lines.append(
-        "\n💡 دي قوالب نية-بحث عامة (اللي المشاهدين بيكتبوها فعليًا في "
-        "البحث). لو عندك مفتاح YouTube API، جرّب youtube_search على كل "
-        "فكرة تشوف الحجم الفعلي للمنافسة عليها."
+        "\n💡 These are general search-intent templates — the shapes viewers actually type into "
+        "search. If you have a YouTube API key, run youtube_search on each "
+        "idea to see the real competition behind it."
     )
     return "\n".join(lines)
 
@@ -242,14 +242,14 @@ def _cmd_script_outline(ctx) -> str:
             try:
                 duration_min = float(arg[13:])
             except ValueError:
-                return "❌ duration_min لازم يكون رقم"
+                return "❌ duration_min must be a number"
         else:
             topic_parts.append(arg)
     topic = " ".join(topic_parts)
     if not topic:
         return "usage: script_outline <topic> [duration_min=8]"
     if not (1 <= duration_min <= 120):
-        return "❌ duration_min لازم يكون بين 1 و120 دقيقة"
+        return "❌ duration_min must be between 1 and 120 minutes"
 
     total = duration_min * 60
     # الهوك أول 15 ثانية دايمًا (بحث retention بيأكد إن أول 15 ثانية حرجة
@@ -264,21 +264,21 @@ def _cmd_script_outline(ctx) -> str:
     segment_len = main_duration / n_segments if n_segments else 0
 
     lines = [
-        f"📝 هيكل سيناريو: {topic} ({duration_min:.0f} دقيقة)",
-        f"\n  [{_fmt_ts(0)}–{_fmt_ts(hook_end)}] 🪝 الهوك — سؤال/تصريح صادم يخلي حد يكمل بعد أول ثواني",
-        f"  [{_fmt_ts(hook_end)}–{_fmt_ts(intro_end)}] 👋 مقدمة قصيرة — إيه اللي هيتعرفه المشاهد (من غير ترحيب طويل)",
+        f"📝 Script outline: {topic} ({duration_min:.0f} minutes)",
+        f"\n  [{_fmt_ts(0)}–{_fmt_ts(hook_end)}] 🪝 Hook — a question or claim striking enough to keep them past the first seconds",
+        f"  [{_fmt_ts(hook_end)}–{_fmt_ts(intro_end)}] 👋 Short intro — what the viewer will learn (skip the long welcome)",
     ]
     if n_segments:
         for i in range(n_segments):
             seg_start = intro_end + i * segment_len
             seg_end = seg_start + segment_len
-            lines.append(f"  [{_fmt_ts(seg_start)}–{_fmt_ts(seg_end)}] 📌 نقطة {i + 1}/{n_segments}")
+            lines.append(f"  [{_fmt_ts(seg_start)}–{_fmt_ts(seg_end)}] 📌 Point {i + 1}/{n_segments}")
             if i == n_segments // 2:
-                lines.append("       💬 (تذكير لطيف بالـ CTA هنا — نص الفيديو تقريبًا)")
-    lines.append(f"  [{_fmt_ts(outro_start)}–{_fmt_ts(total)}] 🎬 خاتمة — ملخص سريع + CTA واضح (اشترك/فيديو تاني)")
+                lines.append("       💬 (a light call-to-action here — roughly the middle of the video)")
+    lines.append(f"  [{_fmt_ts(outro_start)}–{_fmt_ts(total)}] 🎬 Outro — quick recap plus a clear call to action (subscribe, next video)")
     lines.append(
-        "\n💡 استخدم hook_analyzer على نص الهوك اللي هتكتبه للثواني "
-        f"الأولى ({_fmt_ts(hook_end)}) عشان تقيّم قوته قبل التصوير."
+        "\n💡 Run hook_analyzer on the hook you write for the first "
+        f"{_fmt_ts(hook_end)} to judge how strong it is before you film."
     )
     return "\n".join(lines)
 
@@ -311,56 +311,56 @@ def _cmd_hook_analyzer(ctx) -> str:
 
     if len(words) <= 15:
         score += 15
-        notes.append("✅ طول مناسب (قصير ومباشر)")
+        notes.append("✅ good length — short and direct")
     elif len(words) <= 25:
         score += 5
-        notes.append("⚠️ طويل شوية — حاول تقصّره لأقل من 15 كلمة لو ينفع")
+        notes.append("⚠️ a bit long — try to get it under 15 words if you can")
     else:
-        notes.append("❌ طويل جدًا لهوك — المشاهد بيقرر يكمل ولا لأ في ثواني")
+        notes.append("❌ far too long for a hook — viewers decide whether to stay within seconds")
 
     if "؟" in text or "?" in text:
         score += 10
-        notes.append("✅ فيه سؤال — بيشغّل فضول المشاهد")
+        notes.append("✅ contains a question — that switches curiosity on")
 
     if re.search(r"\d", text):
         score += 10
-        notes.append("✅ فيه رقم — أرقام بتلفت الانتباه (زي \"5 غلطات\")")
+        notes.append("✅ contains a number — numbers catch the eye (\"5 mistakes\")")
 
     hit_curiosity = [w for w in _CURIOSITY_WORDS if w in lower]
     if hit_curiosity:
         score += 15
-        notes.append(f"✅ فيه كلمة فضول/تباين: {', '.join(hit_curiosity[:3])}")
+        notes.append(f"✅ contains a curiosity or contrast word: {', '.join(hit_curiosity[:3])}")
 
     hit_generic = [o for o in _GENERIC_OPENERS if lower.startswith(o.lower())]
     if hit_generic:
         score -= 25
-        notes.append(f"❌ بيبدأ بمقدمة عامة معروفة (\"{hit_generic[0]}\") — ده بيضيّع ثواني حرجة")
+        notes.append(f"❌ opens with a stock greeting (\"{hit_generic[0]}\") — that wastes critical seconds")
 
     if any(p in lower[:20] for p in ("انت", "انتي", "you", "your")):
         score += 5
-        notes.append("✅ خطاب مباشر للمشاهد بدري في النص")
+        notes.append("✅ addresses the viewer directly, early")
 
     score = max(0, min(100, score))
     if score >= 75:
-        verdict = "🔥 هوك قوي"
+        verdict = "🔥 strong hook"
     elif score >= 50:
-        verdict = "🙂 هوك متوسط — فيه مجال للتحسين"
+        verdict = "🙂 middling hook — there is room to improve it"
     else:
-        verdict = "⚠️ هوك ضعيف — يحتاج إعادة صياغة"
+        verdict = "⚠️ weak hook — it needs rewriting"
 
-    lines = [f"🪝 تحليل الهوك: \"{text}\"", f"\n{verdict}  ({score}/100)", "\nالتفاصيل:"]
-    lines += [f"  {n}" for n in notes] if notes else ["  (مفيش ملاحظات خاصة)"]
+    lines = [f"🪝 Hook analysis: \"{text}\"", f"\n{verdict}  ({score}/100)", "\nDetails:"]
+    lines += [f"  {n}" for n in notes] if notes else ["  (nothing particular to note)"]
     return "\n".join(lines)
 
 
 def register(engine):
     engine.registry.register("youtube_search", _cmd_youtube_search,
-                              "youtube_search <query> [max=10] — بحث حقيقي في يوتيوب مع أرقام مشاهدات")
+                              "youtube_search <query> [max=10] — a real YouTube search with view counts")
     engine.registry.register("trending_videos", _cmd_trending_videos,
-                              "trending_videos [region=EG] [category=N] [max=15] — الترند الحقيقي دلوقتي")
+                              "trending_videos [region=EG] [category=N] [max=15] — what is actually trending now")
     engine.registry.register("keyword_ideas", _cmd_keyword_ideas,
-                              "keyword_ideas <topic> — قوالب نية-بحث عربي/إنجليزي")
+                              "keyword_ideas <topic> — Arabic and English search-intent templates")
     engine.registry.register("script_outline", _cmd_script_outline,
-                              "script_outline <topic> [duration_min=8] — هيكل سيناريو بتوقيتات فعلية")
+                              "script_outline <topic> [duration_min=8] — a script outline with real timings")
     engine.registry.register("hook_analyzer", _cmd_hook_analyzer,
-                              "hook_analyzer <hook text> — تقييم قوة الهوك الافتتاحي /100")
+                              "hook_analyzer <hook text> — score an opening hook out of 100")

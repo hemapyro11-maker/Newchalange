@@ -98,7 +98,7 @@ def test_youtube_search_no_results(make_ctx, isolated_config, monkeypatch):
     _set_key(isolated_config)
     monkeypatch.setattr(crp.urllib.request, "urlopen", lambda req, timeout: _json_resp({"items": []}))
     result = crp._cmd_youtube_search(make_ctx("youtube_search", ["zzzznonexistent"]))
-    assert "مفيش نتائج" in result
+    assert "no results for" in result
 
 
 def test_youtube_search_query_with_multiple_words_and_max(make_ctx, isolated_config, monkeypatch):
@@ -170,7 +170,7 @@ def test_trending_videos_no_results(make_ctx, isolated_config, monkeypatch):
     _set_key(isolated_config)
     monkeypatch.setattr(crp.urllib.request, "urlopen", lambda req, timeout: _json_resp({"items": []}))
     result = crp._cmd_trending_videos(make_ctx("trending_videos", []))
-    assert "مفيش فيديوهات ترند" in result
+    assert "no trending videos" in result
 
 
 # ── keyword_ideas ────────────────────────────────────────────────────────
@@ -212,15 +212,15 @@ def test_script_outline_duration_out_of_range(make_ctx):
 
 def test_script_outline_default_duration_has_hook_and_outro(make_ctx):
     result = crp._cmd_script_outline(make_ctx("script_outline", ["فوتوشوب"]))
-    assert "🪝 الهوك" in result
-    assert "🎬 خاتمة" in result
+    assert "🪝 Hook" in result
+    assert "🎬 Outro" in result
     assert "[0:00" in result
 
 
 def test_script_outline_longer_video_has_more_segments(make_ctx):
     short = crp._cmd_script_outline(make_ctx("script_outline", ["t", "duration_min=3"]))
     long = crp._cmd_script_outline(make_ctx("script_outline", ["t", "duration_min=30"]))
-    assert long.count("📌 نقطة") > short.count("📌 نقطة")
+    assert long.count("📌 Point") > short.count("📌 Point")
 
 
 def test_script_outline_timestamps_end_at_total_duration(make_ctx):
@@ -249,12 +249,12 @@ def test_hook_analyzer_generic_opener_penalized(make_ctx):
 
 def test_hook_analyzer_question_detected(make_ctx):
     result = crp._cmd_hook_analyzer(make_ctx("hook_analyzer عايز تعرف السر؟", []))
-    assert "فيه سؤال" in result
+    assert "contains a question" in result
 
 
 def test_hook_analyzer_number_detected(make_ctx):
     result = crp._cmd_hook_analyzer(make_ctx("hook_analyzer 7 حاجات محدش بيقولهالك", []))
-    assert "فيه رقم" in result
+    assert "contains a number" in result
 
 
 def test_hook_analyzer_score_in_valid_range(make_ctx):
