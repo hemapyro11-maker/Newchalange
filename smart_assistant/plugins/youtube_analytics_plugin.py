@@ -75,9 +75,9 @@ def _yt_get(endpoint: str, params: dict) -> dict:
     key = _api_key()
     if not key:
         raise YouTubeAPIError(
-            "مفيش مفتاح YouTube API متظبط. هات واحد مجاني من "
-            "https://console.cloud.google.com (فعّل YouTube Data API v3) "
-            "وسجّله بـ: youtube_set_key <المفتاح>"
+            "No YouTube API key configured. Get one free at "
+            "https://console.cloud.google.com (enable YouTube Data API v3) "
+            "then save it with: youtube_set_key <key>"
         )
     q = dict(params)
     q["key"] = key
@@ -118,13 +118,13 @@ def _fmt_int(n) -> str:
     try:
         return f"{int(n):,}"
     except (TypeError, ValueError):
-        return "؟"
+        return "?"
 
 
 def _parse_duration(iso: str) -> str:
     m = _DURATION_RE.match(iso or "")
     if not m:
-        return "؟"
+        return "?"
     h, mnt, s = (int(x) if x else 0 for x in m.groups())
     total_min = h * 60 + mnt
     return f"{h}:{mnt:02d}:{s:02d}" if h else f"{total_min}:{s:02d}"
@@ -142,7 +142,7 @@ def _cmd_video_stats(ctx) -> str:
         return f"❌ {e}"
     items = data.get("items", [])
     if not items:
-        return f"❌ مفيش فيديو بالمعرف ده: {video_id}"
+        return f"❌ no video with that id: {video_id}"
 
     video = items[0]
     snippet = video.get("snippet", {})
@@ -154,10 +154,10 @@ def _cmd_video_stats(ctx) -> str:
 
     lines = [
         f"🎬 {snippet.get('title', video_id)}",
-        f"   📺 {snippet.get('channelTitle', '؟')}  |  📅 {snippet.get('publishedAt', '؟')[:10]}",
-        f"   ⏱ المدة: {_parse_duration(video.get('contentDetails', {}).get('duration', ''))}",
-        f"   👁 مشاهدات: {_fmt_int(views)}   👍 لايكات: {_fmt_int(likes)}   💬 تعليقات: {_fmt_int(comments)}",
-        f"   📊 معدل التفاعل (لايك+تعليق÷مشاهدة): {engagement:.2f}%",
+        f"   📺 {snippet.get('channelTitle', '?')}  |  📅 {snippet.get('publishedAt', '?')[:10]}",
+        f"   ⏱ duration: {_parse_duration(video.get('contentDetails', {}).get('duration', ''))}",
+        f"   👁 views: {_fmt_int(views)}   👍 likes: {_fmt_int(likes)}   💬 comments: {_fmt_int(comments)}",
+        f"   📊 engagement rate (likes+comments÷views): {engagement:.2f}%",
     ]
     return "\n".join(lines)
 
@@ -194,7 +194,7 @@ def _cmd_channel_growth_report(ctx) -> str:
 
     name = channel.get("snippet", {}).get("title", identifier)
     if not videos:
-        return f"📊 {name}: مفيش فيديوهات كفاية لتحليل النمو"
+        return f"📊 {name}: not enough videos to analyse growth"
 
     def views_of(v):
         return int(v.get("statistics", {}).get("viewCount", 0) or 0)
@@ -212,10 +212,10 @@ def _cmd_channel_growth_report(ctx) -> str:
     worst = min(videos_chrono, key=views_of)
 
     lines = [
-        f"📊 تقرير نمو: {name}  ({len(videos_chrono)} فيديو تم تحليلهم)",
-        f"\n   📈 متوسط المشاهدات: {_fmt_int(avg_views)}",
-        f"   🏆 أفضل أداء: \"{best.get('snippet', {}).get('title', '؟')}\" — {_fmt_int(views_of(best))} مشاهدة",
-        f"   📉 أضعف أداء: \"{worst.get('snippet', {}).get('title', '؟')}\" — {_fmt_int(views_of(worst))} مشاهدة",
+        f"📊 Growth report: {name}  ({len(videos_chrono)} videos analysed)",
+        f"\n   📈 average views: {_fmt_int(avg_views)}",
+        f"   🏆 best performer: \"{best.get('snippet', {}).get('title', '?')}\" — {_fmt_int(views_of(best))} views",
+        f"   📉 weakest performer: \"{worst.get('snippet', {}).get('title', '?')}\" — {_fmt_int(views_of(worst))} views",
     ]
 
     if len(views_list) >= 4:
@@ -225,12 +225,12 @@ def _cmd_channel_growth_report(ctx) -> str:
         if first_half_avg > 0:
             trend_pct = (second_half_avg - first_half_avg) / first_half_avg * 100
             if trend_pct > 10:
-                trend_desc = f"📈 في تصاعد ({trend_pct:+.0f}%)"
+                trend_desc = f"📈 trending up ({trend_pct:+.0f}%)"
             elif trend_pct < -10:
-                trend_desc = f"📉 في تراجع ({trend_pct:+.0f}%)"
+                trend_desc = f"📉 trending down ({trend_pct:+.0f}%)"
             else:
-                trend_desc = f"➡️ مستقر تقريبًا ({trend_pct:+.0f}%)"
-            lines.append(f"   📐 اتجاه المشاهدات (أقدم نص مقابل أحدث نص من العينة): {trend_desc}")
+                trend_desc = f"➡️ roughly flat ({trend_pct:+.0f}%)"
+            lines.append(f"   📐 view trend (oldest half vs newest half of the sample): {trend_desc}")
 
     return "\n".join(lines)
 
@@ -247,7 +247,7 @@ def _cmd_engagement_health_proxy(ctx) -> str:
         return f"❌ {e}"
     items = data.get("items", [])
     if not items:
-        return f"❌ مفيش فيديو بالمعرف ده: {video_id}"
+        return f"❌ no video with that id: {video_id}"
 
     video = items[0]
     snippet = video.get("snippet", {})
@@ -275,17 +275,17 @@ def _cmd_engagement_health_proxy(ctx) -> str:
     elif comment_ratio >= 0.1:
         score += 1
 
-    verdict = "🟢 صحي" if score >= 3 else ("🟡 متوسط" if score >= 1 else "🔴 ضعيف")
+    verdict = "🟢 healthy" if score >= 3 else ("🟡 middling" if score >= 1 else "🔴 weak")
 
     lines = [
-        f"🩺 مؤشر صحة تفاعل تقريبي: \"{snippet.get('title', video_id)}\"",
-        f"\n   👁 {_fmt_int(views)} مشاهدة على مدار {days_up} يوم (~{_fmt_int(views_per_day)}/يوم)",
-        f"   👍 نسبة اللايك: {like_ratio:.2f}%   💬 نسبة التعليق: {comment_ratio:.2f}%",
+        f"🩺 Rough engagement health: \"{snippet.get('title', video_id)}\"",
+        f"\n   👁 {_fmt_int(views)} views over {days_up} days (~{_fmt_int(views_per_day)}/day)",
+        f"   👍 like rate: {like_ratio:.2f}%   💬 comment rate: {comment_ratio:.2f}%",
         f"\n   {verdict}  ({score}/4)",
         (
-            "\n⚠️ ده مؤشر تقريبي من بيانات عامة (مشاهدات/لايكات/تعليقات) — "
-            "مش بيانات retention/CTR الحقيقية. البيانات دي متاحة بس لصاحب "
-            "القناة عبر YouTube Analytics (studio.youtube.com) بحسابه الخاص."
+            "\n⚠️ This is a rough proxy built from public data (views, likes, comments) — "
+            "not real retention or CTR. Those are available only to the channel "
+            "owner via YouTube Analytics (studio.youtube.com), signed in to their own account."
         ),
     ]
     return "\n".join(lines)
@@ -307,7 +307,7 @@ def _cmd_report_export(ctx) -> str:
         return f"❌ {e}"
 
     if not videos:
-        return "❌ مفيش فيديوهات نصدرها"
+        return "❌ no videos to export"
 
     try:
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -323,17 +323,17 @@ def _cmd_report_export(ctx) -> str:
                     _parse_duration(v.get("contentDetails", {}).get("duration", "")),
                 ])
     except OSError as e:
-        return f"❌ تعذر الكتابة: {e}"
+        return f"❌ could not write: {e}"
 
-    return f"✅ اتصدّر {len(videos)} فيديو في {out_path}"
+    return f"✅ exported {len(videos)} videos to {out_path}"
 
 
 def register(engine):
     engine.registry.register("video_stats", _cmd_video_stats,
-                              "video_stats <video_id> — إحصائيات فيديو حقيقية (مشاهدات/لايك/تعليق/تفاعل)")
+                              "video_stats <video_id> — real video statistics (views, likes, comments, engagement)")
     engine.registry.register("channel_growth_report", _cmd_channel_growth_report,
-                              "channel_growth_report <channel_id_or_@handle> — اتجاه مشاهدات وأفضل/أسوأ أداء")
+                              "channel_growth_report <channel_id_or_@handle> — view trend plus best and worst performers")
     engine.registry.register("engagement_health_proxy", _cmd_engagement_health_proxy,
-                              "engagement_health_proxy <video_id> — مؤشر صحة تفاعل تقريبي (مش retention حقيقي)")
+                              "engagement_health_proxy <video_id> — rough engagement health (not real retention)")
     engine.registry.register("report_export", _cmd_report_export,
-                              "report_export <channel_id_or_@handle> <out.csv> — تصدير إحصائيات فيديوهات القناة")
+                              "report_export <channel_id_or_@handle> <out.csv> — export the channel videos statistics")

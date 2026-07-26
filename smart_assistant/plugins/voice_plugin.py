@@ -490,7 +490,7 @@ def _cmd_speak(ctx) -> str:
     parts = ctx.raw.split(maxsplit=1)
     text = parts[1].strip() if len(parts) > 1 else ""
     if not text:
-        return "usage: speak <text>  |  speak <نص>   [lang=ar|en]"
+        return "usage: speak <text>   [lang=ar|en]"
 
     # lang=xx صريحة بتتقدّم على الاكتشاف التلقائي — مفيدة للنصوص
     # المختلطة اللي الاكتشاف ممكن يقراها غلط
@@ -501,19 +501,19 @@ def _cmd_speak(ctx) -> str:
             text = text[: -len(token)].strip()
             break
     if not text:
-        return "usage: speak <text>  |  speak <نص>   [lang=ar|en]"
+        return "usage: speak <text>   [lang=ar|en]"
 
     with tempfile.TemporaryDirectory(prefix="nezuko_speech_") as tmp:
         result = _synthesize_with_fallback(text, pathlib.Path(tmp), lang)
         if result is None:
             return (
-                "❌ كل محركات النطق فشلت — مفيش إنترنت لـ edge-tts، Piper مش متثبت/مش قادر "
-                "يحمّل الصوت، وespeak-ng مش متثبت. ثبّت على الأقل espeak-ng (فحص voice_status)."
+                "❌ every speech engine failed — no internet for edge-tts, sherpa/Piper missing or unable "
+                "to fetch a voice, and espeak-ng not installed. Install at least espeak-ng (see voice_status)."
             )
         audio_path, backend_label = result
 
         if not shutil.which("ffplay"):
-            return f"✅ اتولّد الصوت بـ {backend_label} — بس ffplay (جزء من FFmpeg) مش متثبت عشان يشغّله"
+            return f"✅ audio generated with {backend_label} — but ffplay (part of FFmpeg) is not installed to play it"
 
         try:
             play_proc = subprocess.run(
@@ -521,12 +521,12 @@ def _cmd_speak(ctx) -> str:
                 capture_output=True, text=True, timeout=_PLAYBACK_TIMEOUT,
             )
         except subprocess.TimeoutExpired:
-            return f"⚠️ اتولّد الصوت بـ {backend_label} بس التشغيل أخد وقت أطول من اللازم"
+            return f"⚠️ audio generated with {backend_label} but playback took too long"
 
         if play_proc.returncode != 0:
-            return f"⚠️ اتولّد الصوت بـ {backend_label} بس ffplay فشل يشغّله (كود {play_proc.returncode})"
+            return f"⚠️ audio generated with {backend_label} but ffplay could not play it (exit {play_proc.returncode})"
 
-    return f"🔊 اتقال بـ {backend_label}"
+    return f"🔊 spoken with {backend_label}"
 
 
 def _cmd_voice_status(ctx) -> str:
@@ -850,16 +850,16 @@ def _cmd_separate_vocals(ctx) -> str:
     if len(ctx.args) < 2:
         return (
             "usage: separate_vocals <audio> <output_dir> [mode=all|vocals] — "
-            "فصل المسارات الصوتية (Demucs): all=4 مسارات، vocals=صوت/بدون صوت بس (أسرع)"
+            "split audio into stems (Demucs): all=4 stems, vocals=voice/no-voice only (faster)"
         )
     if not shutil.which("demucs"):
-        return "❌ demucs مش متثبت — نزّله بـ: pip install demucs (مجاني ومفتوح المصدر، أول استخدام بيحمّل نموذجه ~80MB)"
+        return "❌ demucs is not installed — pip install demucs (free and open source; first run downloads a ~80MB model)"
     src, out_dir = ctx.args[0], ctx.args[1]
     if not pathlib.Path(src).is_file():
         return f"❌ file not found: {src}"
     mode = ctx.args[2] if len(ctx.args) > 2 else "all"
     if mode not in ("all", "vocals"):
-        return "❌ mode لازم يكون all أو vocals"
+        return "❌ mode must be all or vocals"
 
     cmd = ["demucs", "-o", out_dir]
     if mode == "vocals":
@@ -868,13 +868,13 @@ def _cmd_separate_vocals(ctx) -> str:
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_SEPARATE_TIMEOUT)
     except subprocess.TimeoutExpired:
-        return f"⏱ timed out after ({_SEPARATE_TIMEOUT}s) — الفصل الصوتي بطيء على CPU، جرب ملف أقصر أو جهاز فيه GPU"
+        return f"⏱ timed out after {_SEPARATE_TIMEOUT}s — stem separation is slow on CPU; try a shorter file or a machine with a GPU"
     if proc.returncode != 0:
         return f"❌ failed: {proc.stderr.strip()[-600:]}"
     if not any(pathlib.Path(out_dir).rglob("*.wav")):
-        return "❌ فشل الفصل — demucs خلص من غير خطأ ظاهر بس مفيش ملفات صوت خرج حقيقية"
+        return "❌ separation failed — demucs exited without an error but produced no real audio files"
     stems = "vocals + no_vocals" if mode == "vocals" else "vocals + drums + bass + other"
-    return f"✅ اتفصل الصوت ({stems}) في {out_dir}"
+    return f"✅ audio split into {stems} at {out_dir}"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -890,11 +890,11 @@ def _cmd_diarize_set_token(ctx) -> str:
         return "usage: diarize_set_token <hf_token>"
     token = ctx.args[0].strip()
     if not token:
-        return "❌ توكن فاضي مش هيتحفظ"
+        return "❌ an empty token will not be saved"
     if _set_hf_token_keyring(token):
         return (
-            "✅ اتحفظ توكن Hugging Face بأمان في مخزن أسرار نظام التشغيل (keyring).\n"
-            "لو أول مرة، لازم كمان توافق يدويًا على شروط الاستخدام مرة واحدة — شوف diarize_key_status."
+            "✅ Hugging Face token saved safely in the operating system secret store (keyring).\n"
+            "If this is your first time you must also accept the model terms by hand, once — see diarize_key_status."
         )
     path = _diarize_config_path()
     data = {}
@@ -907,11 +907,11 @@ def _cmd_diarize_set_token(ctx) -> str:
     try:
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError as e:
-        return f"❌ تعذر حفظ التوكن: {e}"
+        return f"❌ could not save the token: {e}"
     return (
-        "⚠️ اتحفظ التوكن كنص عادي في diarize_config.json — تخزين keyring الآمن مش متاح دلوقتي.\n"
-        "   لتخزين أأمن: pip install keyring\n"
-        "لو أول مرة، لازم كمان توافق يدويًا على شروط الاستخدام مرة واحدة — شوف diarize_key_status."
+        "⚠️ Token saved as plain text in diarize_config.json — secure keyring storage is not available here.\n"
+        "   For safer storage: pip install keyring\n"
+        "If this is your first time you must also accept the model terms by hand, once — see diarize_key_status."
     )
 
 
@@ -919,46 +919,46 @@ def _cmd_diarize_key_status(ctx) -> str:
     token = _hf_token()
     if not token:
         return (
-            "❌ مفيش توكن Hugging Face متظبط — استخدم diarize_set_token <token>\n"
-            "التوكن من: https://huggingface.co/settings/tokens (مجاني)\n"
-            "ولازم توافق يدويًا (مرة واحدة بس، ماينفعش أوتوماتيك) على شروط النموذجين دول:\n"
+            "❌ no Hugging Face token configured — use diarize_set_token <token>\n"
+            "Get one free at: https://huggingface.co/settings/tokens\n"
+            "You must also accept these two models terms by hand — once, and it cannot be automated:\n"
             f"  - https://huggingface.co/{_DIARIZE_MODEL}\n"
             "  - https://huggingface.co/pyannote/segmentation-3.0"
         )
     masked = token[:4] + "…" + token[-2:] if len(token) > 8 else "…"
-    line = f"✅ فيه توكن متظبط ({masked})"
+    line = f"✅ a token is configured ({masked})"
     if not _HAS_KEYRING:
-        line += "\n⚠️ keyring مش متثبت — بيتخزن كنص عادي (pip install keyring لتخزين أأمن)"
+        line += "\n⚠️ keyring is not installed — stored as plain text (pip install keyring for safer storage)"
     try:
         import pyannote.audio  # noqa: F401
     except ImportError:
-        line += "\n❌ pyannote.audio مش متثبت — نزّله بـ: pip install pyannote.audio"
+        line += "\n❌ pyannote.audio is not installed — pip install pyannote.audio"
     return line
 
 
 def _cmd_diarize(ctx) -> str:
     if not ctx.args:
-        return "usage: diarize <audio> — يحدد مين اتكلم وإمتى في تسجيل فيه أكتر من متكلم (pyannote.audio)"
+        return "usage: diarize <audio> — work out who spoke when in a multi-speaker recording (pyannote.audio)"
     try:
         from pyannote.audio import Pipeline
     except ImportError:
-        return "❌ pyannote.audio مش متثبت — نزّله بـ: pip install pyannote.audio (مجاني ومفتوح المصدر)"
+        return "❌ pyannote.audio is not installed — pip install pyannote.audio (free and open source)"
     src = ctx.args[0]
     if not pathlib.Path(src).is_file():
         return f"❌ file not found: {src}"
     token = _hf_token()
     if not token:
-        return "❌ محتاج توكن Hugging Face الأول — استخدم diarize_set_token <token> (تفاصيل: diarize_key_status)"
+        return "❌ a Hugging Face token is needed first — use diarize_set_token <token> (details: diarize_key_status)"
 
     pipeline = _diarize_pipeline_cache.get(_DIARIZE_MODEL)
     if pipeline is None:
         try:
             pipeline = Pipeline.from_pretrained(_DIARIZE_MODEL, token=token)
         except Exception as e:
-            return f"❌ تعذر تحميل نموذج pyannote: {e}"
+            return f"❌ could not load the pyannote model: {e}"
         if pipeline is None:
             return (
-                "❌ تعذر تحميل النموذج — لازم توافق يدويًا على شروط الاستخدام الأول على:\n"
+                "❌ could not load the model — you must accept the terms by hand first at:\n"
                 f"  https://huggingface.co/{_DIARIZE_MODEL}\n"
                 "  https://huggingface.co/pyannote/segmentation-3.0"
             )
@@ -967,13 +967,13 @@ def _cmd_diarize(ctx) -> str:
     try:
         diarization = pipeline(src)
     except Exception as e:
-        return f"❌ فشل التحليل: {e}"
+        return f"❌ analysis failed: {e}"
 
     segments = list(diarization.itertracks(yield_label=True))
     if not segments:
-        return "ℹ️ مفيش متكلمين واضحين اتلقوا في التسجيل ده"
+        return "ℹ️ no distinct speakers were found in this recording"
     speakers = {speaker for _turn, _track, speaker in segments}
-    lines = [f"🗣️ {len(speakers)} متكلم اتلقى:"]
+    lines = [f"🗣️ {len(speakers)} speakers found:"]
     for turn, _track, speaker in segments:
         lines.append(f"  [{turn.start:6.1f}s → {turn.end:6.1f}s] {speaker}")
     return "\n".join(lines)
@@ -999,13 +999,13 @@ def _cmd_clone_voice_agree_license(ctx) -> str:
     try:
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError as e:
-        return f"❌ تعذر حفظ الموافقة: {e}"
+        return f"❌ could not record your acceptance: {e}"
     return (
-        "✅ اتسجلت موافقتك على Coqui Public Model License (CPML) لنموذج XTTS-v2.\n"
-        "التفاصيل الكاملة: https://coqui.ai/cpml — بالمختصر: استخدام غير تجاري بشكل\n"
-        "أساسي. نيزوكو مش هيوافق نيابة عنك على ترخيص بيخص استخدامك الشخصي، فلازم\n"
-        "الأمر ده يتشغّل صراحة مرة واحدة قبل clone_voice.\n"
-        "جرّب دلوقتي: clone_voice <reference.wav> \"<نص>\" <output.wav> [language=ar]"
+        "✅ Your acceptance of the Coqui Public Model License (CPML) for XTTS-v2 is recorded.\n"
+        "Full text: https://coqui.ai/cpml — in short: primarily non-commercial\n"
+        "use. Nezuko will not accept a licence on your behalf when it governs your own\n"
+        "use, so this command must be run explicitly, once, before clone_voice.\n"
+        "Try it now: clone_voice <reference.wav> \"<text>\" <output.wav> [language=ar]"
     )
 
 
@@ -1013,28 +1013,28 @@ def _cmd_clone_voice(ctx) -> str:
     if len(ctx.args) < 3:
         return (
             "usage: clone_voice <reference.wav> <text> <output.wav> [language=ar] — "
-            "يستنسخ صوت من عينة صوتية قصيرة (~6+ ثواني) وينطق بيه أي نص (Coqui XTTS-v2)\n"
-            "⚠️ استخدمه لصوتك إنت أو صوت عندك إذن صريح تستنسخه — مش لتقليد حد من غير موافقته."
+            "clone a voice from a short sample (~6+ seconds) and speak any text in it (Coqui XTTS-v2)\n"
+            "⚠️ Use this for your own voice, or one you have explicit permission to clone — not to imitate someone without their consent."
         )
     if not _clone_license_agreed():
         return (
-            "❌ محتاج توافق مرة واحدة بس على ترخيص Coqui Public Model License (CPML) قبل أول استخدام:\n"
-            "   التفاصيل: https://coqui.ai/cpml\n"
-            "   وافق بـ: clone_voice_agree_license"
+            "❌ you must accept the Coqui Public Model License (CPML) once before first use:\n"
+            "   Full text: https://coqui.ai/cpml\n"
+            "   Accept with: clone_voice_agree_license"
         )
     try:
         from TTS.api import TTS as CoquiTTS
     except ImportError:
-        return "❌ TTS (Coqui) مش متثبت — نزّله بـ: pip install TTS (مجاني، أول تشغيل بيحمّل نموذج XTTS-v2 تقيل ~2GB)"
+        return "❌ TTS (Coqui) is not installed — pip install TTS (free; first run downloads the ~2GB XTTS-v2 model)"
 
     reference, text, output = ctx.args[0], ctx.args[1], ctx.args[2]
     if not pathlib.Path(reference).is_file():
         return f"❌ reference audio file not found: {reference}"
     if not text.strip():
-        return "❌ النص فاضي"
+        return "❌ the text is empty"
     language = ctx.args[3] if len(ctx.args) > 3 else "ar"
     if language not in _CLONE_LANGUAGES:
-        return f"❌ language لازم يكون واحدة من: {', '.join(sorted(_CLONE_LANGUAGES))}"
+        return f"❌ language must be one of: {', '.join(sorted(_CLONE_LANGUAGES))}"
 
     os.environ["COQUI_TOS_AGREED"] = "1"  # موافقتنا الصريحة فوق سجّلت فعلاً — ده بس بيبلّغ مكتبة Coqui نفسها
 
@@ -1043,17 +1043,17 @@ def _cmd_clone_voice(ctx) -> str:
         try:
             model = CoquiTTS(_CLONE_MODEL, progress_bar=False, gpu=False)
         except Exception as e:
-            return f"❌ تعذر تحميل نموذج XTTS-v2: {e}"
+            return f"❌ could not load the XTTS-v2 model: {e}"
         _clone_voice_models[_CLONE_MODEL] = model
 
     try:
         model.tts_to_file(text=text, speaker_wav=reference, language=language, file_path=output)
     except Exception as e:
-        return f"❌ فشل استنساخ الصوت: {e}"
+        return f"❌ voice cloning failed: {e}"
 
     if not pathlib.Path(output).is_file():
-        return "❌ فشل استنساخ الصوت — مفيش ملف خرج حقيقي"
-    return f"✅ اتستنسخ الصوت (لغة: {language}) في {output}"
+        return "❌ voice cloning failed — no real output file was produced"
+    return f"✅ voice cloned (language: {language}) at {output}"
 
 
 def _parse_listen_seconds(ctx) -> tuple[int, str | None]:

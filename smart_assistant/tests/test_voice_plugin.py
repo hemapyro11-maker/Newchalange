@@ -1083,7 +1083,7 @@ def test_diarize_key_status_reports_pyannote_missing(make_ctx, monkeypatch, isol
     vp._cmd_diarize_set_token(make_ctx("diarize_set_token", ["tok"]))
     monkeypatch.setitem(sys.modules, "pyannote.audio", None)
     result = vp._cmd_diarize_key_status(make_ctx("diarize_key_status", []))
-    assert "pyannote.audio مش متثبت" in result
+    assert "pyannote.audio is not installed" in result
 
 
 # ── diarize ──────────────────────────────────────────────────────────────
@@ -1098,7 +1098,7 @@ def test_diarize_reports_missing_tool(make_ctx, tmp_path, monkeypatch):
     f = tmp_path / "in.wav"
     f.write_bytes(b"x")
     result = vp._cmd_diarize(make_ctx("diarize", [str(f)]))
-    assert "pyannote.audio مش متثبت" in result
+    assert "pyannote.audio is not installed" in result
 
 
 def test_diarize_missing_input_file(make_ctx, tmp_path, monkeypatch):
@@ -1175,7 +1175,7 @@ def test_diarize_success_reports_speakers(make_ctx, tmp_path, monkeypatch, isola
     f.write_bytes(b"x")
     result = vp._cmd_diarize(make_ctx("diarize", [str(f)]))
     assert result.startswith("🗣️")
-    assert "2 متكلم" in result
+    assert "2 speakers found" in result
     assert "SPEAKER_00" in result
     assert "SPEAKER_01" in result
 
@@ -1222,7 +1222,7 @@ def test_separate_vocals_reports_missing_tool(make_ctx, tmp_path, monkeypatch):
     f = tmp_path / "in.wav"
     f.write_bytes(b"x")
     result = vp._cmd_separate_vocals(make_ctx("separate_vocals", [str(f), str(tmp_path / "out")]))
-    assert "demucs مش متثبت" in result
+    assert "demucs is not installed" in result
     assert "pip install demucs" in result
 
 
@@ -1273,7 +1273,7 @@ def test_separate_vocals_detects_exit_zero_but_no_output(make_ctx, tmp_path, mon
     f.write_bytes(b"x")
     result = vp._cmd_separate_vocals(make_ctx("separate_vocals", [str(f), str(tmp_path / "out")]))
     assert result.startswith("❌")
-    assert "مفيش ملفات صوت خرج حقيقية" in result
+    assert "produced no real audio files" in result
 
 
 def test_separate_vocals_timeout_reported(make_ctx, tmp_path, monkeypatch):
@@ -1341,7 +1341,7 @@ def test_clone_license_agreed_false_by_default(isolated_clone_config):
 def test_clone_voice_no_args(make_ctx):
     result = vp._cmd_clone_voice(make_ctx("clone_voice", []))
     assert result.startswith("usage")
-    assert "موافقته" in result  # التذكير الأخلاقي موجود حتى في رسالة usage
+    assert "without their consent" in result  # التذكير الأخلاقي موجود حتى في رسالة usage
 
 
 def test_clone_voice_requires_license_agreement_first(make_ctx, tmp_path, isolated_clone_config):
@@ -1358,7 +1358,7 @@ def test_clone_voice_reports_missing_tool(make_ctx, tmp_path, monkeypatch, isola
     f = tmp_path / "ref.wav"
     f.write_bytes(b"x")
     result = vp._cmd_clone_voice(make_ctx("clone_voice", [str(f), "hello", str(tmp_path / "out.wav")]))
-    assert "TTS (Coqui) مش متثبت" in result
+    assert "TTS (Coqui) is not installed" in result
     assert "pip install TTS" in result
 
 
@@ -1381,7 +1381,7 @@ def test_clone_voice_empty_text(make_ctx, tmp_path, monkeypatch, isolated_clone_
     f.write_bytes(b"x")
     result = vp._cmd_clone_voice(make_ctx("clone_voice", [str(f), "   ", str(tmp_path / "out.wav")]))
     assert result.startswith("❌")
-    assert "فاضي" in result
+    assert "the text is empty" in result
 
 
 def test_clone_voice_rejects_bad_language(make_ctx, tmp_path, monkeypatch, isolated_clone_config):
@@ -1469,7 +1469,7 @@ def test_clone_voice_reports_when_output_missing(make_ctx, tmp_path, monkeypatch
     f.write_bytes(b"x")
     result = vp._cmd_clone_voice(make_ctx("clone_voice", [str(f), "hi", str(tmp_path / "missing_out.wav")]))
     assert result.startswith("❌")
-    assert "مفيش ملف خرج" in result
+    assert "no real output file" in result
 
 
 def test_clone_voice_model_load_error_reported(make_ctx, tmp_path, monkeypatch, isolated_clone_config):

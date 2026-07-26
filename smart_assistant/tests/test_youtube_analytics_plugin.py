@@ -84,7 +84,7 @@ def test_parse_duration_seconds_only():
 
 
 def test_parse_duration_invalid_returns_placeholder():
-    assert yap._parse_duration("") == "؟"
+    assert yap._parse_duration("") == "?"
 
 
 # ── video_stats ───────────────────────────────────────────────────────
@@ -192,7 +192,7 @@ def test_growth_report_trend_correct_despite_api_response_reordering(make_ctx, i
 
     monkeypatch.setattr(yap.urllib.request, "urlopen", fake_urlopen)
     result = yap._cmd_channel_growth_report(make_ctx("channel_growth_report", ["@x"]))
-    assert "📈 في تصاعد" in result
+    assert "📈 trending up" in result
 
 
 def test_growth_report_no_videos(make_ctx, isolated_config, monkeypatch):
@@ -205,7 +205,7 @@ def test_growth_report_no_videos(make_ctx, isolated_config, monkeypatch):
 
     monkeypatch.setattr(yap.urllib.request, "urlopen", fake_urlopen)
     result = yap._cmd_channel_growth_report(make_ctx("channel_growth_report", ["@x"]))
-    assert "مفيش فيديوهات" in result
+    assert "not enough videos" in result
 
 
 # ── engagement_health_proxy ───────────────────────────────────────────────
@@ -222,7 +222,7 @@ def test_engagement_proxy_healthy_video(make_ctx, isolated_config, monkeypatch):
     monkeypatch.setattr(yap.urllib.request, "urlopen",
                          lambda req, timeout: _json_resp({"items": [_video(views=10_000, likes=500, comments=50, published=published)]}))
     result = yap._cmd_engagement_health_proxy(make_ctx("engagement_health_proxy", ["abc"]))
-    assert "🟢 صحي" in result
+    assert "🟢 healthy" in result
     assert "retention" in result  # الملحوظة الصريحة موجودة
 
 
@@ -231,7 +231,7 @@ def test_engagement_proxy_weak_video(make_ctx, isolated_config, monkeypatch):
     monkeypatch.setattr(yap.urllib.request, "urlopen",
                          lambda req, timeout: _json_resp({"items": [_video(views=100_000, likes=10, comments=0)]}))
     result = yap._cmd_engagement_health_proxy(make_ctx("engagement_health_proxy", ["abc"]))
-    assert "🔴 ضعيف" in result
+    assert "🔴 weak" in result
 
 
 def test_engagement_proxy_not_found(make_ctx, isolated_config, monkeypatch):

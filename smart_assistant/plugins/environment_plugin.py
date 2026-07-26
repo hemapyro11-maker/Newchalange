@@ -30,55 +30,55 @@ OLLAMA_URL = "http://localhost:11434/api/tags"
 TOOLS: dict[str, dict] = {
     # ── الأساسيات (لازمة عشان نيزوكو نفسها تشتغل) ──────────────────────
     "customtkinter": {
-        "category": "الأساسيات", "label": "CustomTkinter (واجهة نيزوكو)",
+        "category": "Core", "label": "CustomTkinter (Nezuko's interface)",
         "kind": "python", "module": "customtkinter", "pip": "customtkinter",
     },
     "mcp": {
-        "category": "الأساسيات", "label": "MCP (Connectors)",
+        "category": "Core", "label": "MCP (Connectors)",
         "kind": "python", "module": "mcp", "pip": "mcp",
     },
     "capstone": {
-        "category": "الأساسيات", "label": "Capstone (هندسة عكسية — re_plugin)",
+        "category": "Core", "label": "Capstone (reverse engineering — re_plugin)",
         "kind": "python", "module": "capstone", "pip": "capstone",
     },
     "pillow": {
-        "category": "الأساسيات", "label": "Pillow (design_plugin/thumbnail_plugin)",
+        "category": "Core", "label": "Pillow (design_plugin/thumbnail_plugin)",
         "kind": "python", "module": "PIL", "pip": "Pillow",
     },
     "pandas": {
-        "category": "الأساسيات", "label": "pandas (data_science_plugin)",
+        "category": "Core", "label": "pandas (data_science_plugin)",
         "kind": "python", "module": "pandas", "pip": "pandas",
     },
     "matplotlib": {
-        "category": "الأساسيات", "label": "matplotlib (data_science_plugin)",
+        "category": "Core", "label": "matplotlib (data_science_plugin)",
         "kind": "python", "module": "matplotlib", "pip": "matplotlib",
     },
     "edge-tts": {
-        "category": "الأساسيات", "label": "edge-tts (صوت نيزوكو الأساسي)",
+        "category": "Core", "label": "edge-tts (Nezuko's primary voice)",
         "kind": "python", "module": "edge_tts", "pip": "edge-tts",
     },
     "piper-tts": {
-        "category": "الأساسيات", "label": "Piper (صوت نيزوكو المحلي)",
+        "category": "Core", "label": "Piper (Nezuko's local voice)",
         "kind": "python", "module": "piper", "pip": "piper-tts",
     },
 
     # ── وسائط وصوت ──────────────────────────────────────────────────────
     "ffmpeg": {
-        "category": "وسائط", "label": "FFmpeg (media_plugin/cinema_plugin/voice_plugin)",
+        "category": "Media", "label": "FFmpeg (media_plugin/cinema_plugin/voice_plugin)",
         "kind": "binary", "bin": "ffmpeg",
         "apt": "ffmpeg", "dnf": "ffmpeg", "pacman": "ffmpeg", "brew": "ffmpeg",
         "winget": "Gyan.FFmpeg", "choco": "ffmpeg",
     },
     "ffprobe": {
-        "category": "وسائط", "label": "FFprobe (تحليل ميديا)",
+        "category": "Media", "label": "FFprobe (media analysis)",
         "kind": "binary", "bin": "ffprobe", "same_as": "ffmpeg",
     },
     "ffplay": {
-        "category": "وسائط", "label": "FFplay (تشغيل صوت نيزوكو)",
+        "category": "Media", "label": "FFplay (plays Nezuko's voice)",
         "kind": "binary", "bin": "ffplay", "same_as": "ffmpeg",
     },
     "espeak-ng": {
-        "category": "وسائط", "label": "espeak-ng (الصوت الاحتياطي الأخير)",
+        "category": "Media", "label": "espeak-ng (last-resort voice)",
         "kind": "binary", "bin": "espeak-ng",
         "apt": "espeak-ng", "dnf": "espeak-ng", "pacman": "espeak-ng",
         "brew": "espeak-ng", "winget": "eSpeak-NG.eSpeak-NG",
@@ -86,42 +86,42 @@ TOOLS: dict[str, dict] = {
 
     # ── أمان ─────────────────────────────────────────────────────────────
     "clamav": {
-        "category": "أمان", "label": "ClamAV (virus_scan)",
+        "category": "Security", "label": "ClamAV (virus_scan)",
         "kind": "binary", "bin": "clamscan",
         "apt": "clamav", "dnf": "clamav", "pacman": "clamav",
         "brew": "clamav", "winget": "ClamWin.ClamWin",
     },
     "pip-audit": {
-        "category": "أمان", "label": "pip-audit (vuln_scan)",
+        "category": "Security", "label": "pip-audit (vuln_scan)",
         "kind": "binary_or_pip", "bin": "pip-audit", "pip": "pip-audit",
     },
 
     # ── أدوات تطوير (لتشغيل مشاريع scaffold نفسها + MCP servers) ──────
     "node": {
-        "category": "أدوات تطوير", "label": "Node.js/npm (MCP servers، سقالات web/arvr/blockchain)",
+        "category": "Dev tools", "label": "Node.js/npm (MCP servers; web/arvr/blockchain scaffolds)",
         "kind": "binary", "bin": "npm",
         "apt": "nodejs npm", "dnf": "nodejs", "pacman": "nodejs npm",
         "brew": "node", "winget": "OpenJS.NodeJS", "choco": "nodejs",
     },
     "gcc": {
-        "category": "أدوات تطوير", "label": "GCC (سقالات embedded/kernel_module)",
+        "category": "Dev tools", "label": "GCC (embedded and kernel_module scaffolds)",
         "kind": "binary", "bin": "gcc",
         "apt": "build-essential", "dnf": "gcc", "pacman": "base-devel",
         "brew": "gcc", "winget": None,
     },
     "docker": {
-        "category": "أدوات تطوير", "label": "Docker (سقالة docker)",
+        "category": "Dev tools", "label": "Docker (docker scaffold)",
         "kind": "binary", "bin": "docker",
         "apt": "docker.io", "dnf": "docker", "pacman": "docker",
         "brew": "--cask docker", "winget": "Docker.DockerDesktop",
     },
     "kotlinc": {
-        "category": "أدوات تطوير", "label": "Kotlin compiler (سقالة android)",
+        "category": "Dev tools", "label": "Kotlin compiler (android scaffold)",
         "kind": "binary", "bin": "kotlinc",
         "apt": None, "brew": "kotlin", "winget": "JetBrains.Kotlin",
     },
     "adb": {
-        "category": "أدوات تطوير", "label": "ADB (android_plugin — تحكم في تطبيقات أندرويد)",
+        "category": "Dev tools", "label": "ADB (android_plugin — control Android apps)",
         "kind": "binary", "bin": "adb",
         "apt": "android-tools-adb", "dnf": "android-tools", "pacman": "android-tools",
         "brew": "android-platform-tools", "winget": "Google.PlatformTools",
@@ -129,26 +129,26 @@ TOOLS: dict[str, dict] = {
 
     # ── ذكاء اصطناعي محلي ────────────────────────────────────────────────
     "ollama": {
-        "category": "AI محلي", "label": "Ollama (self_improve_plugin/plugin_forge_plugin)",
+        "category": "Local AI", "label": "Ollama (self_improve_plugin/plugin_forge_plugin)",
         "kind": "ollama",
     },
 
     # ── مكتبات بايثون اختيارية (لمشاريع scaffold المولّدة) ─────────────
     "scikit-learn": {
-        "category": "مكتبات سقالات", "label": "scikit-learn (سقالة ml)",
+        "category": "Scaffold libraries", "label": "scikit-learn (ml scaffold)",
         "kind": "python", "module": "sklearn", "pip": "scikit-learn",
     },
     "qiskit-aer": {
-        "category": "مكتبات سقالات", "label": "Qiskit Aer (سقالة quantum)",
+        "category": "Scaffold libraries", "label": "Qiskit Aer (quantum scaffold)",
         "kind": "python", "module": "qiskit_aer", "pip": "qiskit-aer",
     },
     "pygame": {
-        "category": "مكتبات سقالات", "label": "Pygame (سقالة game)",
+        "category": "Scaffold libraries", "label": "Pygame (game scaffold)",
         "kind": "python", "module": "pygame", "pip": "pygame",
     },
 }
 
-_CATEGORY_ORDER = ["الأساسيات", "وسائط", "أمان", "أدوات تطوير", "AI محلي", "مكتبات سقالات"]
+_CATEGORY_ORDER = ["Core", "Media", "Security", "Dev tools", "Local AI", "Scaffold libraries"]
 
 
 def _current_os() -> str:
@@ -229,7 +229,7 @@ def _install_command_for_current_os(key: str) -> str | None:
 
 def _cmd_env_check(ctx) -> str:
     os_name = _current_os()
-    lines = [f"🩺 فحص بيئة العمل — النظام المكتشف: {os_name}\n"]
+    lines = [f"🩺 Environment check — detected system: {os_name}\n"]
 
     total = 0
     installed = 0
@@ -246,76 +246,76 @@ def _cmd_env_check(ctx) -> str:
             if ok:
                 lines.append(f"   ✅ {spec['label']}")
             elif spec["kind"] == "ollama":
-                lines.append(f"   ❌ {spec['label']} — نزّله يدوي من https://ollama.com وشغّل: ollama pull llama3.2")
+                lines.append(f"   ❌ {spec['label']} — install it yourself from https://ollama.com then run: ollama pull llama3.2")
             else:
                 cmd = _install_command_for_current_os(key)
-                hint = f"— ثبّته بـ: {cmd}" if cmd else "— مفيش أمر تثبيت تلقائي معروف لنظامك، دوّر عليه يدوي"
+                hint = f"— install with: {cmd}" if cmd else "— no known automatic install command for your system; find it yourself"
                 lines.append(f"   ❌ {spec['label']} {hint}")
         lines.append("")
 
-    lines.append(f"📊 الخلاصة: {installed}/{total} أداة متاحة.")
+    lines.append(f"📊 Summary: {installed}/{total} tools available.")
     if installed < total:
         lines.append(
-            "💡 استخدم `env_install <tool>` لتثبيت مكتبة بايثون واحدة "
-            "تلقائيًا، أو `env_install_all --yes` تثبّت كل مكتبات "
-            "بايثون الناقصة دفعة واحدة. أدوات النظام (زي FFmpeg/Docker) "
-            "لازم تتثبت يدويًا بالأمر المعروض فوق — الأداة مش بتشغّل "
-            "sudo أو مثبتات نظام تلقائيًا لأي سبب."
+            "💡 Use `env_install <tool>` to install a single Python package "
+            "automatically, or `env_install_all --yes` to install every missing "
+            "Python package at once. System tools (FFmpeg, Docker and the like) "
+            "must be installed by hand using the command shown above — this never "
+            "runs sudo or a system installer on your behalf, for any reason."
         )
     else:
-        lines.append("🎉 كل حاجة متاحة!")
+        lines.append("🎉 Everything is available!")
     return "\n".join(lines)
 
 
 def _cmd_env_install(ctx) -> str:
     if not ctx.args:
-        return "usage: env_install <tool_key> [--yes]   (env_check يوريك كل الـ tool_key المتاحة)"
+        return "usage: env_install <tool_key> [--yes]   (env_check lists every available tool_key)"
     key = ctx.args[0].lower()
     confirm = "--yes" in ctx.args[1:]
     if key not in TOOLS:
-        return f"❌ مفيش أداة معروفة بالاسم ده. الأسماء المتاحة: {', '.join(sorted(TOOLS))}"
+        return f"❌ no tool by that name. Available: {', '.join(sorted(TOOLS))}"
 
     spec = TOOLS[key]
     if _is_installed(key):
-        return f"✅ {spec['label']} متثبتة بالفعل"
+        return f"✅ {spec['label']} is already installed"
 
     if spec["kind"] == "ollama":
         return (
-            "🤖 Ollama مش حاجة بايثون بتتثبت بـ pip — محتاج تحميل يدوي "
-            "من https://ollama.com، وبعدين شغّل: ollama pull llama3.2"
+            "🤖 Ollama is not a Python package installable with pip — download it "
+            "from https://ollama.com, then run: ollama pull llama3.2"
         )
 
     is_pip_installable = spec["kind"] == "python" or (spec["kind"] == "binary_or_pip" and "pip" in spec)
     cmd = _install_command_for_current_os(key)
     if cmd is None:
-        return f"❌ مفيش أمر تثبيت تلقائي معروف لـ {spec['label']} على نظامك — دوّر عليه يدوي"
+        return f"❌ no known automatic install command for {spec['label']} on your system — find it yourself"
 
     if not is_pip_installable:
         return (
-            f"📋 {spec['label']} أداة نظام محتاجة صلاحيات — الأداة دي مش "
-            f"بتشغّلها تلقائيًا. انسخ وشغّل بنفسك:\n\n   {cmd}"
+            f"📋 {spec['label']} is a system tool needing privileges — this never "
+            f"runs it for you. Copy and run it yourself:\n\n   {cmd}"
         )
 
     if not confirm:
-        return f"📋 هيتشغّل: {cmd}\n\nلو موافق، أعد المحاولة بـ: env_install {key} --yes"
+        return f"📋 Would run: {cmd}\n\nIf that is fine, run it again as: env_install {key} --yes"
 
     try:
         proc = subprocess.run(cmd.split(), capture_output=True, text=True, timeout=300)
     except subprocess.TimeoutExpired:
-        return "❌ التثبيت أخد وقت أطول من المتوقع (5 دقايق) واتوقف"
+        return "❌ the install took longer than expected (5 minutes) and was stopped"
     except OSError as e:
-        return f"❌ تعذر تشغيل أمر التثبيت: {e}"
+        return f"❌ could not run the install command: {e}"
 
     if proc.returncode != 0:
-        return f"❌ فشل تثبيت {spec['label']}:\n{proc.stderr[-1000:]}"
-    return f"✅ اتثبتت {spec['label']} بنجاح"
+        return f"❌ installing {spec['label']} failed:\n{proc.stderr[-1000:]}"
+    return f"✅ {spec['label']} installed successfully"
 
 
 def _cmd_env_install_all(ctx) -> str:
     confirm = "--yes" in ctx.args
     missing = [k for k in TOOLS if not _is_installed(k)]
     if not missing:
-        return "🎉 كل الأدوات متاحة بالفعل — مفيش حاجة تتثبت"
+        return "🎉 Every tool is already available — nothing to install"
 
     pip_missing = [k for k in missing if TOOLS[k]["kind"] == "python" or (TOOLS[k]["kind"] == "binary_or_pip" and "pip" in TOOLS[k])]
     system_missing = [k for k in missing if k not in pip_missing and TOOLS[k]["kind"] != "ollama"]
@@ -325,40 +325,40 @@ def _cmd_env_install_all(ctx) -> str:
     if pip_missing:
         if not confirm:
             pkgs = ", ".join(TOOLS[k].get("pip", k) for k in pip_missing)
-            lines.append(f"📋 مكتبات بايثون هيتثبتوا: {pkgs}\nأعد المحاولة بـ: env_install_all --yes")
+            lines.append(f"📋 Python packages that would be installed: {pkgs}\nRun it again as: env_install_all --yes")
         else:
             packages = [TOOLS[k]["pip"] for k in pip_missing]
-            lines.append(f"⏳ بتثبيت {len(packages)} مكتبة بايثون...")
+            lines.append(f"⏳ installing {len(packages)} Python packages...")
             try:
                 proc = subprocess.run(
                     [sys.executable, "-m", "pip", "install", *packages],
                     capture_output=True, text=True, timeout=600,
                 )
             except subprocess.TimeoutExpired:
-                return "❌ التثبيت أخد وقت أطول من المتوقع (10 دقايق) واتوقف"
+                return "❌ the install took longer than expected (10 minutes) and was stopped"
             except OSError as e:
-                return f"❌ تعذر تشغيل pip: {e}"
+                return f"❌ could not run pip: {e}"
             if proc.returncode != 0:
-                lines.append(f"❌ فشل جزء من التثبيت:\n{proc.stderr[-1000:]}")
+                lines.append(f"❌ part of the install failed:\n{proc.stderr[-1000:]}")
             else:
-                lines.append(f"✅ اتثبتت {len(packages)} مكتبة بايثون بنجاح")
+                lines.append(f"✅ installed {len(packages)} Python packages successfully")
 
     if system_missing:
-        lines.append("\n📋 أدوات نظام محتاجة تثبيت يدوي (محتاجة صلاحيات — مش بتتثبت تلقائيًا):")
+        lines.append("\n📋 System tools needing manual installation (they require privileges, so they are never installed automatically):")
         for k in system_missing:
             cmd = _install_command_for_current_os(k)
-            lines.append(f"   • {TOOLS[k]['label']}: {cmd or 'مفيش أمر معروف لنظامك'}")
+            lines.append(f"   • {TOOLS[k]['label']}: {cmd or 'no known command for your system'}")
 
     if ollama_missing:
-        lines.append("\n🤖 Ollama: نزّله يدوي من https://ollama.com وشغّل: ollama pull llama3.2")
+        lines.append("\n🤖 Ollama: install it yourself from https://ollama.com then run: ollama pull llama3.2")
 
     return "\n".join(lines)
 
 
 def register(engine):
     engine.registry.register("env_check", _cmd_env_check,
-                              "env_check — فحص شامل لكل الأدوات/المكتبات اللي نيزوكو ممكن تحتاجها")
+                              "env_check — check every tool and library Nezuko might need")
     engine.registry.register("env_install", _cmd_env_install,
-                              "env_install <tool_key> [--yes] — تثبيت أداة واحدة (تلقائي لمكتبات بايثون فقط)")
+                              "env_install <tool_key> [--yes] — install one tool (automatic for Python packages only)")
     engine.registry.register("env_install_all", _cmd_env_install_all,
-                              "env_install_all [--yes] — تثبيت كل مكتبات بايثون الناقصة + عرض أوامر أدوات النظام")
+                              "env_install_all [--yes] — install every missing Python package and print the system-tool commands")

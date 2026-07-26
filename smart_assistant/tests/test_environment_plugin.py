@@ -115,8 +115,8 @@ def test_install_command_gcc_none_on_windows(monkeypatch):
 
 def test_env_check_reports_summary(make_ctx):
     result = ep._cmd_env_check(make_ctx("env_check", []))
-    assert "فحص بيئة العمل" in result
-    assert "الخلاصة" in result
+    assert "Environment check" in result
+    assert "Summary" in result
 
 
 def test_env_check_shows_missing_tool_with_install_hint(make_ctx, monkeypatch):
@@ -137,7 +137,7 @@ def test_env_check_shows_ollama_specific_hint_when_missing(make_ctx, monkeypatch
 def test_env_check_all_installed_shows_celebration(make_ctx, monkeypatch):
     monkeypatch.setattr(ep, "_is_installed", lambda key: True)
     result = ep._cmd_env_check(make_ctx("env_check", []))
-    assert "كل حاجة متاحة" in result
+    assert "Everything is available" in result
 
 
 # ── env_install ──────────────────────────────────────────────────────
@@ -156,7 +156,7 @@ def test_env_install_already_installed(make_ctx, monkeypatch):
     monkeypatch.setattr(ep, "_is_installed", lambda key: True)
     result = ep._cmd_env_install(make_ctx("env_install", ["pandas"]))
     assert result.startswith("✅")
-    assert "متثبتة بالفعل" in result
+    assert "is already installed" in result
 
 
 def test_env_install_ollama_gives_manual_instructions(make_ctx, monkeypatch):
@@ -178,7 +178,7 @@ def test_env_install_system_tool_never_auto_executes(make_ctx, monkeypatch):
     monkeypatch.setattr(ep.subprocess, "run", fail_if_called)
 
     result = ep._cmd_env_install(make_ctx("env_install", ["docker", "--yes"]))
-    assert "انسخ وشغّل بنفسك" in result
+    assert "Copy and run it yourself" in result
     assert "apt install" in result
 
 
@@ -190,7 +190,7 @@ def test_env_install_python_tool_dry_run_without_yes(make_ctx, monkeypatch):
     monkeypatch.setattr(ep.subprocess, "run", fail_if_called)
 
     result = ep._cmd_env_install(make_ctx("env_install", ["pandas"]))
-    assert "هيتشغّل" in result
+    assert "Would run" in result
     assert "--yes" in result
 
 
@@ -236,7 +236,7 @@ def test_env_install_timeout_reported(make_ctx, monkeypatch):
 def test_env_install_all_nothing_missing(make_ctx, monkeypatch):
     monkeypatch.setattr(ep, "_is_installed", lambda key: True)
     result = ep._cmd_env_install_all(make_ctx("env_install_all", []))
-    assert "كل الأدوات متاحة" in result
+    assert "Every tool is already available" in result
 
 
 def test_env_install_all_dry_run_lists_pip_packages(make_ctx, monkeypatch):
@@ -257,7 +257,7 @@ def test_env_install_all_yes_installs_pip_packages_in_one_call(make_ctx, monkeyp
     monkeypatch.setattr(ep.subprocess, "run", fake_run)
 
     result = ep._cmd_env_install_all(make_ctx("env_install_all", ["--yes"]))
-    assert "اتثبتت" in result
+    assert "Python packages successfully" in result
     assert "pandas" in captured["cmd"]
     assert "matplotlib" in captured["cmd"]
 
@@ -267,7 +267,7 @@ def test_env_install_all_separates_system_tools(make_ctx, monkeypatch):
     monkeypatch.setattr(ep, "_current_os", lambda: "linux")
     monkeypatch.setattr(ep, "_linux_pkg_manager", lambda: "apt")
     result = ep._cmd_env_install_all(make_ctx("env_install_all", ["--yes"]))
-    assert "أدوات نظام محتاجة تثبيت يدوي" in result
+    assert "System tools needing manual installation" in result
     assert "FFmpeg" in result
 
 
