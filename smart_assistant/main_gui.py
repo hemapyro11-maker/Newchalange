@@ -861,6 +861,12 @@ class SettingsPanel(ctk.CTkToplevel):
         self.editing.pack(fill="x")
         self.editing._prov = prov
         self.editing.bind("<Return>", lambda e: self._save_key())
+        # customtkinter's CTkEntry لا يضمن دايمًا Ctrl+V الافتراضي (بيعتمد
+        # على نظام التشغيل ولاي-آوت الكيبورد)، فبنعمل paste يدوي مضمون
+        # بيستبدل محتوى الحقل بالكامل بمحتوى الحافظة (مناسب لحقل مفتاح واحد).
+        self.editing.bind("<Control-v>", self._paste_into_editing)
+        self.editing.bind("<Control-V>", self._paste_into_editing)
+        self.editing.bind("<Button-3>", self._paste_into_editing)  # كليك يمين
 
         ctk.CTkLabel(
             box, text=prov.signup, text_color=c["accent"],
@@ -872,6 +878,20 @@ class SettingsPanel(ctk.CTkToplevel):
                 text_color=c["yellow"], font=self.app._font(9),
                 anchor=self.app._anchor,
             ).pack(fill="x")
+
+    def _paste_into_editing(self, event=None):
+        if self.editing is None or not self.editing.winfo_exists():
+            return "break"
+        try:
+            clip = self.editing.clipboard_get()
+        except Exception:
+            return "break"  # الحافظة فاضية أو مفيهاش نص
+        clip = clip.strip()
+        if not clip:
+            return "break"
+        self.editing.delete(0, "end")
+        self.editing.insert(0, clip)
+        return "break"  # يمنع أي معالجة افتراضية تانية تتعارض
 
     # ── التنقل ─────────────────────────────────────────────────────────
     def _move(self, delta: int):
