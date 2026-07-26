@@ -46,17 +46,17 @@ def _cmd_entropy(ctx) -> str:
     try:
         chunk_size = int(ctx.args[1]) if len(ctx.args) > 1 else 4096
     except ValueError:
-        return "❌ chunk_size لازم يكون رقم صحيح"
+        return "❌ chunk_size must be a whole number"
     if chunk_size < 1:
-        return "❌ chunk_size لازم يكون 1 على الأقل"
+        return "❌ chunk_size must be at least 1"
     try:
         data = path.read_bytes()
     except OSError as e:
         return f"❌ could not read the file: {e}"
     overall = _shannon_entropy(data)
-    lines = [f"📊 entropy إجمالي: {overall:.2f} / 8.0 bits/byte  (حجم: {len(data)} bytes)"]
+    lines = [f"📊 overall entropy: {overall:.2f} / 8.0 bits per byte  (size: {len(data)} bytes)"]
     if overall > 7.5:
-        lines.append("⚠  إنتروبيا عالية جداً — الملف كله ممكن يكون مضغوط أو مشفّر أو packed")
+        lines.append("⚠  very high entropy — the whole file may be compressed, encrypted or packed")
 
     hot_chunks = []
     for i in range(0, len(data), chunk_size):
@@ -65,13 +65,13 @@ def _cmd_entropy(ctx) -> str:
         if e > 7.5:
             hot_chunks.append((i, e))
     if hot_chunks:
-        lines.append(f"🔥 {len(hot_chunks)} جزء بإنتروبيا عالية (>7.5) من أصل {math.ceil(len(data) / chunk_size)}:")
+        lines.append(f"🔥 {len(hot_chunks)} high-entropy chunks (>7.5) out of {math.ceil(len(data) / chunk_size)}:")
         for offset, e in hot_chunks[:15]:
             lines.append(f"   0x{offset:08x}: {e:.2f}")
         if len(hot_chunks) > 15:
-            lines.append(f"   ... و{len(hot_chunks) - 15} جزء إضافي")
+            lines.append(f"   ... and {len(hot_chunks) - 15} more")
     else:
-        lines.append("✅ مفيش مناطق بإنتروبيا عالية غير طبيعية")
+        lines.append("✅ no unusually high-entropy regions")
     return "\n".join(lines)
 
 
@@ -84,9 +84,9 @@ _ELF_MACHINES = {3: "x86 (i386)", 40: "ARM", 62: "x86-64", 183: "AArch64", 8: "M
 
 def _parse_elf(data: bytes) -> dict:
     if data[:4] != b"\x7fELF":
-        raise ValueError("مش ملف ELF")
+        raise ValueError("not an ELF file")
     if len(data) < 16:
-        raise ValueError("الملف قصير أوي — header ELF ناقص")
+        raise ValueError("file too short — the ELF header is incomplete")
     ei_class = data[4]          # 1=32-bit, 2=64-bit
     ei_data = data[5]           # 1=LE, 2=BE
     is64 = ei_class == 2
@@ -164,19 +164,19 @@ def _cmd_elf_info(ctx) -> str:
     try:
         info = _parse_elf(data)
     except (ValueError, struct.error, IndexError) as e:
-        return f"❌ مش ملف ELF صالح: {e}"
+        return f"❌ not a valid ELF file: {e}"
 
     lines = [
         f"🐧 ELF {info['bits']}-bit, {info['endian']}-endian, {info['machine']}",
         f"🎯 entry point: 0x{info['entry']:x}",
-        f"📚 مكتبات مطلوبة (DT_NEEDED): {', '.join(info['needed']) or '(مفيش/static)'}",
+        f"📚 required libraries (DT_NEEDED): {', '.join(info['needed']) or '(none / static)'}",
         f"🧩 {len(info['sections'])} section:",
     ]
     for s in info["sections"][:30]:
         if s["name"]:
             lines.append(f"   {s['name']:<20} addr=0x{s['addr']:<10x} size={s['size']}")
     if len(info["sections"]) > 30:
-        lines.append(f"   ... و{len(info['sections']) - 30} section إضافي")
+        lines.append(f"   ... and {len(info['sections']) - 30} more sections")
     return "\n".join(lines)
 
 
@@ -203,10 +203,10 @@ def _read_cstr(data: bytes, offset: int, limit: int = 256) -> str:
 
 def _parse_pe(data: bytes) -> dict:
     if data[:2] != b"MZ":
-        raise ValueError("مش ملف PE (مفيش MZ magic)")
+        raise ValueError("not a PE file (no MZ magic)")
     e_lfanew = struct.unpack_from("<I", data, 0x3C)[0]
     if data[e_lfanew:e_lfanew + 4] != b"PE\x00\x00":
-        raise ValueError("مفيش PE signature في المكان المتوقع")
+        raise ValueError("no PE signature where one was expected")
 
     coff_off = e_lfanew + 4
     machine, num_sections, timestamp, _, _, opt_size, _ = struct.unpack_from(
@@ -303,13 +303,13 @@ def _cmd_pe_info(ctx) -> str:
     try:
         info = _parse_pe(data)
     except (ValueError, struct.error, IndexError) as e:
-        return f"❌ مش ملف PE صالح: {e}"
+        return f"❌ not a valid PE file: {e}"
 
     import datetime
     ts = datetime.datetime.utcfromtimestamp(info["timestamp"]).isoformat() if info["timestamp"] else "?"
     lines = [
         f"🪟 PE {'32+' if info['is64'] else '32'}, {info['machine']}",
-        f"🕒 وقت البناء (COFF timestamp): {ts} UTC",
+        f"🕒 build time (COFF timestamp): {ts} UTC",
         f"🎯 entry point RVA: 0x{info['entry_rva']:x}  (image base: 0x{info['image_base']:x})",
         f"🧩 {len(info['sections'])} section:",
     ]
@@ -318,12 +318,12 @@ def _cmd_pe_info(ctx) -> str:
 
     if info["imports"]:
         total_funcs = sum(len(v) for v in info["imports"].values())
-        lines.append(f"📚 {len(info['imports'])} DLL مستوردة ({total_funcs} دالة):")
+        lines.append(f"📚 {len(info['imports'])} imported DLLs ({total_funcs} functions):")
         for dll, funcs in list(info["imports"].items())[:20]:
             preview = ", ".join(funcs[:6]) + (f" ... (+{len(funcs) - 6})" if len(funcs) > 6 else "")
-            lines.append(f"   {dll}: {preview or '(مفيش دوال متلاقية)'}")
+            lines.append(f"   {dll}: {preview or '(no functions found)'}")
     else:
-        lines.append("📚 مفيش imports متلاقية")
+        lines.append("📚 no imports found")
     return "\n".join(lines)
 
 
@@ -377,7 +377,7 @@ def _auto_entry_offset(data: bytes) -> tuple[int, str] | None:
 
 def _cmd_disasm(ctx) -> str:
     if not CAPSTONE_AVAILABLE:
-        return "❌ باكدج capstone مش متثبت — ثبّته بـ: pip install capstone"
+        return "❌ capstone is not installed — pip install capstone"
     if not ctx.args:
         return "usage: disasm <file> [offset] [length=128] [arch=x86|x64|arm|arm64]"
     path = pathlib.Path(ctx.args[0])
@@ -395,37 +395,37 @@ def _cmd_disasm(ctx) -> str:
             offset = int(ctx.args[1], 0)
         length = int(ctx.args[2]) if len(ctx.args) > 2 else 128
     except ValueError:
-        return "❌ offset و length لازم يكونوا أرقام صحيحة"
+        return "❌ offset and length must be whole numbers"
     if len(ctx.args) > 3:
         arch = ctx.args[3]
 
     if offset is not None and offset < 0:
-        return "❌ offset مينفعش يكون سالب"
+        return "❌ offset cannot be negative"
     if not (0 < length <= 65536):
-        return "❌ length لازم يكون بين 1 و65536"
+        return "❌ length must be between 1 and 65536"
 
     note = ""
     if offset is None:
         auto = _auto_entry_offset(data)
         if auto:
             offset, arch = auto
-            note = f"(تلقائي: entry point عند 0x{offset:x}, arch={arch})\n"
+            note = f"(auto: entry point at 0x{offset:x}, arch={arch})\n"
         else:
             offset = 0
 
     if arch not in _ARCH_MAP:
-        return f"❌ arch غير مدعوم: {arch} (available: {', '.join(_ARCH_MAP)})"
+        return f"❌ unsupported arch: {arch} (available: {', '.join(_ARCH_MAP)})"
 
     chunk = data[offset:offset + length]
     cs_arch, cs_mode = _ARCH_MAP[arch]
     md = capstone.Cs(cs_arch, cs_mode)
-    lines = [f"{note}🧮 disassembly من offset 0x{offset:x}, arch={arch}:"]
+    lines = [f"{note}🧮 disassembly from offset 0x{offset:x}, arch={arch}:"]
     count = 0
     for insn in md.disasm(chunk, offset):
         lines.append(f"   0x{insn.address:08x}:  {insn.mnemonic}\t{insn.op_str}")
         count += 1
     if count == 0:
-        lines.append("   (مفيش تعليمات قابلة للفك — جرب offset/arch مختلف)")
+        lines.append("   (nothing decodable here — try a different offset or arch)")
     return "\n".join(lines)
 
 
@@ -436,9 +436,9 @@ def register(engine):
     if CAPSTONE_AVAILABLE:
         engine.registry.register(
             "disasm", _cmd_disasm,
-            "disasm <file> [offset] [length] [arch] — فك تجميع بايتات لتعليمات معالج (Capstone)",
+            "disasm <file> [offset] [length] [arch] — disassemble bytes into CPU instructions (Capstone)",
         )
     else:
         engine.registry.register(
-            "disasm", _cmd_disasm, "disasm — يحتاج: pip install capstone"
+            "disasm", _cmd_disasm, "disasm — needs: pip install capstone"
         )

@@ -39,8 +39,8 @@ def _cmd_db_schema(ctx) -> str:
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
         tables = [row[0] for row in cur.fetchall()]
         if not tables:
-            return "مفيش جداول في القاعدة دي"
-        lines = [f"📊 {len(tables)} جدول:"]
+            return "No tables in this database"
+        lines = [f"📊 {len(tables)} tables:"]
         for table in tables:
             quoted = _quote_identifier(table)
             if quoted is None:
@@ -78,14 +78,14 @@ def _cmd_db_query(ctx) -> str:
         cur.execute(sql)
         if cur.description is None:
             conn.commit()
-            return f"✅ تم التنفيذ — {cur.rowcount} صف اتأثر"
+            return f"✅ done — {cur.rowcount} rows affected"
         columns = [d[0] for d in cur.description]
         rows = cur.fetchmany(200)
         lines = [" | ".join(columns)]
         lines.append("-" * len(lines[0]))
         for row in rows:
             lines.append(" | ".join(str(v) for v in row))
-        suffix = "\n... (النتائج مقصوصة عند 200 صف)" if len(rows) == 200 else ""
+        suffix = "\n... (results truncated at 200 rows)" if len(rows) == 200 else ""
         return "\n".join(lines) + suffix
     except sqlite3.Error as e:
         return f"❌ SQLite error: {e}"
@@ -104,7 +104,7 @@ def _cmd_db_export_csv(ctx) -> str:
         return f"❌ file not found: {path}"
     quoted = _quote_identifier(table)
     if quoted is None:
-        return f"❌ اسم جدول غير صالح: {table}"
+        return f"❌ invalid table name: {table}"
 
     try:
         conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
@@ -128,8 +128,8 @@ def _cmd_db_export_csv(ctx) -> str:
             writer.writerow(columns)
             writer.writerows(rows)
     except OSError as e:
-        return f"❌ تعذر الكتابة: {e}"
-    return f"✅ اتصدّر {len(rows)} صف من {table} في {out_path}"
+        return f"❌ could not write: {e}"
+    return f"✅ exported {len(rows)} rows from {table} to {out_path}"
 
 
 def _ensure_migrations_table(conn: sqlite3.Connection) -> None:
@@ -154,13 +154,13 @@ def _cmd_db_migration_status(ctx) -> str:
         return "usage: db_migration_status <sqlite_file> <migrations_dir>"
     db_path, migrations_dir = pathlib.Path(ctx.args[0]), pathlib.Path(ctx.args[1])
     if db_path.is_dir():
-        return f"❌ ده مجلد مش ملف قاعدة بيانات: {db_path}"
+        return f"❌ that is a directory, not a database file: {db_path}"
     if not migrations_dir.is_dir():
-        return f"❌ مجلد الهجرات مش موجود: {migrations_dir}"
+        return f"❌ migrations directory not found: {migrations_dir}"
 
     files = _migration_files(migrations_dir)
     if not files:
-        return f"مفيش ملفات *.sql في {migrations_dir}"
+        return f"No *.sql files in {migrations_dir}"
 
     try:
         conn = sqlite3.connect(str(db_path))
@@ -178,23 +178,23 @@ def _cmd_db_migration_status(ctx) -> str:
         except UnboundLocalError:
             pass
 
-    lines = [f"📋 {len(files)} ملف هجرة في {migrations_dir}:"]
+    lines = [f"📋 {len(files)} migration files in {migrations_dir}:"]
     pending = mismatched = ok = 0
     for f in files:
         checksum = _checksum(f.read_text(encoding="utf-8"))
         record = applied.get(f.name)
         if record is None:
-            lines.append(f"  ⏳ {f.name} — لسه متطبقتش")
+            lines.append(f"  ⏳ {f.name} — not applied yet")
             pending += 1
         else:
             applied_checksum, applied_at = record
             if applied_checksum == checksum:
-                lines.append(f"  ✅ {f.name} — اتطبقت في {applied_at}")
+                lines.append(f"  ✅ {f.name} — applied at {applied_at}")
                 ok += 1
             else:
-                lines.append(f"  ⚠️ {f.name} — اتطبقت في {applied_at} بس المحتوى اتغير من ساعتها (checksum mismatch)")
+                lines.append(f"  ⚠️ {f.name} — applied at {applied_at}, but its contents changed since (checksum mismatch)")
                 mismatched += 1
-    lines.append(f"— {ok} متطبقة، {pending} في الانتظار، {mismatched} فيها تعارض checksum")
+    lines.append(f"— {ok} applied, {pending} pending, {mismatched} with a checksum mismatch")
     return "\n".join(lines)
 
 
@@ -203,13 +203,13 @@ def _cmd_db_migrate(ctx) -> str:
         return "usage: db_migrate <sqlite_file> <migrations_dir>"
     db_path, migrations_dir = pathlib.Path(ctx.args[0]), pathlib.Path(ctx.args[1])
     if db_path.is_dir():
-        return f"❌ ده مجلد مش ملف قاعدة بيانات: {db_path}"
+        return f"❌ that is a directory, not a database file: {db_path}"
     if not migrations_dir.is_dir():
-        return f"❌ مجلد الهجرات مش موجود: {migrations_dir}"
+        return f"❌ migrations directory not found: {migrations_dir}"
 
     files = _migration_files(migrations_dir)
     if not files:
-        return f"مفيش ملفات *.sql في {migrations_dir}"
+        return f"No *.sql files in {migrations_dir}"
 
     try:
         conn = sqlite3.connect(str(db_path))
@@ -225,9 +225,9 @@ def _cmd_db_migrate(ctx) -> str:
             if existing_checksum is not None:
                 if existing_checksum != checksum:
                     return (
-                        f"❌ توقف عند {f.name}: اتطبقت قبل كده بمحتوى مختلف (checksum mismatch) — "
-                        f"عدّل اسم الملف لو ده تعديل مقصود، ماتعدلش هجرة اتطبقت خلاص"
-                        + (f"\n✅ اتطبق {len(applied_now)} هجرة قبل كده: {', '.join(applied_now)}" if applied_now else "")
+                        f"❌ stopped at {f.name}: already applied with different contents (checksum mismatch) — "
+                        f"rename the file if the change was intentional; never edit a migration that already ran"
+                        + (f"\n✅ {len(applied_now)} migrations had already been applied: {', '.join(applied_now)}" if applied_now else "")
                     )
                 continue  # applied and unchanged — skip
             try:
@@ -235,8 +235,8 @@ def _cmd_db_migrate(ctx) -> str:
             except sqlite3.Error as e:
                 conn.rollback()
                 return (
-                    f"❌ فشلت الهجرة {f.name}: {e}"
-                    + (f"\n✅ اتطبق {len(applied_now)} هجرة قبل كده: {', '.join(applied_now)}" if applied_now else "")
+                    f"❌ migration {f.name} failed: {e}"
+                    + (f"\n✅ {len(applied_now)} migrations had already been applied: {', '.join(applied_now)}" if applied_now else "")
                 )
             conn.execute(
                 f'INSERT INTO "{_MIGRATIONS_TABLE}" (filename, checksum, applied_at) VALUES (?, ?, ?)',
@@ -253,8 +253,8 @@ def _cmd_db_migrate(ctx) -> str:
             pass
 
     if not applied_now:
-        return "✅ كل الهجرات متطبقة بالفعل — مفيش جديد"
-    return f"✅ اتطبق {len(applied_now)} هجرة: {', '.join(applied_now)}"
+        return "✅ every migration is already applied — nothing new"
+    return f"✅ applied {len(applied_now)} migrations: {', '.join(applied_now)}"
 
 
 def _cmd_db_indexes(ctx) -> str:
@@ -271,16 +271,16 @@ def _cmd_db_indexes(ctx) -> str:
             table_arg = ctx.args[1]
             quoted = _quote_identifier(table_arg)
             if quoted is None:
-                return f"❌ اسم جدول غير صالح: {table_arg}"
+                return f"❌ invalid table name: {table_arg}"
             cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_arg,))
             if cur.fetchone() is None:
-                return f"❌ مفيش جدول اسمه {table_arg}"
+                return f"❌ no table named {table_arg}"
             tables = [table_arg]
         else:
             cur.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
             tables = [row[0] for row in cur.fetchall()]
             if not tables:
-                return "مفيش جداول في القاعدة دي"
+                return "No tables in this database"
 
         lines = []
         for table in tables:
@@ -292,12 +292,12 @@ def _cmd_db_indexes(ctx) -> str:
             index_rows = cur.fetchall()
             indexed_leading_cols = set()
             if not index_rows:
-                lines.append("    (مفيش أي index)")
+                lines.append("    (no indexes at all)")
             for idx in index_rows:
                 idx_name, is_unique, origin = idx[1], idx[2], idx[3]
                 quoted_idx = _quote_identifier(idx_name)
                 if quoted_idx is None:
-                    lines.append(f"    📌 {idx_name} (اسم index غير صالح، اتخطّى)")
+                    lines.append(f"    📌 {idx_name} (invalid index name, skipped)")
                     continue
                 cur.execute(f"PRAGMA index_info({quoted_idx})")
                 cols = [row[2] for row in sorted(cur.fetchall(), key=lambda r: r[0])]
@@ -311,7 +311,7 @@ def _cmd_db_indexes(ctx) -> str:
             for fk in cur.fetchall():
                 ref_table, from_col = fk[2], fk[3]
                 if from_col not in indexed_leading_cols:
-                    lines.append(f"    ⚠️ عمود {from_col} (foreign key لـ {ref_table}) من غير index — ممكن يبطّئ الـ JOINs")
+                    lines.append(f"    ⚠️ column {from_col} (foreign key to {ref_table}) has no index — this can slow JOINs down")
         return "\n".join(lines)
     except sqlite3.Error as e:
         return f"❌ SQLite error: {e}"

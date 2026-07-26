@@ -30,7 +30,7 @@ def test_db_schema_empty_database(make_ctx, tmp_path):
     db = tmp_path / "empty.db"
     sqlite3.connect(db).close()
     result = dbp._cmd_db_schema(make_ctx("db_schema", [str(db)]))
-    assert "مفيش جداول" in result
+    assert "No tables in this database" in result
 
 
 def test_db_query_select_returns_rows(make_ctx, tmp_path):
@@ -117,7 +117,7 @@ def test_db_migration_status_no_sql_files(make_ctx, tmp_path):
     mig = tmp_path / "migrations"
     mig.mkdir()
     result = dbp._cmd_db_migration_status(make_ctx("db_migration_status", [str(tmp_path / "app.db"), str(mig)]))
-    assert "مفيش ملفات" in result
+    assert "No *.sql files" in result
 
 
 def test_db_migration_status_reports_all_pending_on_fresh_db(make_ctx, tmp_path):
@@ -125,7 +125,7 @@ def test_db_migration_status_reports_all_pending_on_fresh_db(make_ctx, tmp_path)
     _make_migrations(mig, {"0001_a.sql": "CREATE TABLE a (id INTEGER PRIMARY KEY);"})
     result = dbp._cmd_db_migration_status(make_ctx("db_migration_status", [str(tmp_path / "app.db"), str(mig)]))
     assert "⏳ 0001_a.sql" in result
-    assert "0 متطبقة، 1 في الانتظار" in result
+    assert "0 applied, 1 pending" in result
 
 
 def test_db_migrate_applies_in_order_and_is_idempotent(make_ctx, tmp_path):
@@ -145,10 +145,10 @@ def test_db_migrate_applies_in_order_and_is_idempotent(make_ctx, tmp_path):
 
     # second run: nothing new to apply
     result2 = dbp._cmd_db_migrate(make_ctx("db_migrate", [str(db), str(mig)]))
-    assert "مفيش جديد" in result2
+    assert "nothing new" in result2
 
     status = dbp._cmd_db_migration_status(make_ctx("db_migration_status", [str(db), str(mig)]))
-    assert "2 متطبقة، 0 في الانتظار، 0 فيها تعارض" in status
+    assert "2 applied, 0 pending, 0 with a checksum mismatch" in status
 
 
 def test_db_migrate_stops_on_sql_error_and_keeps_earlier_migrations(make_ctx, tmp_path):
@@ -184,7 +184,7 @@ def test_db_migrate_refuses_to_reapply_tampered_migration(make_ctx, tmp_path):
 
     status = dbp._cmd_db_migration_status(make_ctx("db_migration_status", [str(db), str(mig)]))
     assert "⚠️" in status
-    assert "0 متطبقة، 0 في الانتظار، 1 فيها تعارض" in status
+    assert "0 applied, 0 pending, 1 with a checksum mismatch" in status
 
 
 def test_db_indexes_lists_index_columns_and_uniqueness(make_ctx, tmp_path):
@@ -215,7 +215,7 @@ def test_db_indexes_flags_foreign_key_without_index(make_ctx, tmp_path):
     conn.close()
 
     result = dbp._cmd_db_indexes(make_ctx("db_indexes", [str(db)]))
-    assert "⚠️ عمود org_id" in result
+    assert "⚠️ column org_id" in result
     assert "orgs" in result
 
 

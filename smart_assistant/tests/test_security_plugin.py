@@ -167,7 +167,7 @@ def test_tls_check_warns_on_soon_expiring_cert(make_ctx, tmp_path):
     try:
         result = sp._cmd_tls_check(make_ctx("tls_check", ["localhost", str(port), "--insecure"]))
         assert "⚠️" in result
-        assert "هتنتهي" in result
+        assert "expires in" in result
     finally:
         server.close()
 
@@ -236,7 +236,7 @@ def test_file_perms_flags_readable_secret_file(make_ctx, tmp_path):
     f.write_text("SECRET_KEY=abc")
     f.chmod(0o644)
     result = sp._cmd_file_perms(make_ctx("file_perms", [str(f)]))
-    assert "حساس" in result
+    assert "sensitive file readable by others" in result
 
 
 def test_file_perms_directory_scan_flags_only_the_bad_file(make_ctx, tmp_path):
@@ -248,7 +248,7 @@ def test_file_perms_directory_scan_flags_only_the_bad_file(make_ctx, tmp_path):
     (tmp_path / "secret.txt").chmod(0o600)
     result = sp._cmd_file_perms(make_ctx("file_perms", [str(tmp_path)]))
     assert "🔍" in result
-    assert "1 مشكلة" in result
+    assert "1 permission problems" in result
     assert "worldwritable.txt" in result
     assert "normal.txt" not in result
     assert "secret.txt" not in result

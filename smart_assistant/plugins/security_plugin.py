@@ -31,7 +31,7 @@ def _cmd_hash_file(ctx) -> str:
     try:
         h = hashlib.new(algo)
     except ValueError:
-        return f"❌ خوارزمية غير مدعومة: {algo} (جرب: {', '.join(sorted(hashlib.algorithms_guaranteed))[:200]})"
+        return f"❌ unsupported algorithm: {algo} (try: {', '.join(sorted(hashlib.algorithms_guaranteed))[:200]})"
     try:
         with path.open("rb") as f:
             for chunk in iter(lambda: f.read(65536), b""):
@@ -43,23 +43,23 @@ def _cmd_hash_file(ctx) -> str:
 
 def _cmd_port_scan(ctx) -> str:
     if len(ctx.args) < 3:
-        return "usage: port_scan <host> <start_port> <end_port>  — لأجهزتك أو المصرح لك باختبارها بس"
+        return "usage: port_scan <host> <start_port> <end_port>  — your own machines, or ones you are authorised to test"
     host = ctx.args[0]
     try:
         start, end = int(ctx.args[1]), int(ctx.args[2])
     except ValueError:
-        return "❌ start_port و end_port لازم يكونوا أرقام"
+        return "❌ start_port and end_port must be numbers"
     if not (0 < start <= 65535 and 0 < end <= 65535):
-        return "❌ أرقام البورتات لازم تكون بين 1 و65535"
+        return "❌ port numbers must be between 1 and 65535"
     if end < start:
-        return "❌ end_port لازم يكون أكبر من أو يساوي start_port"
+        return "❌ end_port must be greater than or equal to start_port"
     if end - start + 1 > MAX_PORT_RANGE:
-        return f"❌ النطاق كبير أوي — الحد الأقصى {MAX_PORT_RANGE} بورت في المرة الواحدة"
+        return f"❌ range too large — at most {MAX_PORT_RANGE} ports at a time"
 
     try:
         socket.getaddrinfo(host, None)
     except socket.gaierror as e:
-        return f"❌ تعذر إيجاد المضيف {host}: {e}"
+        return f"❌ could not resolve host {host}: {e}"
 
     open_ports = []
     for port in range(start, end + 1):
@@ -71,8 +71,8 @@ def _cmd_port_scan(ctx) -> str:
         except OSError:
             continue
     if not open_ports:
-        return f"مفيش بورتات مفتوحة من {start} لـ {end} على {host}"
-    return f"🔓 بورتات مفتوحة على {host}: {', '.join(map(str, open_ports))}"
+        return f"No open ports between {start} and {end} on {host}"
+    return f"🔓 open ports on {host}: {', '.join(map(str, open_ports))}"
 
 
 def _decode_unverified_cert(der_bytes: bytes) -> dict:
@@ -105,9 +105,9 @@ def _cmd_tls_check(ctx) -> str:
         try:
             port = int(rest[0])
         except ValueError:
-            return "❌ port لازم يكون رقم"
+            return "❌ port must be a number"
     if not (0 < port <= 65535):
-        return "❌ port لازم يكون بين 1 و65535"
+        return "❌ port must be between 1 and 65535"
 
     context = ssl._create_unverified_context() if insecure else ssl.create_default_context()
     try:
@@ -119,11 +119,11 @@ def _cmd_tls_check(ctx) -> str:
             cert_der = tls_sock.getpeercert(binary_form=True)
             cipher = tls_sock.cipher()
     except ssl.SSLCertVerificationError as e:
-        return f"❌ الشهادة مش موثوقة/صالحة: {e.verify_message}\n💡 جرب tls_check {host} {port} --insecure عشان تشوف تفاصيلها برضو"
+        return f"❌ the certificate is not trusted or not valid: {e.verify_message}\n💡 try tls_check {host} {port} --insecure to inspect it anyway"
     except socket.gaierror as e:
-        return f"❌ تعذر إيجاد المضيف {host}: {e}"
+        return f"❌ could not resolve host {host}: {e}"
     except (TimeoutError, ConnectionRefusedError, OSError) as e:
-        return f"❌ تعذر الاتصال بـ {host}:{port}: {e}"
+        return f"❌ could not connect to {host}:{port}: {e}"
 
     if not cert and cert_der:
         try:
@@ -131,7 +131,7 @@ def _cmd_tls_check(ctx) -> str:
         except Exception:
             cert = None
     if not cert:
-        return f"⚠️ اتصل بـ {host}:{port} بس مفيش شهادة اتقرت (ممكن --insecure من غير شهادة سيرفر)"
+        return f"⚠️ connected to {host}:{port} but read no certificate (possibly --insecure with no server cert)"
 
     subject = ", ".join(f"{k}={v}" for pair in cert.get("subject", ()) for k, v in pair)
     issuer = ", ".join(f"{k}={v}" for pair in cert.get("issuer", ()) for k, v in pair)
@@ -151,13 +151,13 @@ def _cmd_tls_check(ctx) -> str:
         lines.append(f"  SAN: {', '.join(sans)}")
     if not_after is not None:
         if days_left < 0:
-            lines.append(f"  ❌ الشهادة منتهية من {-days_left} يوم (كانت لغاية {cert['notAfter']})")
+            lines.append(f"  ❌ expired {-days_left} days ago (was valid until {cert['notAfter']})")
         elif days_left < 30:
-            lines.append(f"  ⚠️ الشهادة هتنتهي بعد {days_left} يوم ({cert['notAfter']})")
+            lines.append(f"  ⚠️ expires in {days_left} days ({cert['notAfter']})")
         else:
-            lines.append(f"  ✅ صالحة لـ {days_left} يوم كمان (لغاية {cert['notAfter']})")
+            lines.append(f"  ✅ valid for another {days_left} days (until {cert['notAfter']})")
     if insecure:
-        lines.append("  ⚠️ اتعمل الفحص من غير التحقق من صحة الشهادة (--insecure)")
+        lines.append("  ⚠️ checked without verifying the certificate (--insecure)")
     return "\n".join(lines)
 
 
@@ -196,25 +196,25 @@ def _cmd_file_perms(ctx) -> str:
         if stat.S_ISREG(mode) and (mode & stat.S_ISGID):
             issues.append("SGID")
         if stat.S_ISREG(mode) and (mode & 0o777) == 0o777:
-            issues.append("777 (كل الصلاحيات للكل)")
+            issues.append("777 (everything, for everyone)")
         name_lower = p.name.lower()
         sensitive = any(kw in name_lower for kw in ("secret", "password", "credential", ".env", "id_rsa", "private_key"))
         if sensitive and (mode & (stat.S_IROTH | stat.S_IRGRP)):
-            issues.append("ملف حساس مقروء من غير المالك")
+            issues.append("sensitive file readable by others")
         if issues:
             findings.append((p, oct(mode & 0o7777), issues))
 
     if not findings:
-        summary = f"✅ فحصت {len(targets)} عنصر ({root}) — مفيش مشاكل صلاحيات ظاهرة"
-        return summary + ("\n⚠️ (فيه عناصر أكتر متفحصتش — النطاق محدود بـ " + str(MAX_FILE_PERMS_SCAN) + ")" if truncated else "")
+        summary = f"✅ checked {len(targets)} entries ({root}) — no obvious permission problems"
+        return summary + ("\n⚠️ (more entries were not checked — the scan is capped at " + str(MAX_FILE_PERMS_SCAN) + ")" if truncated else "")
 
-    lines = [f"🔍 فحصت {len(targets)} عنصر ولقيت {len(findings)} مشكلة صلاحيات في {root}:"]
+    lines = [f"🔍 checked {len(targets)} entries and found {len(findings)} permission problems in {root}:"]
     for p, mode_oct, issues in findings[:50]:
         lines.append(f"  ⚠️ {p} ({mode_oct}): {', '.join(issues)}")
     if len(findings) > 50:
-        lines.append(f"  ... و{len(findings) - 50} مشكلة تانية متعرضتش")
+        lines.append(f"  ... and {len(findings) - 50} more not shown")
     if truncated:
-        lines.append(f"⚠️ فيه عناصر أكتر متفحصتش — النطاق محدود بـ {MAX_FILE_PERMS_SCAN}")
+        lines.append(f"⚠️ more entries were not checked — the scan is capped at {MAX_FILE_PERMS_SCAN}")
     return "\n".join(lines)
 
 
