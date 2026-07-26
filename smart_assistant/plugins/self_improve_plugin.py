@@ -12,11 +12,24 @@ import json
 import urllib.error
 import urllib.request
 
+import brain
+
 OLLAMA_URL = "http://localhost:11434/api/generate"
 DEFAULT_MODEL = "llama3.2"
 
 
-def _ask_ollama(prompt: str, model: str = DEFAULT_MODEL) -> str:
+def _configured_model() -> str:
+    """اسم الموديل اللي المستخدم اختاره فعلاً لـ Ollama (عبر brain_model)،
+    مش قيمة ثابتة — عشان الأمر ده يستخدم نفس الموديل اللي الشات بيستخدمه،
+    ومايديش رسالة مضللة لو المستخدم عنده موديل تاني متحمّل غير الافتراضي."""
+    try:
+        cfg = brain.load_config()
+        return cfg.get("models", {}).get("ollama", DEFAULT_MODEL)
+    except Exception:
+        return DEFAULT_MODEL
+
+
+def _ask_ollama(prompt: str, model: str) -> str:
     payload = json.dumps({"model": model, "prompt": prompt, "stream": False}).encode("utf-8")
     req = urllib.request.Request(
         OLLAMA_URL, data=payload, headers={"Content-Type": "application/json"}
@@ -38,13 +51,24 @@ def _cmd_self_improve(ctx) -> str:
         "(new plugin commands, fixes) in at most 5 bullet points, written in Arabic.\n\n"
         f"Log:\n{transcript}"
     )
+    model = _configured_model()
     try:
-        suggestion = _ask_ollama(prompt)
+        suggestion = _ask_ollama(prompt, model)
+    except urllib.error.HTTPError as e:
+        # Ollama شغال ورد فعلاً، لكن بمشكلة (زي الموديل ده مش متحمّل) —
+        # ده مختلف تمامًا عن "مفيش Ollama خالص"، فمحتاج رسالة مختلفة.
+        if e.code == 404:
+            return (
+                f"⚠  Ollama is running, but the model '{model}' isn't pulled yet.\n"
+                f"Run: ollama pull {model}\n"
+                "(or switch the configured model with: brain_model ollama <name>)"
+            )
+        return f"❌ Ollama returned an error ({e.code}): {e}"
     except (urllib.error.URLError, ConnectionError, TimeoutError):
         return (
             "⚠  No local model running (Ollama) to suggest improvements.\n"
             "It is completely free — get it from https://ollama.com then run:\n"
-            f"   ollama pull {DEFAULT_MODEL}\n"
+            f"   ollama pull {model}\n"
             "Then try this command again."
         )
     except Exception as e:
