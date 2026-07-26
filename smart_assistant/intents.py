@@ -62,6 +62,30 @@ def normalize(text: str) -> str:
     return text
 
 
+# كلمات حشو مبتغيّرش المعنى. من غير شيلها، نمط زي "extract audio"
+# مبيطابقش "extract the audio" — وده كان بيخلي صيغ إنجليزية طبيعية
+# تمامًا تعدي للنموذج وتستهلك من الحصة بلا داعي. القياس (benchmark.py)
+# هو اللي كشف الحتة دي: نص الحالات الإنجليزية كانت بتفشل عشان "the".
+_FILLERS = (
+    "the", "a", "an", "this", "that", "these", "those",
+    "my", "your", "our", "some", "please", "just",
+    "ده", "دي", "دول", "بتاعي", "بتاع", "من فضلك", "لو سمحت",
+)
+_FILLER_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(w) for w in _FILLERS) + r")\b"
+)
+
+
+def match_form(text: str) -> str:
+    """الصيغة اللي بنطابق بيها الأنماط: مطبّعة + من غير كلمات الحشو.
+
+    منفصلة عن `normalize` عن قصد — الذاكرة المتعلّمة بتتخزن بالصيغة
+    المطبّعة الكاملة، فلو شيلنا الحشو منها كانت جملتين مختلفتين هيبقوا
+    مفتاح واحد.
+    """
+    return re.sub(r"\s+", " ", _FILLER_RE.sub(" ", normalize(text))).strip()
+
+
 # ── وصف الوسائط ──────────────────────────────────────────────────────
 
 FILE = "file"          # مسار ملف موجود — الواجهة بتفتح نافذة اختيار
@@ -168,7 +192,8 @@ RULES: tuple[IntentRule, ...] = (
         "probe",
         ("حلل الفيديو", "معلومات الفيديو", "تفاصيل الملف", "بيانات الفيديو",
          "الفيديو ده ايه", "probe", "media info", "what is this file",
-         "inspect .*(video|media|file)", "metadata"),
+         "inspect .*(video|media|file)", "metadata",
+         "check .*file", "look at .*(file|video)", "analyse", "analyze"),
         (ArgSpec(FILE, "pick_media", filetypes="media"),),
     ),
     IntentRule(
@@ -185,6 +210,13 @@ RULES: tuple[IntentRule, ...] = (
          "convert", "transcode", "change format"),
         (ArgSpec(FILE, "pick_media", filetypes="media"),
          ArgSpec(OUT, suffix="_converted")),
+    ),
+    IntentRule(
+        "trim",
+        ("اقص الفيديو", "اقص الملف", "قص جزء", "خد جزء من",
+         "trim", "cut .*(video|clip|audio)", "clip .*from"),
+        (ArgSpec(FILE, "pick_media", filetypes="media"),
+         ArgSpec(OUT, suffix="_trimmed")),
     ),
     IntentRule(
         "auto_trim_silence",
@@ -372,8 +404,10 @@ RULES: tuple[IntentRule, ...] = (
     IntentRule("plugins", ("الاضافات", "plugin", "extension")),
     IntentRule("skills", ("مهاراتك", "بتعرفي تعملي ايه", "skill", "what can you do")),
     IntentRule("help", ("الاوامر", "ساعديني", "ايه الاوامر", "قايمه الاوامر",
-     "help", "list command", "what command")),
-    IntentRule("todo", ("المهام", "قايمه المهام", "todo", "task list")),
+     "help", "list command", "what command", "list .*commands",
+     "show .*commands", "what can you do", "تقدري تعملي ايه")),
+    IntentRule("todo", ("المهام", "قايمه المهام", "todo", "task list",
+     "show .*task", "my tasks", "what.* to do", "الحاجات المطلوبه")),
     IntentRule("schedule", ("الجدوله", "المواعيد", "schedule", "cron", "remind me")),
     IntentRule("check_update", ("تحديث", "اصدار جديد", "update", "new version")),
     IntentRule("brain_status", ("حاله المخ", "المخ شغال", "الحصه",
@@ -548,13 +582,14 @@ def resolve(text: str, known_commands: set[str] | None = None) -> IntentMatch | 
     if cached and (not known_commands or cached in known_commands):
         return IntentMatch(cached, source="cache")
 
-    # 3) القاموس المنسّق
+    # 3) القاموس المنسّق — بنطابق على الصيغة اللي من غير كلمات الحشو
+    matchable = match_form(raw)
     best: tuple[int, IntentRule, str] | None = None
     for rule in RULES:
         if known_commands and rule.command not in known_commands:
             continue
         for pat in rule.patterns:
-            if re.search(pat, norm):
+            if re.search(pat, norm) or re.search(pat, matchable):
                 score = rule.priority * 100 + len(pat)
                 if best is None or score > best[0]:
                     best = (score, rule, pat)

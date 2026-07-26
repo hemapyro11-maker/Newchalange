@@ -10,6 +10,7 @@ brain_model, brain_mode, brain_local, brain_dict, brain_forget_dict
 """
 from __future__ import annotations
 
+import benchmark
 import brain
 import intents
 
@@ -226,6 +227,16 @@ def _cmd_brain_forget_dict(ctx) -> str:
     return f"🗑️ cleared {n} learned phrasings (the built-in dictionary is untouched)"
 
 
+def _cmd_benchmark(ctx) -> str:
+    """بيشغّل القياس الحقيقي. `--full` بيضيف نداء نموذج واحد لقياس الزمن."""
+    include_model = "--full" in ctx.args
+    results = benchmark.run(ctx.engine, include_model=include_model)
+    out = benchmark.report(results)
+    if not include_model:
+        out += "\n\n  Add --full to include one real model call (measures round-trip)."
+    return out
+
+
 def register(engine):
     r = engine.registry.register
     r("brain_setup", _cmd_brain_setup, "brain_setup — step-by-step guide to a free brain")
@@ -237,3 +248,4 @@ def register(engine):
     r("brain_local", _cmd_brain_local, "brain_local on|off — disable every cloud provider")
     r("brain_dict", _cmd_brain_dict, "brain_dict — local dictionary coverage and learned phrasings")
     r("brain_forget_dict", _cmd_brain_forget_dict, "brain_forget_dict — clear learned phrasings")
+    r("benchmark", _cmd_benchmark, "benchmark [--full] — measure Nezuko against a labelled task set")
