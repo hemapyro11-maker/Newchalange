@@ -1169,3 +1169,165 @@ def test_clone_voice_model_load_error_reported(make_ctx, tmp_path, monkeypatch, 
     result = vp._cmd_clone_voice(make_ctx("clone_voice", [str(f), "hi", str(tmp_path / "out.wav")]))
     assert result.startswith("❌")
     assert "boom" in result
+
+
+# ── دعم اللغتين في النطق ─────────────────────────────────────────────
+
+def test_detect_lang_arabic():
+    assert vp._detect_lang("افحص الملف ده") == "ar"
+
+
+def test_detect_lang_english():
+    assert vp._detect_lang("scan this file please") == "en"
+
+
+def test_detect_lang_mixed_counts_as_arabic():
+    """نص فيه حرف عربي واحد جوهره عربي — زي "افحص file.exe"."""
+    assert vp._detect_lang("افحص file.exe") == "ar"
+
+
+def test_detect_lang_empty_defaults_to_english():
+    assert vp._detect_lang("") == "en"
+
+
+def test_detect_lang_numbers_only():
+    assert vp._detect_lang("12345") == "en"
+
+
+def test_arabic_and_english_use_different_edge_voices():
+    """راجع: المحركات كانت مربوطة بالعربي بالإيد، فأي نص إنجليزي كان
+    بيتقري بصوت عربي — كلام مش مفهوم."""
+    assert vp._voice_for("ar")["edge"] != vp._voice_for("en")["edge"]
+    assert vp._voice_for("ar")["edge"].startswith("ar-")
+    assert vp._voice_for("en")["edge"].startswith("en-")
+
+
+def test_arabic_and_english_use_different_piper_models():
+    assert vp._voice_for("ar")["piper_name"] != vp._voice_for("en")["piper_name"]
+
+
+def test_arabic_and_english_use_different_espeak_voices():
+    assert vp._voice_for("ar")["espeak"] == "ar"
+    assert vp._voice_for("en")["espeak"] == "en-us"
+
+
+def test_unknown_language_falls_back_to_english():
+    assert vp._voice_for("fr") == vp._voice_for("en")
+
+
+def test_edge_synthesis_passes_the_english_voice(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_run(cmd, **kw):
+        captured["cmd"] = cmd
+        (tmp_path / "out.mp3").write_bytes(b"audio")
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(vp.shutil, "which", lambda name: "/usr/bin/edge-tts")
+    monkeypatch.setattr(vp.subprocess, "run", fake_run)
+    vp._synthesize_edge("hello world", tmp_path / "out.mp3", "en")
+    assert vp._voice_for("en")["edge"] in captured["cmd"]
+
+
+def test_edge_synthesis_passes_the_arabic_voice(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_run(cmd, **kw):
+        captured["cmd"] = cmd
+        (tmp_path / "out.mp3").write_bytes(b"audio")
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(vp.shutil, "which", lambda name: "/usr/bin/edge-tts")
+    monkeypatch.setattr(vp.subprocess, "run", fake_run)
+    vp._synthesize_edge("أهلاً بيك", tmp_path / "out.mp3", "ar")
+    assert vp._voice_for("ar")["edge"] in captured["cmd"]
+
+
+def test_espeak_synthesis_passes_the_right_voice_flag(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_run(cmd, **kw):
+        captured["cmd"] = cmd
+        (tmp_path / "out.wav").write_bytes(b"audio")
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(vp.shutil, "which", lambda name: "/usr/bin/espeak-ng")
+    monkeypatch.setattr(vp.subprocess, "run", fake_run)
+    vp._synthesize_espeak("hello", tmp_path / "out.wav", "en")
+    assert "en-us" in captured["cmd"]
+
+
+def test_fallback_detects_language_from_the_text(monkeypatch, tmp_path):
+    seen = {}
+
+    def fake_edge(text, out, lang="ar"):
+        seen["lang"] = lang
+        out.write_bytes(b"a")
+        return True
+
+    monkeypatch.setattr(vp, "_synthesize_edge", fake_edge)
+    vp._synthesize_with_fallback("hello there", tmp_path)
+    assert seen["lang"] == "en"
+
+    vp._synthesize_with_fallback("أهلاً بيك", tmp_path)
+    assert seen["lang"] == "ar"
+
+
+def test_explicit_language_overrides_detection(monkeypatch, tmp_path):
+    seen = {}
+
+    def fake_edge(text, out, lang="ar"):
+        seen["lang"] = lang
+        out.write_bytes(b"a")
+        return True
+
+    monkeypatch.setattr(vp, "_synthesize_edge", fake_edge)
+    # نص عربي بس المستخدم طلب إنجليزي صراحةً
+    vp._synthesize_with_fallback("أهلاً", tmp_path, "en")
+    assert seen["lang"] == "en"
+
+
+def test_backend_label_names_the_voice_actually_used(monkeypatch, tmp_path):
+    def fake_edge(text, out, lang="ar"):
+        out.write_bytes(b"a")
+        return True
+
+    monkeypatch.setattr(vp, "_synthesize_edge", fake_edge)
+    _path, label = vp._synthesize_with_fallback("hello", tmp_path)
+    assert vp._voice_for("en")["edge"] in label
+
+
+def test_speak_accepts_an_explicit_language_suffix(monkeypatch, make_ctx, tmp_path):
+    seen = {}
+
+    def fake_fallback(text, tmp, lang=None):
+        seen["text"], seen["lang"] = text, lang
+        return None
+
+    monkeypatch.setattr(vp, "_synthesize_with_fallback", fake_fallback)
+    vp._cmd_speak(make_ctx("speak أهلاً بيك lang=en", []))
+    assert seen["lang"] == "en"
+    assert seen["text"] == "أهلاً بيك"      # اللاحقة اتشالت من النص
+
+
+def test_speak_without_suffix_leaves_detection_to_the_backend(monkeypatch, make_ctx):
+    seen = {}
+    monkeypatch.setattr(
+        vp, "_synthesize_with_fallback",
+        lambda text, tmp, lang=None: seen.update(lang=lang) or None,
+    )
+    vp._cmd_speak(make_ctx("speak hello world", []))
+    assert seen["lang"] is None
+
+
+def test_speak_with_only_a_language_suffix_shows_usage(make_ctx):
+    assert vp._cmd_speak(make_ctx("speak lang=en", [])).startswith("usage")
+
+
+def test_piper_downloads_the_model_for_the_requested_language(monkeypatch, tmp_path):
+    urls = []
+    monkeypatch.setattr(vp, "_voice_cache_dir", lambda: tmp_path)
+    monkeypatch.setattr(vp, "_download", lambda url, dest: urls.append(url) or dest.write_bytes(b"m") or True)
+    vp._ensure_piper_voice("en")
+    assert any("en_US" in u for u in urls)
+    assert not any("ar_JO" in u for u in urls)

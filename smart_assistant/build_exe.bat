@@ -87,6 +87,8 @@ py -m PyInstaller ^
     --hidden-import sessions ^
     --hidden-import permissions ^
     --hidden-import hooks ^
+    --hidden-import agents ^
+    --hidden-import styles ^
     --collect-all CTkToolTip ^
     --collect-all mcp ^
     --collect-all capstone ^
@@ -111,6 +113,8 @@ py -m PyInstaller ^
     --add-data "sessions.py;." ^
     --add-data "permissions.py;." ^
     --add-data "hooks.py;." ^
+    --add-data "agents.py;." ^
+    --add-data "styles.py;." ^
     --add-data "version.py;." ^
     --add-data "version.json;." ^
     --add-data "connectors.example.json;." ^

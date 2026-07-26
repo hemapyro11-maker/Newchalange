@@ -33,3 +33,5 @@ smart_assistant/brain_state.json
 smart_assistant/intent_cache.json
 smart_assistant/sessions/
 smart_assistant/hooks.json
+smart_assistant/agents/
+smart_assistant/styles/

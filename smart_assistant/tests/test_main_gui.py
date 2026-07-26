@@ -81,21 +81,43 @@ def test_palette_has_every_colour_key_in_both_modes():
 
 # ── الاتجاه ──────────────────────────────────────────────────────────
 
+def test_english_is_the_default_and_flows_left_to_right(app):
+    assert app.t.lang == "en"
+    assert app._rtl is False
+    assert app._side == "left"
+    assert app._anchor == "w"
+    assert app._justify == "left"
+
+
 def test_arabic_flows_right_to_left(app):
+    app.t.set_lang("ar")
     assert app._rtl is True
     assert app._side == "right"
     assert app._anchor == "e"
     assert app._justify == "right"
 
 
-def test_english_flows_left_to_right(app):
-    app.t.set_lang("en")
-    assert app._side == "left"
-    assert app._anchor == "w"
+def test_entry_justifies_left_in_english(app):
+    assert app.entry.cget("justify") == "left"
 
 
-def test_entry_justifies_with_the_language(app):
-    assert app.entry.cget("justify") == "right"
+def test_language_choice_persists(app):
+    app._toggle_lang()
+    assert brain.load_config()["ui_lang"] == "ar"
+    assert app.t.lang == "ar"
+
+
+def test_every_key_exists_in_both_languages():
+    """أي مفتاح موجود في لغة ومفقود في التانية بيظهر إنجليزي فجأة
+    وسط واجهة عربية — بنتأكد إن المجموعتين متطابقتين."""
+    import i18n
+    assert set(i18n.STRINGS["en"]) == set(i18n.STRINGS["ar"])
+
+
+def test_missing_key_falls_back_to_english_not_blank():
+    import i18n
+    t = i18n.Translator("ar")
+    assert t.t("totally_unknown_key") == "totally_unknown_key"
 
 
 # ── أسطر المحادثة ────────────────────────────────────────────────────
@@ -149,7 +171,7 @@ def test_plugin_load_lines_go_to_the_status_line_not_the_stream(app):
 
 def test_plugin_count_appears_in_status_line(app):
     app._render_log("🧩 plugin loaded: x", "ok")
-    assert "إضافة" in app.status_label.cget("text")
+    assert "plugins" in app.status_label.cget("text")
 
 
 def test_a_normal_ok_message_is_still_shown(app):
@@ -170,7 +192,7 @@ def test_executed_command_renders_as_a_tool_line(app):
 
 def test_status_line_warns_when_no_brain(app):
     app._refresh_status()
-    assert "مفيش مخ" in app.status_label.cget("text")
+    assert "no brain" in app.status_label.cget("text")
 
 
 def test_status_line_shows_provider_and_quota(app):
@@ -178,7 +200,7 @@ def test_status_line_shows_provider_and_quota(app):
     app._refresh_status()
     text = app.status_label.cget("text")
     assert "groq" in text.lower()
-    assert "متبقي" in text
+    assert "left" in text
 
 
 def test_status_line_shows_active_modes(app):
@@ -188,7 +210,7 @@ def test_status_line_shows_active_modes(app):
     brain.save_config(cfg)
     app._refresh_status()
     text = app.status_label.cget("text")
-    assert "عميق" in text and "محلي" in text
+    assert "deep" in text and "local" in text
 
 
 # ── أوامر الشرطة المائلة ─────────────────────────────────────────────
@@ -292,7 +314,7 @@ def test_home_lists_every_section(app):
     app.update()
     panel = app._settings
     pages = {i["page"] for i in panel.data if i["kind"] == "goto"}
-    for key, _label in main_gui.SettingsPanel.PAGES:
+    for key in main_gui.SettingsPanel.PAGES:
         if key != "home":
             assert key in pages
     panel.close()
@@ -321,7 +343,7 @@ def test_back_returns_to_home(app):
     panel.close()
 
 
-@pytest.mark.parametrize("page", [k for k, _ in main_gui.SettingsPanel.PAGES])
+@pytest.mark.parametrize("page", main_gui.SettingsPanel.PAGES)
 def test_every_page_renders_without_error(app, page):
     app._open_settings()
     app.update()
@@ -498,7 +520,7 @@ def test_permissions_page_says_nothing_allowed_by_default(app):
     panel = app._settings
     panel.page = "permissions"
     panel._build()
-    assert any("كل حاجة بتتسأل" in i["label"] for i in panel.data)
+    assert any("everything asks" in i["label"] for i in panel.data)
     panel.close()
 
 

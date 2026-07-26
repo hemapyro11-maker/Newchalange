@@ -31,6 +31,7 @@ import hooks
 import intents
 import permissions
 import sessions
+import styles
 
 log = logging.getLogger("assistant.core")
 
@@ -551,8 +552,13 @@ class AssistantEngine:
             )
             return
 
+        style = styles.prompt_for()
         messages = [
-            {"role": "system", "content": _SYSTEM_PROMPT + "\nالأوامر المتاحة:\n" + self._tool_catalog()},
+            {"role": "system", "content": (
+                _SYSTEM_PROMPT
+                + (f"\n{style}\n" if style else "")
+                + "\nالأوامر المتاحة:\n" + self._tool_catalog()
+            )},
             *self.chat_history[-_MAX_CHAT_TURNS:],
             {"role": "user", "content": text},
         ]

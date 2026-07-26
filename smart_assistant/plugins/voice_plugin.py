@@ -91,6 +91,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -113,10 +114,48 @@ except ImportError:
     KeyringError = Exception
     _HAS_KEYRING = False
 
-EDGE_VOICE = "ar-EG-SalmaNeural"
-PIPER_VOICE_NAME = "ar_JO-kareem-medium"
-PIPER_MODEL_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/ar/ar_JO/kareem/medium/ar_JO-kareem-medium.onnx?download=true"
-PIPER_CONFIG_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/ar/ar_JO/kareem/medium/ar_JO-kareem-medium.onnx.json?download=true.json"
+# ── أصوات لكل لغة ────────────────────────────────────────────────────
+# نيزوكو بتتكلم عربي وإنجليزي. قبل كده كل المحركات كانت مربوطة بالعربي
+# بالإيد، فأي نص إنجليزي كان بيتقري بصوت عربي — كلام مش مفهوم.
+# دلوقتي اللغة بتتحدد من النص نفسه (_detect_lang) وكل محرك بياخد
+# الصوت المناسب ليها.
+
+_VOICES = {
+    "ar": {
+        "edge": "ar-EG-SalmaNeural",          # مصري أنثوي طبيعي
+        "espeak": "ar",
+        "piper_name": "ar_JO-kareem-medium",
+        "piper_base": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/ar/ar_JO/kareem/medium/ar_JO-kareem-medium",
+    },
+    "en": {
+        "edge": "en-US-AriaNeural",           # أمريكي أنثوي طبيعي
+        "espeak": "en-us",
+        "piper_name": "en_US-amy-medium",
+        "piper_base": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/amy/medium/en_US-amy-medium",
+    },
+}
+
+# للتوافق مع الكود القديم/الاختبارات اللي بتشاور على الاسم ده
+EDGE_VOICE = _VOICES["ar"]["edge"]
+PIPER_VOICE_NAME = _VOICES["ar"]["piper_name"]
+PIPER_MODEL_URL = _VOICES["ar"]["piper_base"] + ".onnx?download=true"
+PIPER_CONFIG_URL = _VOICES["ar"]["piper_base"] + ".onnx.json?download=true.json"
+
+_ARABIC_RANGE = re.compile(r"[\u0600-\u06FF]")
+
+
+def _detect_lang(text: str) -> str:
+    """بيحدد لغة النص من الحروف نفسها.
+
+    مش محتاج مكتبة ولا نموذج: وجود حرف عربي واحد كفاية يخلي النص عربي
+    (النصوص المختلطة زي "افحص file.exe" عربية في جوهرها). أي حاجة تانية
+    بتتعامل كإنجليزي.
+    """
+    return "ar" if _ARABIC_RANGE.search(text or "") else "en"
+
+
+def _voice_for(lang: str) -> dict:
+    return _VOICES.get(lang, _VOICES["en"])
 
 _NETWORK_TIMEOUT = 20
 _SYNTH_TIMEOUT = 30
@@ -228,26 +267,33 @@ def _download(url: str, dest: pathlib.Path) -> bool:
         return False
 
 
-def _ensure_piper_voice() -> tuple[pathlib.Path, pathlib.Path] | None:
+def _ensure_piper_voice(lang: str = "ar") -> tuple[pathlib.Path, pathlib.Path] | None:
+    """بينزّل صوت Piper الخاص باللغة دي مرة واحدة ويخزّنه.
+
+    كل لغة ليها نموذجها — نموذج عربي مينفعش ينطق إنجليزي والعكس.
+    """
+    voice = _voice_for(lang)
     d = _voice_cache_dir()
-    model = d / f"{PIPER_VOICE_NAME}.onnx"
-    config = d / f"{PIPER_VOICE_NAME}.onnx.json"
+    name = voice["piper_name"]
+    model = d / f"{name}.onnx"
+    config = d / f"{name}.onnx.json"
     if model.is_file() and config.is_file():
         return model, config
-    if not _download(PIPER_MODEL_URL, model):
+    if not _download(voice["piper_base"] + ".onnx?download=true", model):
         return None
-    if not _download(PIPER_CONFIG_URL, config):
+    if not _download(voice["piper_base"] + ".onnx.json?download=true.json", config):
         model.unlink(missing_ok=True)
         return None
     return model, config
 
 
-def _synthesize_edge(text: str, out_path: pathlib.Path) -> bool:
+def _synthesize_edge(text: str, out_path: pathlib.Path, lang: str = "ar") -> bool:
     if not shutil.which("edge-tts"):
         return False
     try:
         proc = subprocess.run(
-            ["edge-tts", "-t", text, "-v", EDGE_VOICE, "--write-media", str(out_path)],
+            ["edge-tts", "-t", text, "-v", _voice_for(lang)["edge"],
+             "--write-media", str(out_path)],
             capture_output=True, text=True, timeout=_SYNTH_TIMEOUT,
         )
     except subprocess.TimeoutExpired:
@@ -255,10 +301,10 @@ def _synthesize_edge(text: str, out_path: pathlib.Path) -> bool:
     return proc.returncode == 0 and out_path.is_file() and out_path.stat().st_size > 0
 
 
-def _synthesize_piper(text: str, out_path: pathlib.Path) -> bool:
+def _synthesize_piper(text: str, out_path: pathlib.Path, lang: str = "ar") -> bool:
     if not shutil.which("piper"):
         return False
-    voice = _ensure_piper_voice()
+    voice = _ensure_piper_voice(lang)
     if voice is None:
         return False
     model, config = voice
@@ -272,12 +318,12 @@ def _synthesize_piper(text: str, out_path: pathlib.Path) -> bool:
     return proc.returncode == 0 and out_path.is_file() and out_path.stat().st_size > 0
 
 
-def _synthesize_espeak(text: str, out_path: pathlib.Path) -> bool:
+def _synthesize_espeak(text: str, out_path: pathlib.Path, lang: str = "ar") -> bool:
     if not shutil.which("espeak-ng"):
         return False
     try:
         proc = subprocess.run(
-            ["espeak-ng", "-v", "ar", "-s", "155", "-p", "70", "-w", str(out_path), text],
+            ["espeak-ng", "-v", _voice_for(lang)["espeak"], "-s", "155", "-p", "70", "-w", str(out_path), text],
             capture_output=True, text=True, timeout=_SYNTH_TIMEOUT,
         )
     except subprocess.TimeoutExpired:
@@ -287,18 +333,27 @@ def _synthesize_espeak(text: str, out_path: pathlib.Path) -> bool:
 
 # الترتيب بيمثّل أولوية الجودة الحقيقية: صوت أنثوي مصري طبيعي أولاً،
 # وبعدين احتياطي محلي أفضل من إسبيك، وأخيرًا الضمانة اللي بتشتغل دايمًا.
+# بنخزّن **أسماء** الدوال مش الدوال نفسها، وبنجيبها وقت النداء.
+# لو خزّنّا المرجع نفسه هنا، القايمة بتتجمّد على النسخة الموجودة وقت
+# الاستيراد — فمينفعش تستبدل محرك (لا في اختبار ولا في تخصيص).
 _BACKENDS = [
-    ("edge-tts (ar-EG-SalmaNeural — صوت مصري أنثوي)", _synthesize_edge, ".mp3"),
-    ("Piper (ar_JO-kareem — صوت عربي محلي)", _synthesize_piper, ".wav"),
-    ("espeak-ng (احتياطي محلي دايمًا شغال)", _synthesize_espeak, ".wav"),
+    ("edge-tts", "_synthesize_edge", ".mp3"),
+    ("Piper", "_synthesize_piper", ".wav"),
+    ("espeak-ng", "_synthesize_espeak", ".wav"),
 ]
 
 
-def _synthesize_with_fallback(text: str, tmp_dir: pathlib.Path) -> tuple[pathlib.Path, str] | None:
-    for label, synth_fn, ext in _BACKENDS:
+def _synthesize_with_fallback(text: str, tmp_dir: pathlib.Path,
+                              lang: str | None = None) -> tuple[pathlib.Path, str] | None:
+    lang = lang or _detect_lang(text)
+    voice = _voice_for(lang)
+    for label, fn_name, ext in _BACKENDS:
+        synth_fn = globals()[fn_name]
         out_path = tmp_dir / f"speech{ext}"
-        if synth_fn(text, out_path):
-            return out_path, label
+        if synth_fn(text, out_path, lang):
+            name = {"edge-tts": voice["edge"], "Piper": voice["piper_name"],
+                    "espeak-ng": voice["espeak"]}[label]
+            return out_path, f"{label} ({name})"
     return None
 
 
@@ -306,10 +361,21 @@ def _cmd_speak(ctx) -> str:
     parts = ctx.raw.split(maxsplit=1)
     text = parts[1].strip() if len(parts) > 1 else ""
     if not text:
-        return "usage: speak <نص>"
+        return "usage: speak <text>  |  speak <نص>   [lang=ar|en]"
+
+    # lang=xx صريحة بتتقدّم على الاكتشاف التلقائي — مفيدة للنصوص
+    # المختلطة اللي الاكتشاف ممكن يقراها غلط
+    lang = None
+    for token in ("lang=ar", "lang=en"):
+        if text.endswith(token):
+            lang = token.split("=")[1]
+            text = text[: -len(token)].strip()
+            break
+    if not text:
+        return "usage: speak <text>  |  speak <نص>   [lang=ar|en]"
 
     with tempfile.TemporaryDirectory(prefix="nezuko_speech_") as tmp:
-        result = _synthesize_with_fallback(text, pathlib.Path(tmp))
+        result = _synthesize_with_fallback(text, pathlib.Path(tmp), lang)
         if result is None:
             return (
                 "❌ كل محركات النطق فشلت — مفيش إنترنت لـ edge-tts، Piper مش متثبت/مش قادر "
