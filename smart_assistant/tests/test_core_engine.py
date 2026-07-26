@@ -407,7 +407,10 @@ def test_gui_file_hook_is_used_when_available(bare_engine, monkeypatch):
     asked = {}
     bare_engine.on_need_file = lambda spec, cb: asked.update(prompt=spec.prompt)
     bare_engine._dispatch("افحص ملف فيروسات")
-    assert "اختار" in asked["prompt"]
+    # الـ prompt مفتاح ترجمة مش نص جاهز — الواجهة هي اللي بتترجمه
+    # بلغتها، فنفس القاعدة بتخدم اللغتين من غير تكرار
+    import i18n
+    assert asked["prompt"] in i18n.STRINGS["en"]
 
 
 def test_learned_phrase_resolves_locally_afterwards(bare_engine, monkeypatch):
@@ -606,7 +609,7 @@ def test_reply_a_is_refused_for_a_never_allowed_command(bare_engine, monkeypatch
     bare_engine._converse("شغّل حاجة")
     bare_engine._dispatch("a")
     assert permissions.is_allowed("run") is False
-    assert any("مينفعش" in msg for _, msg in logs)
+    assert any("never be allowed" in msg for _, msg in logs)
 
 
 def test_confirm_prompt_mentions_the_always_option(bare_engine, monkeypatch):
@@ -673,3 +676,75 @@ def test_startup_hook_fires_on_start(bare_engine, monkeypatch, tmp_path):
     bare_engine.stop()
     time.sleep(0.3)
     assert any("بدأنا" in msg for _, msg in logs)
+
+
+# ── الرد بلغة المستخدم ───────────────────────────────────────────────
+
+def test_system_prompt_tells_the_model_to_mirror_the_user_language(bare_engine, monkeypatch):
+    """راجع: تعليمات النظام كانت مكتوبة بالعربي، فنيزوكو كانت بترد
+    عربي حتى لو المستخدم كتب إنجليزي."""
+    captured = {}
+    monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
+    monkeypatch.setattr(
+        brain.Brain, "chat",
+        lambda self, messages, **kw: captured.setdefault("m", messages)
+        and None or brain.BrainReply(text="ok", label="X"),
+    )
+    bare_engine._converse("hello there")
+    system = captured["m"][0]["content"]
+    assert "same language the user wrote in" in system
+    assert "Egyptian Arabic" in system
+
+
+def test_system_prompt_is_not_hardcoded_to_one_language(bare_engine, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
+    monkeypatch.setattr(
+        brain.Brain, "chat",
+        lambda self, messages, **kw: captured.setdefault("m", messages)
+        and None or brain.BrainReply(text="ok", label="X"),
+    )
+    bare_engine._converse("x")
+    system = captured["m"][0]["content"]
+    # التعليمات نفسها إنجليزية، فمش بتجرّ النموذج للعربي
+    assert "أنتي نيزوكو" not in system
+
+
+def test_english_phrase_resolves_locally_without_the_brain(bare_engine, monkeypatch):
+    """الإدخال الإنجليزي لازم يتحل من القاموس المحلي زي العربي
+    بالظبط — بصفر حصة."""
+    called = {"brain": False}
+    monkeypatch.setattr(
+        brain.Brain, "ready",
+        lambda self: called.__setitem__("brain", True) or True,
+    )
+    bare_engine.registry.register("env_check", lambda ctx: "env fine")
+    logs = []
+    bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
+
+    bare_engine._dispatch("what is installed")
+    assert any("env fine" in msg for _, msg in logs)
+    assert called["brain"] is False
+
+
+def test_english_and_arabic_reach_the_same_command(bare_engine, monkeypatch):
+    _no_brain(monkeypatch)
+    seen = []
+    monkeypatch.setattr(
+        bare_engine, "_execute",
+        lambda name, args, raw: seen.append(name),
+    )
+    bare_engine.registry.register("virus_scan", lambda ctx: "x")
+    bare_engine._dispatch("scan /a/b.exe for malware")
+    bare_engine._dispatch("افحص /a/b.exe فيروسات")
+    assert seen == ["virus_scan", "virus_scan"]
+
+
+def test_cancel_works_in_both_languages(bare_engine, monkeypatch):
+    _no_brain(monkeypatch)
+    bare_engine.registry.register("virus_scan", lambda ctx: "should not run")
+    for word in ("cancel", "إلغاء"):
+        bare_engine._dispatch("scan a file for malware")
+        assert bare_engine._pending_args is not None
+        bare_engine._dispatch(word)
+        assert bare_engine._pending_args is None

@@ -1331,3 +1331,31 @@ def test_piper_downloads_the_model_for_the_requested_language(monkeypatch, tmp_p
     vp._ensure_piper_voice("en")
     assert any("en_US" in u for u in urls)
     assert not any("ar_JO" in u for u in urls)
+
+
+def test_arabic_reply_gets_the_arabic_voice_end_to_end(monkeypatch, tmp_path):
+    """السلسلة كاملة: رد المخ بالعربي → النطق يختار الصوت العربي.
+    ده اللي بيخلي 'اتكلم معاها عربي ترد عربي' مسموع مش مكتوب بس."""
+    seen = {}
+
+    def fake_edge(text, out, lang="ar"):
+        seen["lang"] = lang
+        out.write_bytes(b"a")
+        return True
+
+    monkeypatch.setattr(vp, "_synthesize_edge", fake_edge)
+    vp._synthesize_with_fallback("أهلاً! أنا تمام الحمد لله", tmp_path)
+    assert seen["lang"] == "ar"
+
+
+def test_english_reply_gets_the_english_voice_end_to_end(monkeypatch, tmp_path):
+    seen = {}
+
+    def fake_edge(text, out, lang="ar"):
+        seen["lang"] = lang
+        out.write_bytes(b"a")
+        return True
+
+    monkeypatch.setattr(vp, "_synthesize_edge", fake_edge)
+    vp._synthesize_with_fallback("Hi! I'm doing well, thanks", tmp_path)
+    assert seen["lang"] == "en"

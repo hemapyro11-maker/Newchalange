@@ -32,6 +32,12 @@ import intents
 import permissions
 import sessions
 import styles
+from i18n import Translator
+
+# لغة الرسايل اللي المحرك نفسه بيطبعها (مش ردود المخ — دي بتقلّد
+# لغة المستخدم). بتتقرا من نفس إعداد الواجهة.
+def _tr(key: str) -> str:
+    return Translator(brain.load_config().get("ui_lang", "en")).t(key)
 
 log = logging.getLogger("assistant.core")
 
@@ -73,15 +79,20 @@ _CONFIRM_ALWAYS = {"a", "always", "دايما", "دايمًا", "اسمح"}
 _MAX_CHAT_TURNS = 30
 
 _SYSTEM_PROMPT = (
-    "أنتي نيزوكو، مساعدة ذكية مصرية بتتكلمي عامية مصرية طبيعية ومختصرة. "
-    "بتشتغلي جوه برنامج على جهاز المستخدم، وعندك أدوات حقيقية تقدري تشغّليها.\n\n"
-    "لو المستخدم عايز حاجة محتاجة أداة، اكتبي سطر لوحده بالشكل ده بالظبط:\n"
-    "TOOL: <اسم_الأمر> <الوسائط>\n\n"
-    "قواعد مهمة:\n"
-    "- استخدمي بس الأوامر الموجودة في القايمة تحت. متخترعيش أسماء أوامر.\n"
-    "- لو السؤال عادي (سلام، رأي، شرح) جاوبي عادي من غير أي TOOL.\n"
-    "- سطر TOOL لازم يكون آخر حاجة في ردك، ومعاه سطر واحد بس بيشرح ليه.\n"
-    "- متقوليش إنك نفّذتي حاجة — المستخدم لازم يأكّد الأول.\n"
+    "You are Nezuko, an assistant running inside an app on the user's own "
+    "machine, with real tools you can propose running.\n\n"
+    "**Answer in the same language the user wrote in.** If they write in "
+    "Arabic, answer in natural Egyptian Arabic. If they write in English, "
+    "answer in English. Match them every time — never switch on your own, "
+    "and never answer in a language they did not use.\n\n"
+    "To run a tool, write a line on its own exactly like this:\n"
+    "TOOL: <command_name> <arguments>\n\n"
+    "Rules:\n"
+    "- Use only commands from the list below. Never invent a command name.\n"
+    "- For ordinary questions (a greeting, an opinion, an explanation) just "
+    "answer — no TOOL line.\n"
+    "- The TOOL line goes last, with one short line above it saying why.\n"
+    "- Never claim you ran something. The user confirms first.\n"
 )
 
 
@@ -461,8 +472,8 @@ class AssistantEngine:
             # الواجهة هتفتح نافذة اختيار — أسرع وأنضف من كتابة المسار
             self.on_need_file(spec, self._submit_arg_value)
             return
-        prompt = spec.prompt or "محتاجة الحاجة الناقصة دي"
-        self._log(f"📝 {prompt} — ابعتهالي في رسالة جاية (أو اكتب: إلغاء)", "warn")
+        prompt = _tr(spec.prompt) if spec.prompt else _tr("pick_file")
+        self._log(f"📝 {prompt}  —  reply with it, or type cancel", "warn")
 
     def _submit_arg_value(self, value: str):
         """بتتنادى من الواجهة لما المستخدم يختار ملف من النافذة."""
@@ -474,7 +485,7 @@ class AssistantEngine:
     def _fill_pending_arg(self, text: str) -> bool:
         """بتحط قيمة في أول وسيطة ناقصة. بترجع True لو استهلكت الرسالة."""
         command, args, missing, original = self._pending_args
-        if intents.normalize(text) in {"الغاء", "إلغاء", "cancel", "لا"}:
+        if intents.normalize(text) in {"الغاء", "cancel", "لا", "stop"}:
             self._pending_args = None
             self._log("❌ اتلغى", "info")
             return True
@@ -490,7 +501,7 @@ class AssistantEngine:
             if nxt.kind in (intents.FILE, intents.DIR) and callable(self.on_need_file):
                 self.on_need_file(nxt, self._submit_arg_value)
             else:
-                self._log(f"📝 {nxt.prompt or 'الحاجة الجاية'}", "warn")
+                self._log(f"📝 {_tr(nxt.prompt) if nxt.prompt else _tr('pick_file')}", "warn")
             return True
 
         self._pending_args = None

@@ -54,21 +54,21 @@ def allow(command: str) -> tuple[bool, str]:
     """بيضيف أمر للقايمة. بيرجع (نجح، رسالة)."""
     name = command.lower().strip()
     if not name:
-        return False, "اسم فاضي"
+        return False, "empty name"
     if name in _NEVER:
         return False, (
-            f"❌ {name} مينفعش يتسمح أبدًا — بينفذ كود أو بيوصل لحاجة "
-            "بمدخلات حرة، فمحتاج موافقتك في كل مرة."
+            f"❌ {name} can never be allowed — it executes code or takes "
+            "free-form input, so it needs your approval every time."
         )
     with _lock:
         cfg = brain.load_config()
         current = set(cfg.get("allowed_commands", []))
         if name in current:
-            return True, f"{name} مسموح بالفعل"
+            return True, f"{name} is already allowed"
         current.add(name)
         cfg["allowed_commands"] = sorted(current)
         brain.save_config(cfg)
-    return True, f"✅ {name} هيتنفذ من غير سؤال من دلوقتي"
+    return True, f"✅ {name} will run without asking from now on"
 
 
 def revoke(command: str) -> bool:

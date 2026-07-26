@@ -433,10 +433,15 @@ class AssistantApp(ctk.CTk):
 
     def _pick_file(self, spec, callback):
         self._hide_thinking()
+        # spec.prompt مفتاح ترجمة مش نص جاهز — عشان نافذة الاختيار
+        # تتكلم بلغة الواجهة زي أي حاجة تانية
+        title = self.t.t(spec.prompt) if spec.prompt else self.t.t(
+            "pick_dir" if spec.kind == "dir" else "pick_file"
+        )
         if spec.kind == "dir":
-            path = filedialog.askdirectory(title=spec.prompt or self.t.t("pick_dir"))
+            path = filedialog.askdirectory(title=title)
         else:
-            path = filedialog.askopenfilename(title=spec.prompt or self.t.t("pick_file"))
+            path = filedialog.askopenfilename(title=title)
         if path:
             self._add_user(f"📄 {path}")
             self._show_thinking()

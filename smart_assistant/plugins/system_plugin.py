@@ -20,33 +20,33 @@ import sessions
 def _cmd_sessions(ctx) -> str:
     rows = sessions.list_all()
     if not rows:
-        return "مفيش محادثات محفوظة لسه."
-    lines = [f"💬 {len(rows)} محادثة محفوظة:\n"]
+        return "No saved conversations yet."
+    lines = [f"💬 {len(rows)} saved conversations:\n"]
     for s in rows[:20]:
         lines.append(
             f"  {s['id']}\n"
             f"    {s['title']}\n"
-            f"    {s['turns']} دور · {sessions.relative_time(s['updated'])}"
+            f"    {s['turns']} turns · {sessions.relative_time(s['updated'])}"
         )
     if len(rows) > 20:
-        lines.append(f"\n… و{len(rows) - 20} كمان")
-    lines.append("\nلفتح واحدة: session_open <id>   ·   من الواجهة: /resume")
+        lines.append(f"\n… and {len(rows) - 20} more")
+    lines.append("\nOpen one: session_open <id>   ·   in the UI: /resume")
     return "\n".join(lines)
 
 
 def _cmd_session_open(ctx) -> str:
     if not ctx.args:
-        return "usage: session_open <id>   (شوف sessions للقايمة)"
+        return "usage: session_open <id>   (see: sessions)"
     session_id = ctx.args[0]
     messages = sessions.load(session_id)
     if messages is None:
-        return f"❌ مفيش محادثة بالمعرّف ده: {session_id}"
+        return f"❌ no conversation with that id: {session_id}"
     ctx.engine.session_id = session_id
     ctx.engine.chat_history = list(messages)
     meta = sessions.meta(session_id) or {}
     return (
-        f"✅ اتفتحت: {meta.get('title', '—')}\n"
-        f"   {len(messages)} رسالة · هكمّل من عندها."
+        f"✅ opened: {meta.get('title', '—')}\n"
+        f"   {len(messages)} messages · continuing from there."
     )
 
 
@@ -54,31 +54,31 @@ def _cmd_session_delete(ctx) -> str:
     if not ctx.args:
         return "usage: session_delete <id|--all>"
     if ctx.args[0] == "--all":
-        return f"🗑️ اتمسحت {sessions.delete_all()} محادثة"
+        return f"🗑️ deleted {sessions.delete_all()} conversations"
     ok = sessions.delete(ctx.args[0])
-    return "🗑️ اتمسحت" if ok else f"❌ مفيش محادثة بالمعرّف ده: {ctx.args[0]}"
+    return "🗑️ deleted" if ok else f"❌ no conversation with that id: {ctx.args[0]}"
 
 
 # ── الصلاحيات ────────────────────────────────────────────────────────
 
 def _cmd_allow(ctx) -> str:
     if not ctx.args:
-        return "usage: allow <command>   (بيخلي الأمر يعدي من غير سؤال)"
+        return "usage: allow <command>   (lets that command run without asking)"
     ok, message = permissions.allow(ctx.args[0])
     return message if ok else message
 
 
 def _cmd_allow_list(ctx) -> str:
     allowed = sorted(permissions.allowed())
-    lines = ["🔓 أوامر بتعدي من غير سؤال:"]
+    lines = ["🔓 Commands that run without asking:"]
     if allowed:
         lines += [f"  • {name}" for name in allowed]
     else:
-        lines.append("  (مفيش — كل حاجة بتتسأل، وده الافتراضي الآمن)")
-    lines.append("\n🔒 ممنوعة نهائيًا مهما حصل:")
-    lines.append("  " + "، ".join(sorted(permissions.never_allowed())))
+        lines.append("  (none — everything asks, which is the safe default)")
+    lines.append("\n🔒 Never allowed, no matter what:")
+    lines.append("  " + ", ".join(sorted(permissions.never_allowed())))
     lines.append(
-        "\nدي بتنفذ كود أو بتوصل لحاجة بمدخلات حرة — محتاجة موافقتك كل مرة."
+        "\nThese execute code or take free-form input — they need your approval every time."
     )
     return "\n".join(lines)
 
@@ -87,9 +87,9 @@ def _cmd_disallow(ctx) -> str:
     if not ctx.args:
         return "usage: disallow <command|--all>"
     if ctx.args[0] == "--all":
-        return f"🔒 اتسحبت {permissions.revoke_all()} صلاحية"
+        return f"🔒 revoked {permissions.revoke_all()} permissions"
     ok = permissions.revoke(ctx.args[0])
-    return "🔒 اتسحبت الصلاحية" if ok else f"❌ {ctx.args[0]} مش في القايمة أصلاً"
+    return "🔒 permission revoked" if ok else f"❌ {ctx.args[0]} was not in the list"
 
 
 # ── الأحداث ──────────────────────────────────────────────────────────
@@ -101,7 +101,7 @@ def _cmd_hook(ctx) -> str:
         "  hook add <event> <command...>\n"
         "  hook remove <event> <command...>\n"
         "  hook clear\n"
-        f"الأحداث: {', '.join(hooks.EVENTS)}"
+        f"events: {', '.join(hooks.EVENTS)}"
     )
     if not ctx.args:
         return usage
@@ -109,7 +109,7 @@ def _cmd_hook(ctx) -> str:
 
     if action == "list":
         data = hooks.load()
-        lines = ["🪝 الأحداث المربوطة:"]
+        lines = ["🪝 Bound hooks:"]
         total = 0
         for event in hooks.EVENTS:
             if data[event]:
@@ -118,12 +118,12 @@ def _cmd_hook(ctx) -> str:
                     lines.append(f"    → {cmd}")
                 total += len(data[event])
         if not total:
-            lines.append("  (مفيش حاجة مربوطة)")
-        lines.append("\n💡 {command} في نص الـ hook بتتبدل باسم الأمر اللي شغّله")
+            lines.append("  (nothing bound)")
+        lines.append("\n💡 {command} in a hook is replaced with the command that fired it")
         return "\n".join(lines)
 
     if action == "clear":
-        return f"🗑️ اتفك {hooks.clear()} ربط"
+        return f"🗑️ unbound {hooks.clear()} hooks"
 
     if action in ("add", "remove"):
         if len(ctx.args) < 3:
@@ -133,17 +133,17 @@ def _cmd_hook(ctx) -> str:
             _ok, message = hooks.add(event, command)
             return message
         ok = hooks.remove(event, command)
-        return "🗑️ اتفك الربط" if ok else "❌ الربط ده مش موجود"
+        return "🗑️ unbound" if ok else "❌ no such hook"
 
     return usage
 
 
 def register(engine):
     r = engine.registry.register
-    r("sessions", _cmd_sessions, "sessions — كل المحادثات المحفوظة")
-    r("session_open", _cmd_session_open, "session_open <id> — افتح محادثة محفوظة وكمّل عليها")
-    r("session_delete", _cmd_session_delete, "session_delete <id|--all> — امسح محادثة")
-    r("allow", _cmd_allow, "allow <command> — خلي الأمر ده يعدي من غير سؤال")
-    r("allow_list", _cmd_allow_list, "allow_list — الأوامر المسموحة والممنوعة نهائيًا")
-    r("disallow", _cmd_disallow, "disallow <command|--all> — اسحب السماح")
-    r("hook", _cmd_hook, "hook list|add|remove|clear — اربط أوامر بأحداث نيزوكو")
+    r("sessions", _cmd_sessions, "sessions — every saved conversation")
+    r("session_open", _cmd_session_open, "session_open <id> — reopen a conversation and continue")
+    r("session_delete", _cmd_session_delete, "session_delete <id|--all> — delete a conversation")
+    r("allow", _cmd_allow, "allow <command> — let this command run without asking")
+    r("allow_list", _cmd_allow_list, "allow_list — what is allowed and what never can be")
+    r("disallow", _cmd_disallow, "disallow <command|--all> — revoke permission")
+    r("hook", _cmd_hook, "hook list|add|remove|clear — bind commands to events")

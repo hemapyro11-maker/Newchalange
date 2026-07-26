@@ -64,17 +64,17 @@ def _save(data: dict[str, list[str]]) -> None:
 
 def add(event: str, command: str) -> tuple[bool, str]:
     if event not in EVENTS:
-        return False, f"❌ حدث مش معروف: {event} (المتاح: {', '.join(EVENTS)})"
+        return False, f"❌ unknown event: {event} (available: {', '.join(EVENTS)})"
     command = command.strip()
     if not command:
-        return False, "❌ الأمر فاضي"
+        return False, "❌ empty command"
     with _lock:
         data = load()
         if command in data[event]:
-            return True, "مربوط بالفعل"
+            return True, "already bound"
         data[event].append(command)
         _save(data)
-    return True, f"✅ اتربط بـ {event}: {command}"
+    return True, f"✅ bound to {event}: {command}"
 
 
 def remove(event: str, command: str) -> bool:

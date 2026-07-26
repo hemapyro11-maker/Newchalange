@@ -27,7 +27,7 @@ def _msgs(*texts):
 # ── الجلسات ──────────────────────────────────────────────────────────
 
 def test_sessions_empty_message(make_ctx):
-    assert "مفيش محادثات" in sp._cmd_sessions(make_ctx("sessions", []))
+    assert "No saved conversations" in sp._cmd_sessions(make_ctx("sessions", []))
 
 
 def test_sessions_lists_saved_ones(make_ctx):
@@ -77,7 +77,7 @@ def test_allow_adds_permission(make_ctx):
 
 def test_allow_refuses_dangerous_command(make_ctx):
     out = sp._cmd_allow(make_ctx("allow run", ["run"]))
-    assert "مينفعش" in out
+    assert "never be allowed" in out
     assert permissions.is_allowed("run") is False
 
 
@@ -87,7 +87,7 @@ def test_allow_without_args_shows_usage(make_ctx):
 
 def test_allow_list_shows_empty_default(make_ctx):
     out = sp._cmd_allow_list(make_ctx("allow_list", []))
-    assert "مفيش" in out
+    assert "none" in out
     assert "run" in out  # الممنوعة نهائيًا معروضة برضه
 
 
@@ -120,7 +120,7 @@ def test_hook_without_args_shows_usage(make_ctx):
 
 
 def test_hook_list_when_empty(make_ctx):
-    assert "مفيش حاجة مربوطة" in sp._cmd_hook(make_ctx("hook list", ["list"]))
+    assert "nothing bound" in sp._cmd_hook(make_ctx("hook list", ["list"]))
 
 
 def test_hook_add_then_list(make_ctx):
@@ -132,7 +132,7 @@ def test_hook_add_then_list(make_ctx):
 
 def test_hook_add_rejects_bad_event(make_ctx):
     out = sp._cmd_hook(make_ctx("hook add nope echo", ["add", "nope", "echo"]))
-    assert "مش معروف" in out
+    assert "unknown event" in out
 
 
 def test_hook_add_needs_a_command(make_ctx):
@@ -142,7 +142,7 @@ def test_hook_add_needs_a_command(make_ctx):
 def test_hook_remove(make_ctx):
     sp._cmd_hook(make_ctx("x", ["add", "startup", "echo", "hi"]))
     out = sp._cmd_hook(make_ctx("x", ["remove", "startup", "echo", "hi"]))
-    assert "اتفك" in out
+    assert "unbound" in out
     assert hooks.commands_for("startup") == []
 
 

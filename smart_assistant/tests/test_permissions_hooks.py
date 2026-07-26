@@ -42,7 +42,7 @@ def test_allow_twice_is_harmless():
     permissions.allow("probe")
     ok, msg = permissions.allow("probe")
     assert ok is True
-    assert "بالفعل" in msg
+    assert "already allowed" in msg
 
 
 def test_empty_command_is_rejected():
@@ -75,7 +75,7 @@ def test_dangerous_commands_can_never_be_allowed(cmd):
     تحذير في الواجهة."""
     ok, msg = permissions.allow(cmd)
     assert ok is False
-    assert "مينفعش" in msg
+    assert "never be allowed" in msg
     assert permissions.is_allowed(cmd) is False
 
 
@@ -116,7 +116,7 @@ def test_add_and_read_back():
 def test_add_rejects_unknown_event():
     ok, msg = hooks.add("whenever", "echo x")
     assert ok is False
-    assert "مش معروف" in msg
+    assert "unknown event" in msg
 
 
 def test_add_rejects_empty_command():
