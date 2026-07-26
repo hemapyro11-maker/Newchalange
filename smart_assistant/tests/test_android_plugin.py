@@ -73,7 +73,7 @@ def test_devices_no_devices_connected(make_ctx, monkeypatch):
     monkeypatch.setattr(ap.shutil, "which", lambda name: "/usr/bin/adb")
     monkeypatch.setattr(ap.subprocess, "run", lambda *a, **kw: _fake_completed(stdout="List of devices attached\n\n"))
     result = ap._cmd_android_devices(make_ctx("android_devices", []))
-    assert "مفيش أجهزة" in result
+    assert "no devices or emulators connected" in result
 
 
 def test_devices_lists_connected_devices(make_ctx, monkeypatch):
@@ -83,7 +83,7 @@ def test_devices_lists_connected_devices(make_ctx, monkeypatch):
         lambda *a, **kw: _fake_completed(stdout="List of devices attached\nemulator-5554\tdevice product:sdk\n"),
     )
     result = ap._cmd_android_devices(make_ctx("android_devices", []))
-    assert "1 جهاز" in result
+    assert "1 device(s) connected" in result
     assert "emulator-5554" in result
 
 

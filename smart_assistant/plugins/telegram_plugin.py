@@ -199,13 +199,13 @@ def _run_and_capture(engine, text: str) -> str:
             engine._dispatch(text)
         finally:
             engine._log = original_log
-        result_holder.put("\n".join(captured) if captured else "(نُفّذ من غير أي رد نصي)")
+        result_holder.put("\n".join(captured) if captured else "(ran, with no text output)")
 
     engine.run_task(text, _task)
     try:
         return result_holder.get(timeout=_DISPATCH_TIMEOUT)
     except queue.Empty:
-        return "⏱ الأمر لسه في طابور التنفيذ — اتأكد إن نيزوكو شغالة (زرار ▶ تشغيل على الجهاز)"
+        return "⏱ the command is still queued — check that Nezuko is running (the ▶ button on your machine)"
 
 
 def _handle_incoming(engine, sender_id: int, text: str) -> str:
@@ -217,8 +217,8 @@ def _handle_incoming(engine, sender_id: int, text: str) -> str:
         return _run_and_capture(engine, text)
     code = _request_pairing(sender_id)
     return (
-        "🔒 معرفك مش معروف لنيزوكو.\n"
-        "لو انت صاحب الجهاز ده، روح لنيزوكو على جهازك واكتب:\n"
+        "🔒 Nezuko does not recognise your account.\n"
+        "If this is your machine, go to Nezuko on it and type:\n"
         f"telegram_approve {code}"
     )
 
@@ -227,24 +227,24 @@ def _handle_incoming(engine, sender_id: int, text: str) -> str:
 
 def _cmd_telegram_set_token(ctx) -> str:
     if not ctx.args:
-        return "usage: telegram_set_token <token>   (احصل عليه من @BotFather على تليجرام)"
+        return "usage: telegram_set_token <token>   (get one from @BotFather on Telegram)"
     token = ctx.args[0]
     if _set_token(token):
-        secure_note = "✅ اتحفظ الـ token بأمان في مخزن أسرار نظام التشغيل (keyring)."
+        secure_note = "✅ Token saved safely in the operating system secret store (keyring)."
     else:
         with _config_lock:
             data = _load_config()
             data["bot_token"] = token
             _save_config(data)
         secure_note = (
-            "⚠️ اتحفظ الـ token كنص عادي في telegram_config.json — تخزين keyring الآمن مش متاح دلوقتي.\n"
-            "   لتخزين أأمن: pip install keyring"
+            "⚠️ Token saved as plain text in telegram_config.json — secure keyring storage is not available here.\n"
+            "   For safer storage: pip install keyring"
         )
     _ensure_bot_started(ctx.engine)
     return (
         f"{secure_note}\n"
-        "لو مفيش owner متظبط لسه، أول حد يكلم البوت على تليجرام هيحتاج "
-        "يتوافق عليه من هنا بـ: telegram_approve <code>"
+        "If no owner is set yet, the first person to message the bot on Telegram will need "
+        "approving from here with: telegram_approve <code>"
     )
 
 
@@ -256,7 +256,7 @@ def _cmd_telegram_approve(ctx) -> str:
         data = _load_config()
         match_id = next((sid for sid, info in data["pending_pairs"].items() if info["code"] == code), None)
         if match_id is None:
-            return "❌ الكود ده مش موجود أو منتهي"
+            return "❌ that code does not exist, or has expired"
         requested_at = data["pending_pairs"][match_id].get("requested_at", "")
         try:
             age = datetime.datetime.now() - datetime.datetime.fromisoformat(requested_at)
@@ -265,11 +265,11 @@ def _cmd_telegram_approve(ctx) -> str:
         del data["pending_pairs"][match_id]
         if age > _PAIR_CODE_TTL:
             _save_config(data)
-            return "❌ الكود ده منتهي (أكتر من 24 ساعة) — اطلب من المرسل يبعت رسالة تاني للبوت عشان ياخد كود جديد"
+            return "❌ that code expired (over 24 hours old) — ask them to message the bot again for a fresh one"
         if int(match_id) not in data["owner_ids"]:
             data["owner_ids"].append(int(match_id))
         _save_config(data)
-    return f"✅ اتوافق على المستخدم {match_id} — بقى يقدر يتحكم في نيزوكو بالكامل من تليجرام (زي ما لو قاعد على جهازك)"
+    return f"✅ approved user {match_id} — they now have full control of Nezuko from Telegram, as if sitting at your machine"
 
 
 def _cmd_telegram_deauthorize(ctx) -> str:
@@ -279,10 +279,10 @@ def _cmd_telegram_deauthorize(ctx) -> str:
     with _config_lock:
         data = _load_config()
         if target not in data["owner_ids"]:
-            return f"❌ المستخدم {target} مش موافق عليه أصلاً"
+            return f"❌ user {target} was not approved in the first place"
         data["owner_ids"].remove(target)
         _save_config(data)
-    return f"🚫 اتشال {target} — مش هيقدر يتحكم في نيزوكو من تليجرام تاني"
+    return f"🚫 removed {target} — they can no longer control Nezuko from Telegram"
 
 
 def _cmd_telegram_status(ctx) -> str:
@@ -290,17 +290,17 @@ def _cmd_telegram_status(ctx) -> str:
     token = _get_token()
     bot_thread = getattr(ctx.engine, "_telegram_thread", None)
     lines = [
-        "📱 حالة قناة تليجرام:",
-        f"  Token: {'✅ متظبط' if token else '❌ مش متظبط — telegram_set_token <token>'}",
-        f"  البوت: {'✅ شغال' if bot_thread is not None and bot_thread.is_alive() else '❌ مش شغال'}",
-        f"  Owners معتمدين: {', '.join(str(i) for i in data['owner_ids']) or '(مفيش)'}",
+        "📱 Telegram channel status:",
+        f"  Token: {'✅ configured' if token else '❌ not configured — telegram_set_token <token>'}",
+        f"  Bot: {'✅ running' if bot_thread is not None and bot_thread.is_alive() else '❌ not running'}",
+        f"  Approved owners: {', '.join(str(i) for i in data['owner_ids']) or '(none)'}",
     ]
     if data["pending_pairs"]:
-        lines.append(f"  طلبات موافقة معلّقة: {len(data['pending_pairs'])}")
+        lines.append(f"  Pending approval requests: {len(data['pending_pairs'])}")
     if not _HAS_KEYRING:
-        lines.append("  ⚠️ keyring مش متثبت — التوكن بيتخزن كنص عادي (pip install keyring لتخزين أأمن)")
+        lines.append("  ⚠️ keyring is not installed — the token is stored as plain text (pip install keyring for safer storage)")
     if not _HAS_PTB:
-        lines.append("  ⚠️ python-telegram-bot مش متثبت — pip install python-telegram-bot")
+        lines.append("  ⚠️ python-telegram-bot is not installed — pip install python-telegram-bot")
     return "\n".join(lines)
 
 
@@ -310,13 +310,13 @@ def _run_bot(engine, token: str, stop_event: threading.Event) -> None:
     import asyncio
 
     async def _on_start(update, context):
-        await update.message.reply_text("أهلاً! أنا نيزوكو 🦊 — لو انت صاحب الجهاز، ابعتلي أي أمر.")
+        await update.message.reply_text("Hi! I am Nezuko 🦊 — if this is your machine, send me any command.")
 
     async def _on_message(update, context):
         if update.effective_user is None or update.message is None or update.message.text is None:
             return
         reply = _handle_incoming(engine, update.effective_user.id, update.message.text)
-        await update.message.reply_text(reply or "(مفيش رد)")
+        await update.message.reply_text(reply or "(no reply)")
 
     async def _main():
         app = Application.builder().token(token).build()
@@ -356,11 +356,11 @@ def _ensure_bot_started(engine) -> None:
 
 def register(engine):
     engine.registry.register("telegram_set_token", _cmd_telegram_set_token,
-                              "telegram_set_token <token> — تظبيط بوت تليجرام (من @BotFather)")
+                              "telegram_set_token <token> — set up the Telegram bot (from @BotFather)")
     engine.registry.register("telegram_approve", _cmd_telegram_approve,
-                              "telegram_approve <code> — الموافقة على مستخدم تليجرام طلب pairing")
+                              "telegram_approve <code> — approve a Telegram user who requested pairing")
     engine.registry.register("telegram_deauthorize", _cmd_telegram_deauthorize,
-                              "telegram_deauthorize <id> — إلغاء صلاحية مستخدم تليجرام معتمد")
+                              "telegram_deauthorize <id> — revoke an approved Telegram user")
     engine.registry.register("telegram_status", _cmd_telegram_status,
-                              "telegram_status — حالة قناة تليجرام (البوت، الـ owners، الطلبات المعلّقة)")
+                              "telegram_status — Telegram channel status (bot, owners, pending requests)")
     _ensure_bot_started(engine)

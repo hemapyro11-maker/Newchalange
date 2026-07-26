@@ -27,9 +27,9 @@ def _run_ffmpeg(args: list[str], timeout: int) -> tuple[bool, str]:
     try:
         result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
-        return False, f"⏱ timed out after ({timeout}s) — الملف كبير أوي أو ffmpeg علّق"
+        return False, f"⏱ timed out after {timeout}s — the file is very large, or ffmpeg hung"
     except OSError as e:
-        return False, f"❌ تعذر تشغيل {args[0]}: {e}"
+        return False, f"❌ could not run {args[0]}: {e}"
     if result.returncode != 0:
         return False, result.stderr.strip()[-500:]
     return True, result.stdout
@@ -39,7 +39,7 @@ def _cmd_probe(ctx) -> str:
     if not ctx.args:
         return "usage: probe <file>"
     if not shutil.which("ffprobe"):
-        return "❌ ffprobe غير موجود — ثبّت FFmpeg وضيفه للـ PATH (ffmpeg.org/download.html)"
+        return "❌ ffprobe not found — install FFmpeg and put it on your PATH (ffmpeg.org/download.html)"
     path = ctx.args[0]
     if not pathlib.Path(path).is_file():
         return f"❌ file not found: {path}"
@@ -48,11 +48,11 @@ def _cmd_probe(ctx) -> str:
         timeout=30,
     )
     if not ok:
-        return f"❌ الملف مش قابل للقراءة:\n{output}"
+        return f"❌ the file is not readable:\n{output}"
     try:
         data = json.loads(output)
     except json.JSONDecodeError:
-        return "❌ تعذر تحليل مخرجات ffprobe"
+        return "❌ could not parse ffprobe output"
 
     fmt = data.get("format", {})
     streams = data.get("streams", [])
@@ -62,7 +62,7 @@ def _cmd_probe(ctx) -> str:
     ]
     issues = []
     if not streams:
-        issues.append("مفيش أي stream — الملف ممكن يكون تالف")
+        issues.append("no streams at all — the file may be corrupt")
     for s in streams:
         kind = s.get("codec_type")
         codec = s.get("codec_name")
@@ -71,14 +71,14 @@ def _cmd_probe(ctx) -> str:
         elif kind == "audio":
             lines.append(f"🔊 audio: {codec}  {s.get('sample_rate')}Hz  ch={s.get('channels')}")
             if s.get("channels") in (0, "0"):
-                issues.append("مسار الصوت بلا قنوات (channels=0)")
+                issues.append("audio track has no channels (channels=0)")
     try:
         if float(fmt.get("duration", 0)) <= 0:
-            issues.append("مدة الملف صفر — الملف على الأغلب تالف")
+            issues.append("zero duration — the file is most likely corrupt")
     except (TypeError, ValueError):
         pass
 
-    lines.append("⚠  مشاكل محتملة: " + " | ".join(issues) if issues else "✅ الملف سليم وقابل للقراءة")
+    lines.append("⚠  possible problems: " + " | ".join(issues) if issues else "✅ the file is sound and readable")
     return "\n".join(lines)
 
 
@@ -86,15 +86,15 @@ def _cmd_convert(ctx) -> str:
     if len(ctx.args) < 2:
         return "usage: convert <input> <output>"
     if not shutil.which("ffmpeg"):
-        return "❌ ffmpeg not found — ثبّته من ffmpeg.org"
+        return "❌ ffmpeg not found — install it from ffmpeg.org"
     src, dst = ctx.args[0], ctx.args[1]
     missing = _missing_files(src)
     if missing:
         return f"❌ file not found: {missing[0]}"
     ok, err = _run_ffmpeg(["ffmpeg", "-y", "-i", src, dst], timeout=300)
     if not ok:
-        return f"❌ فشل التحويل:\n{err}"
-    return f"✅ تم التحويل إلى {dst}"
+        return f"❌ conversion failed:\n{err}"
+    return f"✅ converted to {dst}"
 
 
 def _cmd_trim(ctx) -> str:
@@ -110,8 +110,8 @@ def _cmd_trim(ctx) -> str:
         ["ffmpeg", "-y", "-ss", start, "-i", src, "-t", duration, "-c", "copy", dst], timeout=120,
     )
     if not ok:
-        return f"❌ فشل القص:\n{err}"
-    return f"✅ تم القص إلى {dst}"
+        return f"❌ trim failed:\n{err}"
+    return f"✅ trimmed to {dst}"
 
 
 def _cmd_merge_av(ctx) -> str:
@@ -128,8 +128,8 @@ def _cmd_merge_av(ctx) -> str:
         timeout=300,
     )
     if not ok:
-        return f"❌ فشل الدمج:\n{err}"
-    return f"✅ تم دمج الصوت مع الفيديو في {dst}"
+        return f"❌ merge failed:\n{err}"
+    return f"✅ audio merged into the video at {dst}"
 
 
 def _cmd_concat(ctx) -> str:
@@ -157,8 +157,8 @@ def _cmd_concat(ctx) -> str:
     finally:
         os.unlink(list_path)
     if not ok:
-        return f"❌ فشل الدمج:\n{err}"
-    return f"✅ تم دمج {len(files)} ملفات في {dst}"
+        return f"❌ merge failed:\n{err}"
+    return f"✅ joined {len(files)} files into {dst}"
 
 
 def _cmd_extract_audio(ctx) -> str:
@@ -174,8 +174,8 @@ def _cmd_extract_audio(ctx) -> str:
         ["ffmpeg", "-y", "-i", src, "-vn", "-acodec", "libmp3lame", dst], timeout=180,
     )
     if not ok:
-        return f"❌ فشل الاستخراج:\n{err}"
-    return f"✅ اتحفظ الصوت في {dst}"
+        return f"❌ extraction failed:\n{err}"
+    return f"✅ audio saved to {dst}"
 
 
 def _cmd_thumbnail(ctx) -> str:
@@ -190,7 +190,7 @@ def _cmd_thumbnail(ctx) -> str:
     ok, err = _run_ffmpeg(["ffmpeg", "-y", "-ss", ts, "-i", src, "-frames:v", "1", dst], timeout=60)
     if not ok:
         return f"❌ failed: {err}"
-    return f"✅ اتحفظت الصورة في {dst}"
+    return f"✅ frame saved to {dst}"
 
 
 def _cmd_overlay_text(ctx) -> str:
@@ -209,8 +209,8 @@ def _cmd_overlay_text(ctx) -> str:
     )
     ok, err = _run_ffmpeg(["ffmpeg", "-y", "-i", src, "-vf", vf, "-codec:a", "copy", dst], timeout=300)
     if not ok:
-        return f"❌ فشل إضافة النص:\n{err}"
-    return f"✅ اتحفظ الفيديو مع النص في {dst}"
+        return f"❌ could not add the text:\n{err}"
+    return f"✅ video with text saved to {dst}"
 
 
 def register(engine):

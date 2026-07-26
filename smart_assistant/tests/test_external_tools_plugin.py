@@ -48,7 +48,7 @@ def test_add_invalid_name_rejected(engine):
 def test_add_collides_with_builtin_command(engine):
     result = ep._cmd_external_add(_ctx(engine, "external_add", ["help", "echo hi"]))
     assert result.startswith("❌")
-    assert "متصادم" in result
+    assert "collides with a built-in" in result
 
 
 def test_add_registers_and_persists(engine, isolated_config):
@@ -100,7 +100,7 @@ def test_registered_cli_tool_nonexistent_binary(engine):
     cmd = engine.registry.get("ghost")
     result = cmd.handler(_ctx(engine, "ghost", []))
     assert result.startswith("❌")
-    assert "مش موجود" in result
+    assert "program not found" in result
 
 
 def test_registered_cli_tool_timeout(engine, monkeypatch):
@@ -131,7 +131,7 @@ def test_registered_desktop_tool_uses_popen_not_run(engine, monkeypatch):
     cmd = engine.registry.get("myapp")
     result = cmd.handler(_ctx(engine, "myapp", []))
     assert result.startswith("✅")
-    assert "الخلفية" in result
+    assert "in the background" in result
     assert captured["argv"] == ["true"]
 
 
@@ -178,7 +178,7 @@ def test_remove_deletes_from_registry_and_persistence(engine, isolated_config):
 
 def test_list_empty(engine):
     result = ep._cmd_external_list(_ctx(engine, "external_list", []))
-    assert "مفيش أدوات" in result
+    assert "No external tools registered" in result
 
 
 def test_list_shows_registered_tools(engine):

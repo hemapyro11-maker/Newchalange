@@ -105,7 +105,7 @@ def test_add_unknown_command_warns_but_still_saves(make_ctx, bare_engine):
         "schedule add every:1h totally_unknown_cmd", ["add", "every:1h", "totally_unknown_cmd"], engine=bare_engine,
     ))
     assert "✅" in result
-    assert "تحذير" in result
+    assert "warning" in result
     assert len(sp._load()["jobs"]) == 1
 
 
@@ -119,7 +119,7 @@ def test_add_increments_ids(make_ctx, bare_engine):
 
 def test_list_empty(make_ctx, bare_engine):
     result = sp._cmd_schedule(make_ctx("schedule list", ["list"], engine=bare_engine))
-    assert "مفيش" in result
+    assert "Nothing scheduled" in result
 
 
 def test_list_shows_added_jobs(make_ctx, bare_engine):
@@ -154,11 +154,11 @@ def test_remove_no_id_shows_usage(make_ctx, bare_engine):
 def test_pause_and_resume_job(make_ctx, bare_engine):
     sp._cmd_schedule(make_ctx("schedule add every:1h echo hi", ["add", "every:1h", "echo", "hi"], engine=bare_engine))
     result = sp._cmd_schedule(make_ctx("schedule pause 1", ["pause", "1"], engine=bare_engine))
-    assert "اتوقف" in result
+    assert "paused" in result
     assert sp._load()["jobs"][0]["enabled"] is False
 
     result = sp._cmd_schedule(make_ctx("schedule resume 1", ["resume", "1"], engine=bare_engine))
-    assert "اتشغّل" in result
+    assert "resumed" in result
     assert sp._load()["jobs"][0]["enabled"] is True
 
 

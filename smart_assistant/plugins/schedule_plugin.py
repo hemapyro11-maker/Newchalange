@@ -154,13 +154,13 @@ def _ensure_scheduler_started(engine) -> None:
 def _usage() -> str:
     return (
         "usage:\n"
-        "  schedule add <spec> <command...>    — جدول أمر جديد\n"
+        "  schedule add <spec> <command...>    — schedule a new command\n"
         "     spec: every:<N>s|m|h|d  |  daily:HH:MM  |  weekly:mon..sun:HH:MM\n"
-        "     مثال: schedule add daily:09:00 channel_growth_report @MrBeast\n"
-        "  schedule list                        — عرض كل الجداول\n"
-        "  schedule remove <id>                 — شيل جدول\n"
-        "  schedule pause <id> / resume <id>     — إيقاف/تشغيل مؤقت من غير حذف\n"
-        "  schedule run_now <id>                — نفّذ فورًا من غير ما تستنى الموعد"
+        "     example: schedule add daily:09:00 channel_growth_report @MrBeast\n"
+        "  schedule list                        — show every schedule\n"
+        "  schedule remove <id>                 — delete a schedule\n"
+        "  schedule pause <id> / resume <id>     — pause or resume without deleting\n"
+        "  schedule run_now <id>                — run it now instead of waiting"
     )
 
 
@@ -171,12 +171,12 @@ def _handle_add(ctx) -> str:
     spec, command = parts[2], parts[3].strip()
     parsed = _parse_spec(spec)
     if parsed is None:
-        return f"❌ صيغة موعد غير مفهومة: {spec}\n  استخدم: every:<N>s|m|h|d  |  daily:HH:MM  |  weekly:mon..sun:HH:MM"
+        return f"❌ could not read that schedule: {spec}\n  use: every:<N>s|m|h|d  |  daily:HH:MM  |  weekly:mon..sun:HH:MM"
     kind, params = parsed
     cmd_name = command.split(maxsplit=1)[0]
     warn = ""
     if ctx.engine.registry.get(cmd_name) is None:
-        warn = f"\n⚠️ تحذير: '{cmd_name}' مش أمر مسجّل دلوقتي — هيتحفظ الجدول برضه، بس هيفشل وقت التنفيذ لو فضل كده."
+        warn = f"\n⚠️ warning: '{cmd_name}' is not a registered command right now — the schedule is saved anyway, but it will fail when it fires unless that changes."
     with _lock(ctx.engine):
         data = _load()
         job_id = data["next_id"]
@@ -189,19 +189,19 @@ def _handle_add(ctx) -> str:
             "last_run": None, "created": now.isoformat(timespec="seconds"),
         })
         _save(data)
-    return f"✅ اتضاف #{job_id} — هيتنفذ الأول: {next_run.strftime('%Y-%m-%d %H:%M')}{warn}"
+    return f"✅ added #{job_id} — first run: {next_run.strftime('%Y-%m-%d %H:%M')}{warn}"
 
 
 def _handle_list(ctx) -> str:
     data = _load()
     if not data["jobs"]:
-        return "مفيش أي جدول متسجل. أضف واحد بـ: schedule add <spec> <command...>"
-    lines = ["📅 الجداول المسجّلة:"]
+        return "Nothing scheduled. Add one with: schedule add <spec> <command...>"
+    lines = ["📅 Scheduled commands:"]
     for job in sorted(data["jobs"], key=lambda j: j["id"]):
         status = "✅" if job.get("enabled", True) else "⏸"
-        line = f"  {status} #{job['id']} [{job['spec']}] {job['command']} — الجاي: {job['next_run']}"
+        line = f"  {status} #{job['id']} [{job['spec']}] {job['command']} — next: {job['next_run']}"
         if job.get("last_run"):
-            line += f" — آخر تنفيذ: {job['last_run']}"
+            line += f" — last run: {job['last_run']}"
         lines.append(line)
     return "\n".join(lines)
 
@@ -219,9 +219,9 @@ def _handle_remove(ctx) -> str:
         before = len(data["jobs"])
         data["jobs"] = [j for j in data["jobs"] if j["id"] != job_id]
         if len(data["jobs"]) == before:
-            return f"❌ مفيش جدول بالرقم #{job_id}"
+            return f"❌ no schedule numbered #{job_id}"
         _save(data)
-    return f"🗑 اتشال #{job_id}"
+    return f"🗑 removed #{job_id}"
 
 
 def _handle_toggle(ctx, enabled: bool) -> str:
@@ -233,10 +233,10 @@ def _handle_toggle(ctx, enabled: bool) -> str:
         data = _load()
         job = _find_job(data, job_id)
         if job is None:
-            return f"❌ مفيش جدول بالرقم #{job_id}"
+            return f"❌ no schedule numbered #{job_id}"
         job["enabled"] = enabled
         _save(data)
-    return f"{'▶️ اتشغّل' if enabled else '⏸ اتوقف'} #{job_id}"
+    return f"{'▶️ resumed' if enabled else '⏸ paused'} #{job_id}"
 
 
 def _handle_run_now(ctx) -> str:
@@ -246,9 +246,9 @@ def _handle_run_now(ctx) -> str:
     data = _load()
     job = _find_job(data, job_id)
     if job is None:
-        return f"❌ مفيش جدول بالرقم #{job_id}"
+        return f"❌ no schedule numbered #{job_id}"
     ctx.engine.submit(job["command"])
-    return f"▶️ اتبعت #{job_id} ({job['command']}) للتنفيذ فورًا"
+    return f"▶️ sent #{job_id} ({job['command']}) to run now"
 
 
 def _cmd_schedule(ctx) -> str:
@@ -273,6 +273,6 @@ def _cmd_schedule(ctx) -> str:
 def register(engine):
     engine.registry.register(
         "schedule", _cmd_schedule,
-        "schedule add|list|remove|pause|resume|run_now — أتمتة أوامر نيزوكو على مواعيد (every:/daily:/weekly:)",
+        "schedule add|list|remove|pause|resume|run_now — run Nezuko commands on a timer (every:/daily:/weekly:)",
     )
     _ensure_scheduler_started(engine)

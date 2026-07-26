@@ -146,7 +146,7 @@ def test_approve_rejects_expired_code(make_ctx, bare_engine):
 
     result = dc._cmd_discord_approve(make_ctx(f"discord_approve {code}", [code], engine=bare_engine))
     assert result.startswith("❌")
-    assert "منتهي" in result
+    assert "expired" in result
     data = dc._load_config()
     assert 777 not in data["owner_ids"]
     assert "777" not in data["pending_pairs"]  # الكود المنتهي اتشال برضو، مش فاضل معلّق للأبد
@@ -252,7 +252,7 @@ def test_get_token_reads_legacy_plaintext_when_keyring_has_nothing(monkeypatch, 
 
 def test_status_reports_no_token(make_ctx, bare_engine):
     result = dc._cmd_discord_status(make_ctx("discord_status", [], engine=bare_engine))
-    assert "❌ مش متظبط" in result
+    assert "❌ not configured" in result
 
 
 def test_status_reports_owners_and_pending(make_ctx, bare_engine):
@@ -261,9 +261,9 @@ def test_status_reports_owners_and_pending(make_ctx, bare_engine):
     dc._cmd_discord_approve(make_ctx(f"discord_approve {code}", [code], engine=bare_engine))
     dc._request_pairing(999)
     result = dc._cmd_discord_status(make_ctx("discord_status", [], engine=bare_engine))
-    assert "✅ متظبط" in result
+    assert "✅ configured" in result
     assert "555" in result
-    assert "طلبات موافقة معلّقة: 1" in result
+    assert "Pending approval requests: 1" in result
 
 
 # ── _handle_incoming (المنطق الأمني الأساسي) ─────────────────────────
