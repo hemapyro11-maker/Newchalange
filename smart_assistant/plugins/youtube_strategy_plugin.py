@@ -38,7 +38,7 @@ TIMEOUT = 15
 _KEYRING_SERVICE = "nezuko-youtube"
 _API_KEY_NAME = "api_key"
 _CHANNEL_ID_RE = re.compile(r"^UC[\w-]{22}$")
-_DAY_NAMES_AR = ["الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
+_DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 
 class YouTubeAPIError(Exception):
@@ -104,9 +104,9 @@ def _yt_get(endpoint: str, params: dict) -> dict:
     key = _api_key()
     if not key:
         raise YouTubeAPIError(
-            "مفيش مفتاح YouTube API متظبط. هات واحد مجاني من "
-            "https://console.cloud.google.com (فعّل YouTube Data API v3) "
-            "وسجّله بـ: youtube_set_key <المفتاح>"
+            "No YouTube API key configured. Get one free at "
+            "https://console.cloud.google.com (enable YouTube Data API v3) "
+            "then save it with: youtube_set_key <key>"
         )
     q = dict(params)
     q["key"] = key
@@ -160,11 +160,11 @@ def _cmd_youtube_set_key(ctx) -> str:
         return "usage: youtube_set_key <api_key>"
     key = ctx.args[0].strip()
     if not key:
-        return "❌ مفتاح فاضي مش هيتحفظ"
+        return "❌ an empty key will not be saved"
     if _set_api_key_keyring(key):
         return (
-            "✅ اتحفظ مفتاح YouTube API بأمان في مخزن أسرار نظام التشغيل (keyring).\n"
-            "جرّب: channel_stats <channel_id_or_@handle>"
+            "✅ YouTube API key saved safely in the operating system secret store (keyring).\n"
+            "Try: channel_stats <channel_id_or_@handle>"
         )
     path = _config_path()
     data = {}
@@ -177,22 +177,22 @@ def _cmd_youtube_set_key(ctx) -> str:
     try:
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError as e:
-        return f"❌ تعذر حفظ المفتاح: {e}"
+        return f"❌ could not save the key: {e}"
     return (
-        "⚠️ اتحفظ المفتاح كنص عادي في youtube_config.json — تخزين keyring الآمن مش متاح دلوقتي.\n"
-        "   لتخزين أأمن: pip install keyring\n"
-        "جرّب: channel_stats <channel_id_or_@handle>"
+        "⚠️ Key saved as plain text in youtube_config.json — secure keyring storage is not available here.\n"
+        "   For safer storage: pip install keyring\n"
+        "Try: channel_stats <channel_id_or_@handle>"
     )
 
 
 def _cmd_youtube_key_status(ctx) -> str:
     key = _api_key()
     if not key:
-        return "❌ مفيش مفتاح متظبط — استخدم youtube_set_key <key>"
+        return "❌ no key configured — use youtube_set_key <key>"
     masked = key[:4] + "…" + key[-2:] if len(key) > 8 else "…"
-    line = f"✅ فيه مفتاح متظبط ({masked})"
+    line = f"✅ a key is configured ({masked})"
     if not _HAS_KEYRING:
-        line += "\n⚠️ keyring مش متثبت — بيتخزن كنص عادي (pip install keyring لتخزين أأمن)"
+        line += "\n⚠️ keyring is not installed — stored as plain text (pip install keyring for safer storage)"
     return line
 
 
@@ -200,7 +200,7 @@ def _fmt_int(n) -> str:
     try:
         return f"{int(n):,}"
     except (TypeError, ValueError):
-        return "؟"
+        return "?"
 
 
 def _cmd_channel_stats(ctx) -> str:
@@ -223,11 +223,11 @@ def _cmd_channel_stats(ctx) -> str:
 
     lines = [
         f"📺 {snippet.get('title', identifier)}",
-        f"   👥 مشتركين: {_fmt_int(subs) if not stats.get('hiddenSubscriberCount') else 'مخفي'}",
-        f"   👁 إجمالي مشاهدات: {_fmt_int(views)}",
-        f"   🎬 عدد فيديوهات: {_fmt_int(videos)}",
-        f"   📊 متوسط مشاهدات/فيديو: {_fmt_int(avg_views)}",
-        f"   📅 اتعملت: {snippet.get('publishedAt', '؟')[:10]}",
+        f"   👥 subscribers: {_fmt_int(subs) if not stats.get('hiddenSubscriberCount') else 'hidden'}",
+        f"   👁 total views: {_fmt_int(views)}",
+        f"   🎬 videos: {_fmt_int(videos)}",
+        f"   📊 average views per video: {_fmt_int(avg_views)}",
+        f"   📅 created: {snippet.get('publishedAt', '?')[:10]}",
     ]
     return "\n".join(lines)
 
@@ -250,7 +250,7 @@ def _cmd_channel_strategy_report(ctx) -> str:
     views = int(stats.get("viewCount", 0))
     videos = int(stats.get("videoCount", 0))
 
-    lines = [f"📈 تقرير استراتيجية: {snippet.get('title', identifier)}"]
+    lines = [f"📈 Strategy report: {snippet.get('title', identifier)}"]
 
     # اتساق النشر: بنحسب الفجوات بين تواريخ آخر الفيديوهات، ومعامل التباين
     # (coefficient of variation = الانحراف المعياري ÷ المتوسط) عشان نقيس
@@ -266,16 +266,16 @@ def _cmd_channel_strategy_report(ctx) -> str:
         if mean_gap > 0 and len(gaps_days) >= 2:
             cv = statistics.stdev(gaps_days) / mean_gap
             if cv < 0.3:
-                consistency = "ممتاز — نشر منتظم جدًا"
+                consistency = "excellent — very regular publishing"
             elif cv < 0.6:
-                consistency = "كويس — فيه اتساق بس مش مثالي"
+                consistency = "good — consistent, though not perfectly so"
             else:
-                consistency = "غير منتظم — الفجوات بين الفيديوهات متذبذبة"
-            lines.append(f"   🗓 متوسط الفجوة بين الفيديوهات: {mean_gap:.1f} يوم — الاتساق: {consistency}")
+                consistency = "irregular — the gaps between videos swing about"
+            lines.append(f"   🗓 average gap between videos: {mean_gap:.1f} days — consistency: {consistency}")
         else:
-            lines.append(f"   🗓 متوسط الفجوة بين الفيديوهات: {mean_gap:.1f} يوم")
+            lines.append(f"   🗓 average gap between videos: {mean_gap:.1f} days")
     else:
-        lines.append("   🗓 مش كفاية فيديوهات لتحليل اتساق النشر (محتاج 3 على الأقل)")
+        lines.append("   🗓 not enough videos to judge publishing consistency (needs at least 3)")
 
     # كفاءة الوصول: متوسط مشاهدات القناة مقسومة على عدد المشتركين — نسبة
     # أعلى من 1 معناها المحتوى بيوصل لناس أكتر من قاعدة المشتركين
@@ -284,27 +284,27 @@ def _cmd_channel_strategy_report(ctx) -> str:
         avg_views = views / videos
         reach_ratio = avg_views / subs
         if reach_ratio >= 1.0:
-            reach_desc = "قوي — بيوصل لناس أكتر من مجرد المشتركين (اكتشاف كويس)"
+            reach_desc = "strong — reaching well beyond subscribers (good discovery)"
         elif reach_ratio >= 0.3:
-            reach_desc = "متوسط — وصول محدود برّه قاعدة المشتركين"
+            reach_desc = "middling — limited reach outside the subscriber base"
         else:
-            reach_desc = "ضعيف — الاعتماد شبه كامل على المشتركين الحاليين"
-        lines.append(f"   🎯 نسبة الوصول (متوسط مشاهدات÷مشتركين): {reach_ratio:.2f} — {reach_desc}")
+            reach_desc = "weak — almost entirely dependent on existing subscribers"
+        lines.append(f"   🎯 reach ratio (average views ÷ subscribers): {reach_ratio:.2f} — {reach_desc}")
 
     created = snippet.get("publishedAt")
     if created:
         age_days = (datetime.now(timezone.utc) - datetime.fromisoformat(created.replace("Z", "+00:00"))).days
         if age_days > 0 and videos > 0:
             videos_per_month = videos / (age_days / 30)
-            lines.append(f"   ⏱ معدل نشر تاريخي: ~{videos_per_month:.1f} فيديو/شهر منذ إنشاء القناة")
+            lines.append(f"   ⏱ historic publishing rate: ~{videos_per_month:.1f} videos/month since the channel started")
 
-    lines.append("\n💡 توصيات:")
+    lines.append("\n💡 Recommendations:")
     if videos == 0:
-        lines.append("   • القناة لسه من غير فيديوهات — مفيش بيانات نشاط تتحلل")
+        lines.append("   • the channel has no videos yet — there is no activity to analyse")
     else:
         if subs > 0 and views / max(videos, 1) / subs < 0.3:
-            lines.append("   • ركّز على SEO/thumbnails عشان توصل لمشاهدين جداد برّه قاعدة مشتركينك")
-        lines.append("   • حافظ على جدول نشر ثابت (استخدم content_calendar) — الاتساق بيبني الخوارزمية عليك")
+            lines.append("   • focus on SEO and thumbnails to reach viewers beyond your subscriber base")
+        lines.append("   • keep a steady publishing schedule (use content_calendar) — consistency is what the algorithm builds on")
 
     return "\n".join(lines)
 
@@ -316,11 +316,11 @@ def _cmd_content_calendar(ctx) -> str:
         per_week = int(ctx.args[0])
         weeks = int(ctx.args[1])
     except ValueError:
-        return "❌ لازم رقمين صحاح"
+        return "❌ two whole numbers are required"
     if not (1 <= per_week <= 7):
-        return "❌ عدد الفيديوهات أسبوعيًا لازم يكون بين 1 و7"
+        return "❌ videos per week must be between 1 and 7"
     if not (1 <= weeks <= 26):
-        return "❌ عدد الأسابيع لازم يكون بين 1 و26"
+        return "❌ the number of weeks must be between 1 and 26"
 
     # توزيع متساوي عبر أيام الأسبوع: بنستخدم round(i * 7 / n) عشان الأيام
     # تتباعد بأقصى قدر ممكن بدل ما تتكدس (زي توزيع الـ 3/أسبوع على
@@ -336,19 +336,19 @@ def _cmd_content_calendar(ctx) -> str:
     today = datetime.now()
     monday = today - timedelta(days=today.weekday())
 
-    lines = [f"🗓 خطة نشر: {per_week} فيديو/أسبوع × {weeks} أسبوع = {per_week * weeks} فيديو"]
+    lines = [f"🗓 Publishing plan: {per_week} videos/week × {weeks} weeks = {per_week * weeks} videos"]
     for w in range(weeks):
         week_start = monday + timedelta(days=7 * w)
-        lines.append(f"\n  أسبوع {w + 1} ({week_start.strftime('%Y-%m-%d')}):")
+        lines.append(f"\n  Week {w + 1} ({week_start.strftime('%Y-%m-%d')}):")
         for d in day_indices:
             day_date = week_start + timedelta(days=d)
-            lines.append(f"    • {_DAY_NAMES_AR[d]} — {day_date.strftime('%Y-%m-%d')}")
+            lines.append(f"    • {_DAY_NAMES[d]} — {day_date.strftime('%Y-%m-%d')}")
 
     lines.append(
-        "\n💡 ملحوظة: التوزيع ده متباعد بالتساوي عشان يفضل حضور ثابت "
-        "طول الأسبوع بدل ما يتكدس. أفضل وقت نشر فعليًا بيختلف حسب "
-        "جمهورك — راجع YouTube Studio Analytics بتاعتك (متاح مجانًا "
-        "لأي صاحب قناة) لتضبط التوقيت بالساعة."
+        "\n💡 Note: this spacing is even, to keep a steady presence "
+        "through the week rather than bunching up. The genuinely best time to publish depends on "
+        "your own audience — check your YouTube Studio Analytics (free to "
+        "any channel owner) to tune the hour."
     )
     return "\n".join(lines)
 
@@ -362,9 +362,9 @@ def _cmd_competitor_compare(ctx) -> str:
     except YouTubeAPIError as e:
         return f"❌ {e}"
     if a is None:
-        return f"❌ مفيش قناة بالمعرف ده: {ctx.args[0]}"
+        return f"❌ no channel with that id or name: {ctx.args[0]}"
     if b is None:
-        return f"❌ مفيش قناة بالمعرف ده: {ctx.args[1]}"
+        return f"❌ no channel with that id or name: {ctx.args[1]}"
 
     def stat(ch, key):
         return int(ch.get("statistics", {}).get(key, 0) or 0)
@@ -381,31 +381,31 @@ def _cmd_competitor_compare(ctx) -> str:
         if va == vb:
             marker = "="
         elif va > vb:
-            marker = f"◀ {name_a} أعلى"
+            marker = f"◀ {name_a} higher"
         else:
-            marker = f"{name_b} أعلى ▶"
-        return f"   {label}: {fmt(va)}  مقابل  {fmt(vb)}   ({marker})"
+            marker = f"{name_b} higher ▶"
+        return f"   {label}: {fmt(va)}  vs  {fmt(vb)}   ({marker})"
 
     lines = [
-        f"⚔️ مقارنة: {name_a}  مقابل  {name_b}",
-        cmp_line("👥 مشتركين", subs_a, subs_b),
-        cmp_line("👁 إجمالي مشاهدات", views_a, views_b),
-        cmp_line("🎬 عدد فيديوهات", vids_a, vids_b),
-        cmp_line("📊 متوسط مشاهدات/فيديو", avg_a, avg_b, lambda x: f"{x:,.0f}"),
+        f"⚔️ Comparison: {name_a}  vs  {name_b}",
+        cmp_line("👥 subscribers", subs_a, subs_b),
+        cmp_line("👁 total views", views_a, views_b),
+        cmp_line("🎬 videos", vids_a, vids_b),
+        cmp_line("📊 average views per video", avg_a, avg_b, lambda x: f"{x:,.0f}"),
     ]
     return "\n".join(lines)
 
 
 def register(engine):
     engine.registry.register("youtube_set_key", _cmd_youtube_set_key,
-                              "youtube_set_key <api_key> — تسجيل مفتاح YouTube Data API v3 (مجاني)")
+                              "youtube_set_key <api_key> — save a free YouTube Data API v3 key")
     engine.registry.register("youtube_key_status", _cmd_youtube_key_status,
-                              "youtube_key_status — هل فيه مفتاح YouTube API متظبط؟")
+                              "youtube_key_status — is a YouTube API key configured?")
     engine.registry.register("channel_stats", _cmd_channel_stats,
-                              "channel_stats <channel_id_or_@handle> — بيانات حقيقية عن قناة")
+                              "channel_stats <channel_id_or_@handle> — real data about a channel")
     engine.registry.register("channel_strategy_report", _cmd_channel_strategy_report,
-                              "channel_strategy_report <channel_id_or_@handle> — تحليل اتساق النشر وكفاءة الوصول")
+                              "channel_strategy_report <channel_id_or_@handle> — publishing consistency and reach efficiency")
     engine.registry.register("content_calendar", _cmd_content_calendar,
-                              "content_calendar <videos_per_week> <weeks> — خطة نشر بتواريخ حقيقية")
+                              "content_calendar <videos_per_week> <weeks> — a publishing plan with real dates")
     engine.registry.register("competitor_compare", _cmd_competitor_compare,
-                              "competitor_compare <channel_1> <channel_2> — مقارنة إحصائيات قناتين")
+                              "competitor_compare <channel_1> <channel_2> — compare two channels statistics")

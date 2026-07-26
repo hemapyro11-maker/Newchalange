@@ -190,7 +190,7 @@ def test_channel_stats_hidden_subscriber_count(make_ctx, monkeypatch):
     ch["statistics"]["hiddenSubscriberCount"] = True
     _json_urlopen(monkeypatch, {"items": [ch]})
     result = ysp._cmd_channel_stats(make_ctx("channel_stats", ["@x"]))
-    assert "مخفي" in result
+    assert "hidden" in result
 
 
 def test_channel_stats_http_error_reported_clearly(make_ctx, monkeypatch):
@@ -239,7 +239,7 @@ def test_channel_strategy_report_consistent_uploads(make_ctx, monkeypatch):
 
     monkeypatch.setattr(ysp.urllib.request, "urlopen", fake_urlopen)
     result = ysp._cmd_channel_strategy_report(make_ctx("channel_strategy_report", ["@x"]))
-    assert "ممتاز" in result
+    assert "excellent" in result
     assert calls["n"] == 2
 
 
@@ -253,7 +253,7 @@ def test_channel_strategy_report_inconsistent_uploads(make_ctx, monkeypatch):
 
     monkeypatch.setattr(ysp.urllib.request, "urlopen", fake_urlopen)
     result = ysp._cmd_channel_strategy_report(make_ctx("channel_strategy_report", ["@x"]))
-    assert "غير منتظم" in result
+    assert "irregular" in result
 
 
 def test_channel_strategy_report_too_few_uploads_for_consistency(make_ctx, monkeypatch):
@@ -266,7 +266,7 @@ def test_channel_strategy_report_too_few_uploads_for_consistency(make_ctx, monke
 
     monkeypatch.setattr(ysp.urllib.request, "urlopen", fake_urlopen)
     result = ysp._cmd_channel_strategy_report(make_ctx("channel_strategy_report", ["@x"]))
-    assert "مش كفاية فيديوهات" in result
+    assert "not enough videos" in result
 
 
 def test_channel_strategy_report_channel_not_found(make_ctx, monkeypatch):
@@ -299,7 +299,7 @@ def test_content_calendar_out_of_range_weeks(make_ctx):
 
 def test_content_calendar_produces_correct_total_dates(make_ctx):
     result = ysp._cmd_content_calendar(make_ctx("content_calendar", ["3", "2"]))
-    assert "6 فيديو" in result
+    assert "6 videos" in result
     # 3 نقط (•) لكل أسبوع × أسبوعين = 6
     assert result.count("•") == 6
 
@@ -311,7 +311,7 @@ def test_content_calendar_single_video_per_week(make_ctx):
 
 def test_content_calendar_seven_per_week_covers_all_days(make_ctx):
     result = ysp._cmd_content_calendar(make_ctx("content_calendar", ["7", "1"]))
-    for day in ysp._DAY_NAMES_AR:
+    for day in ysp._DAY_NAMES:
         assert day in result
 
 
