@@ -1,0 +1,37 @@
+customtkinter>=5.2.0
+CTkToolTip>=0.8
+pyinstaller>=6.0.0
+mcp>=1.0.0
+capstone>=5.0.0
+# yara-python: pattern-matching malware/threat detection (VirusTotal's
+# engine). Complements virus_scan (ClamAV, curated signatures) with
+# rule-based hunting — reports matches only, never quarantines.
+yara-python>=4.5.0
+Pillow>=10.0.0
+pandas>=2.0.0
+matplotlib>=3.8.0
+edge-tts>=6.1.0
+# sherpa-onnx: محرك نطق محلي مصان (Apache-2.0). بيشغّل نفس نماذج Piper
+# الأصلية بترخيص MIT من غير ما نحتاج برنامج piper — مهم لأن مستودع
+# Piper الأصلي اتأرشف في أكتوبر 2025 والوريث بترخيص GPL-3.0.
+sherpa-onnx>=1.10.0
+# piper-tts: احتياطي للي عنده التثبيت القديم شغال. sherpa فوق بيجرّب
+# الأول وبيشغّل نفس الأصوات، فده مش مطلوب لتثبيت جديد.
+piper-tts>=1.2.0
+sounddevice>=0.4.6
+faster-whisper>=0.10.0
+openai-whisper>=20231117
+vosk>=0.3.45
+# silero-vad: stops `listen` recording as soon as you go quiet instead of
+# always waiting a fixed 5s. ~2MB model, MIT, works on Arabic and English.
+# Optional — without it `listen` falls back to the fixed duration.
+silero-vad>=5.1
+scenedetect[opencv]>=0.6.4
+python-telegram-bot>=21.0
+discord.py>=2.3.0
+keyring>=24.0.0
+# tree-sitter: بيبني خريطة مرتّبة للمشروع (repomap.py) عشان المخ يشوف
+# البنية كلها بدل ما يخمّن أسماء دوال. اختياري — من غيره الخريطة
+# بترجع فاضية وكل حاجة تانية شغالة.
+tree-sitter>=0.23.0
+tree-sitter-language-pack>=0.7.0

@@ -1,11 +1,10 @@
 """
 Y99 Filter Bot — واجهة حديثة
 """
-import tkinter as tk
 import json
-import threading
-import sys
 import os
+import sys
+import tkinter as tk
 
 if sys.platform == "win32":
     import winsound
@@ -16,7 +15,8 @@ else:
 try:
     import customtkinter as ctk
 except ImportError:
-    import subprocess, sys
+    import subprocess
+    import sys
     subprocess.check_call([sys.executable, "-m", "pip", "install", "customtkinter"])
     import customtkinter as ctk
 
@@ -304,16 +304,22 @@ class App(ctk.CTk):
             self.bot.stop()
         self.running = False
         self.start_btn.configure(text="▶  تشغيل", fg_color=ACCENT, hover_color="#3b5bdb")
-        self.next_btn.configure(state="disabled", text_color=TEXT_DIM)
+        self._reset_next_btn()
         self._set_status("stopped", "متوقف", GRAY)
-        self._found_f = False
 
     def _request_next(self):
         if self.bot:
             self.bot.request_next()
-        self.next_btn.configure(state="disabled", text_color=TEXT_DIM)
-        self._found_f = False
+        self._reset_next_btn()
         self._set_status("running", "جارٍ التشغيل...", ACCENT)
+
+    def _reset_next_btn(self):
+        # next_btn بيتلوّن أخضر لما نلاقي F (زر شغّال). أي حالة تانية
+        # (running/stopped/error) لازم ترجّعه لشكله العادي المقفول —
+        # وإلا هيفضل أخضر "شغّال شكلاً" حتى وهو disabled فعليًا.
+        self.next_btn.configure(state="disabled", fg_color=CARD, hover_color=BORDER,
+                                 text_color=TEXT_DIM, text="⏭  شات جديد")
+        self._found_f = False
 
     def _clear_log(self):
         self.log_box.configure(state="normal")
@@ -350,8 +356,7 @@ class App(ctk.CTk):
     def __update_status(self, status):
         if status == "running":
             self._set_status("running", "جارٍ التشغيل...", ACCENT)
-            self.next_btn.configure(state="disabled", text_color=TEXT_DIM)
-            self._found_f = False
+            self._reset_next_btn()
         elif status == "found_f":
             self._set_status("found_f", "✅  لقينا F! اضغط شات جديد لما تخلص", GREEN)
             self.next_btn.configure(state="normal", fg_color=GREEN,
@@ -364,11 +369,12 @@ class App(ctk.CTk):
         elif status == "stopped":
             self.running = False
             self.start_btn.configure(text="▶  تشغيل", fg_color=ACCENT, hover_color="#3b5bdb")
-            self.next_btn.configure(state="disabled", text_color=TEXT_DIM)
+            self._reset_next_btn()
             self._set_status("stopped", "متوقف", GRAY)
         elif status == "error":
             self.running = False
             self.start_btn.configure(text="▶  تشغيل", fg_color=ACCENT, hover_color="#3b5bdb")
+            self._reset_next_btn()
             self._set_status("error", "حدث خطأ", RED)
 
     def _set_status(self, key, text, color):

@@ -5,9 +5,10 @@ import asyncio
 import logging
 import random
 import re
-import time
 import threading
+import time
 from collections import Counter
+
 from playwright.async_api import async_playwright
 
 log = logging.getLogger("bot")
@@ -143,7 +144,7 @@ class Y99Bot:
                 if decision == "stay":
                     self.stayed += 1
                     self.on_stats(self.total, self.skipped, self.stayed)
-                    self.on_log(f"✅  F!  فضلت في الشات", "green")
+                    self.on_log("✅  F!  فضلت في الشات", "green")
                     # نمسح أي طلب Next قديم فضل واقف من شات سابق، عشان
                     # ما نتخطاش الشات ده فورًا من غير ما نستناها
                     self._next_requested = False
@@ -161,7 +162,7 @@ class Y99Bot:
                 else:
                     self.skipped += 1
                     self.on_stats(self.total, self.skipped, self.stayed)
-                    self.on_log(f"❌  M → skip", "salmon")
+                    self.on_log("❌  M → skip", "salmon")
                     await self._next(page)
 
             self.on_stats(self.total, self.skipped, self.stayed)
