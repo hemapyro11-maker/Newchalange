@@ -110,6 +110,7 @@ def _ask_best_available(prompt: str) -> tuple[str, str]:
 
 def _cmd_self_improve(ctx) -> str:
     engine = ctx.engine
+    focus = " ".join(ctx.args).strip()  # لو المستخدم كتب سطر بعد الأمر، ده نص توجيه اختياري
     recent = list(engine.log_history)[-40:]
     if not recent:
         return "Not enough history to analyse yet — run a few commands first"
@@ -130,6 +131,13 @@ def _cmd_self_improve(ctx) -> str:
         context_blocks.append(plugin_list)
     context = "\n\n".join(context_blocks)
 
+    focus_instruction = (
+        f"\nThe user specifically asked you to focus on this, and to prioritise it over "
+        f"generic log/error scanning unless something genuinely urgent is in the log:\n"
+        f"\"{focus}\"\n"
+        if focus else ""
+    )
+
     prompt = (
         "You are reviewing the recent activity log of a local desktop assistant app "
         "called Nezuko (nickname 'nezuko'), written in Python.\n"
@@ -138,6 +146,7 @@ def _cmd_self_improve(ctx) -> str:
         "other than Python. If a plugin is listed as registered, it exists and is documented; "
         "do not claim otherwise.\n\n"
         f"{context}\n\n"
+        f"{focus_instruction}"
         "Point out any recurring errors/warnings in the log below, and suggest concrete, "
         "safe improvements grounded in the actual code above, in at most 5 bullet points, "
         "written in Arabic. If nothing concrete is wrong, say so plainly instead of inventing "
@@ -172,6 +181,8 @@ def _cmd_self_improve(ctx) -> str:
 def register(engine):
     engine.registry.register(
         "self_improve", _cmd_self_improve,
-        "self_improve — read the recent log + a real map of Nezuko's own code and suggest "
-        "grounded improvements via the best available model (cloud or local); changes nothing on its own",
+        "self_improve [focus text] — read the recent log + a real map of Nezuko's own code and "
+        "suggest grounded improvements via the best available model (cloud or local); optional "
+        "focus text steers what it prioritises (e.g. 'compare with Wisp's addon isolation system'); "
+        "changes nothing on its own",
     )
