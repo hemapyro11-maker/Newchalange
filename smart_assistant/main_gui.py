@@ -52,6 +52,115 @@ ctk.set_appearance_mode("dark")
 
 MAX_ROWS = 300
 MAX_CHARS = 6000
+MAX_STREAM_LINES = 4000  # سقف أسطر خام في صندوق المحادثة، بديل MAX_ROWS بعد التحويل لـ CTkTextbox
+
+
+# ── اختصارات تحرير قياسية (نسخ/لصق/تحديد الكل/كليك يمين) ────────────
+#
+# CTkEntry و CTkTextbox متبنيين على ودجتس Tk عادية (tk.Entry / tk.Text)
+# اللي *مالهاش* ربط افتراضي لـ Ctrl+A كـ "تحديد الكل" على ويندوز — في
+# Tk الافتراضي Control-a معناها "روح لأول السطر" (أسلوب Emacs)، وده
+# بيبان للمستخدم إنه "مش شغال" لأنه مش اللي متوقعه. نفس الحكاية مفيش
+# قايمة كليك يمين افتراضية خالص. الدالتين دول بيضيفوا السلوك القياسي
+# اللي أي برنامج ويندوز عادي بيعمله.
+
+def _attach_entry_shortcuts(widget) -> None:
+    """لصندوق إدخال قابل للتعديل (CTkEntry): نسخ/قص/لصق/تحديد الكل +
+    قايمة كليك يمين."""
+    entry = widget._entry if hasattr(widget, "_entry") else widget
+
+    def select_all(_event=None):
+        entry.selection_range(0, "end")
+        entry.icursor("end")
+        return "break"
+
+    def copy(_event=None):
+        try:
+            sel = entry.selection_get()
+        except Exception:
+            return "break"
+        entry.clipboard_clear()
+        entry.clipboard_append(sel)
+        return "break"
+
+    def cut(_event=None):
+        copy()
+        try:
+            entry.delete("sel.first", "sel.last")
+        except Exception:
+            pass
+        return "break"
+
+    def paste(_event=None):
+        try:
+            entry.insert("insert", entry.clipboard_get())
+        except Exception:
+            pass
+        return "break"
+
+    for seq in ("<Control-a>", "<Control-A>"):
+        entry.bind(seq, select_all)
+    for seq in ("<Control-c>", "<Control-C>"):
+        entry.bind(seq, copy)
+    for seq in ("<Control-x>", "<Control-X>"):
+        entry.bind(seq, cut)
+    for seq in ("<Control-v>", "<Control-V>"):
+        entry.bind(seq, paste)
+
+    menu = [None]
+
+    def show_menu(event):
+        import tkinter as tk
+        m = tk.Menu(entry, tearoff=0)
+        m.add_command(label="Cut", command=cut)
+        m.add_command(label="Copy", command=copy)
+        m.add_command(label="Paste", command=paste)
+        m.add_separator()
+        m.add_command(label="Select All", command=select_all)
+        menu[0] = m
+        try:
+            m.tk_popup(event.x_root, event.y_root)
+        finally:
+            m.grab_release()
+
+    entry.bind("<Button-3>", show_menu)
+
+
+def _attach_readonly_textbox_shortcuts(widget) -> None:
+    """لصندوق نص للقراءة بس (زي شريط المحادثة): تحديد الكل/نسخ + كليك
+    يمين، من غير لصق أو تعديل (الودجت disabled أصلاً)."""
+    text = widget._textbox if hasattr(widget, "_textbox") else widget
+
+    def select_all(_event=None):
+        text.tag_add("sel", "1.0", "end")
+        return "break"
+
+    def copy(_event=None):
+        try:
+            sel = text.get("sel.first", "sel.last")
+        except Exception:
+            return "break"
+        text.clipboard_clear()
+        text.clipboard_append(sel)
+        return "break"
+
+    for seq in ("<Control-a>", "<Control-A>"):
+        text.bind(seq, select_all)
+    for seq in ("<Control-c>", "<Control-C>"):
+        text.bind(seq, copy)
+
+    def show_menu(event):
+        import tkinter as tk
+        m = tk.Menu(text, tearoff=0)
+        m.add_command(label="Copy", command=copy)
+        m.add_separator()
+        m.add_command(label="Select All", command=select_all)
+        try:
+            m.tk_popup(event.x_root, event.y_root)
+        finally:
+            m.grab_release()
+
+    text.bind("<Button-3>", show_menu)
 
 GLYPH_USER = "›"
 GLYPH_REPLY = "⏺"
@@ -73,7 +182,6 @@ class AssistantApp(ctk.CTk):
         self.engine.on_need_file = self._on_need_file
         self.voice_enabled = False
         self._last_command_name = ""
-        self._rows: list = []
         self._plugin_count = 0
         self._thinking = None
         self._settings = None
@@ -117,12 +225,21 @@ class AssistantApp(ctk.CTk):
         self.root = ctk.CTkFrame(self, fg_color=c["bg"], corner_radius=0)
         self.root.pack(fill="both", expand=True)
 
-        self.stream = ctk.CTkScrollableFrame(
+        # CTkTextbox بدل CTkScrollableFrame+CTkLabel القديمة: التحديد
+        # بالسحب، Ctrl+A، Ctrl+C، وكليك يمين كلهم شغالين بشكل حقيقي هنا
+        # (CTkLabel أصلاً مش قابل للتحديد خالص، ده كان السبب الحقيقي
+        # وراء "النسخ مش شغال في الشات").
+        self.stream = ctk.CTkTextbox(
             self.root, fg_color=c["bg"], corner_radius=0,
+            wrap="word", activate_scrollbars=True,
             scrollbar_button_color=c["border"],
             scrollbar_button_hover_color=c["dim"],
+            font=self._font(13),
         )
         self.stream.pack(fill="both", expand=True, padx=26, pady=(18, 6))
+        self.stream.configure(state="disabled")  # للقراءة بس — المستخدم بيكتب في self.entry
+        _attach_readonly_textbox_shortcuts(self.stream)
+        self._tag_cache: set = set()
 
         bottom = ctk.CTkFrame(self.root, fg_color=c["bg"], corner_radius=0)
         bottom.pack(fill="x", padx=26, pady=(0, 14))
@@ -146,12 +263,8 @@ class AssistantApp(ctk.CTk):
         )
         self.entry.pack(side=self._side, fill="x", expand=True, padx=(2, 10), pady=4)
         self.entry.bind("<Return>", lambda e: self._send())
+        _attach_entry_shortcuts(self.entry)
         self.entry.focus_set()
-        # نفس مشكلة الـ paste اللي في CTkEntry بتاع مفتاح الـ API —
-        # موجودة هنا كمان في صندوق الشات الرئيسي، فبنعمل نفس الحل.
-        self.entry.bind("<Control-v>", self._paste_into_entry)
-        self.entry.bind("<Control-V>", self._paste_into_entry)
-        self.entry.bind("<Button-3>", self._paste_into_entry)  # كليك يمين
 
         # شريط أدوات نصي مختصر — أفعال بحرف واحد، مفيش أزرار ضخمة
         tools = ctk.CTkFrame(bottom, fg_color="transparent")
@@ -183,36 +296,63 @@ class AssistantApp(ctk.CTk):
         self._refresh_status()
 
     # ── أسطر المحادثة ──────────────────────────────────────────────────
+    def _stream_tag(self, color: str, size: int, bold: bool) -> str:
+        """بيرجع اسم تاج بلون/حجم/تخانة معينين، وبيعرّفه أول مرة بس."""
+        name = f"c_{color.lstrip('#')}_{size}_{int(bold)}"
+        if name not in self._tag_cache:
+            text = self.stream._textbox
+            text.tag_configure(
+                name, foreground=color, font=self._font(size, bold),
+                justify="right" if self._rtl else "left",
+                lmargin1=4, lmargin2=4, spacing1=1, spacing3=1,
+            )
+            self._tag_cache.add(name)
+        return name
+
     def _line(self, glyph: str, text: str, color: str, *,
               indent: int = 0, size: int = 13, bold: bool = False):
-        """سطر واحد في الشريط: علامة + نص، بالاتجاه الصح."""
-        row = ctk.CTkFrame(self.stream, fg_color="transparent")
-        row.pack(fill="x", pady=1)
-
-        pad = (indent * 16)
-        if glyph:
-            ctk.CTkLabel(
-                row, text=glyph, width=18, text_color=color,
-                font=self._font(size, True), anchor="n",
-            ).pack(side=self._side, padx=(pad, 4) if self._rtl else (pad, 4), anchor="n")
+        """سطر واحد في شريط المحادثة: علامة + نص، متحدد وقابل للنسخ."""
+        pad = 4 + indent * 16
+        name = f"c_{color.lstrip('#')}_{size}_{int(bold)}_i{indent}"
+        if name not in self._tag_cache:
+            text_widget = self.stream._textbox
+            text_widget.tag_configure(
+                name, foreground=color, font=self._font(size, bold),
+                justify="right" if self._rtl else "left",
+                lmargin1=pad, lmargin2=pad, spacing1=2, spacing3=2,
+            )
+            self._tag_cache.add(name)
 
         body = text if len(text) <= MAX_CHARS else text[:MAX_CHARS] + "\n…"
-        ctk.CTkLabel(
-            row, text=body, text_color=color, font=self._font(size, bold),
-            justify=self._justify, anchor=self._anchor, wraplength=760 - pad,
-        ).pack(side=self._side, fill="x", expand=True,
-               padx=(0, pad) if not self._rtl else (pad, 0))
+        rendered = f"{glyph}  {body}" if glyph else body
 
-        self._rows.append(row)
-        while len(self._rows) > MAX_ROWS:
-            self._rows.pop(0).destroy()
+        self.stream.configure(state="normal")
+        start = self.stream.index("end-1c")
+        self.stream.insert("end", rendered + "\n", name)
+        self.stream.configure(state="disabled")
+        self._trim_stream()
         self.after(20, self._scroll_bottom)
-        return row
+        return start  # مرجع نصي (index) للسطر ده — يستخدم مع _show_thinking/_hide_thinking
 
     def _blank(self, height: int = 6):
-        f = ctk.CTkFrame(self.stream, fg_color="transparent", height=height)
-        f.pack(fill="x")
-        self._rows.append(f)
+        self.stream.configure(state="normal")
+        self.stream.insert("end", "\n")
+        self.stream.configure(state="disabled")
+
+    def _trim_stream(self):
+        """بيقص الأسطر القديمة جدًا لو عدّت سقف معقول، عشان الذاكرة."""
+        text = self.stream._textbox
+        total = int(text.index("end-1c").split(".")[0])
+        if total > MAX_STREAM_LINES:
+            over = total - MAX_STREAM_LINES
+            self.stream.configure(state="normal")
+            self.stream.delete("1.0", f"{over + 1}.0")
+            self.stream.configure(state="disabled")
+
+    def _clear_stream(self):
+        self.stream.configure(state="normal")
+        self.stream.delete("1.0", "end")
+        self.stream.configure(state="disabled")
 
     def _add_user(self, text: str):
         self._blank()
@@ -255,19 +395,25 @@ class AssistantApp(ctk.CTk):
         self._blank(10)
 
     def _scroll_bottom(self):
-        canvas = self.stream._parent_canvas
-        canvas.configure(scrollregion=canvas.bbox("all"))
-        canvas.yview_moveto(1.0)
+        self.stream.see("end")
 
     def _show_thinking(self):
         if self._thinking is None:
+            self.stream.configure(state="normal")
+            self._thinking_start = self.stream.index("end-1c")
+            self.stream.mark_set("thinking_start", self._thinking_start)
+            self.stream.mark_gravity("thinking_start", "left")
+            self.stream.configure(state="disabled")
             self._thinking = self._line("", "…", self.c["faint"], indent=1, size=12)
 
     def _hide_thinking(self):
         if self._thinking is not None:
-            if self._thinking in self._rows:
-                self._rows.remove(self._thinking)
-            self._thinking.destroy()
+            self.stream.configure(state="normal")
+            try:
+                self.stream.delete("thinking_start", "thinking_start + 1 line")
+            except Exception:
+                pass  # لو الـ mark راح لأي سبب، مفيش حاجة نشيلها
+            self.stream.configure(state="disabled")
             self._thinking = None
 
     # ── سطر الحالة ─────────────────────────────────────────────────────
@@ -301,23 +447,6 @@ class AssistantApp(ctk.CTk):
         self.status_label.configure(text=f"{GLYPH_STATUS}  " + "  ·  ".join(parts))
 
     # ── الأفعال ────────────────────────────────────────────────────────
-    def _paste_into_entry(self, event=None):
-        try:
-            clip = self.entry.clipboard_get()
-        except Exception:
-            return "break"  # الحافظة فاضية أو مفيهاش نص
-        if not clip:
-            return "break"
-        # بنلصق في مكان المؤشر (مش استبدال كامل)، عشان ده صندوق شات
-        # عادي ممكن يبقى فيه نص مكتوب قبل الـ paste خلاف مربع المفتاح.
-        try:
-            if self.entry.selection_present():
-                self.entry.delete("sel.first", "sel.last")
-        except Exception:
-            pass
-        self.entry.insert("insert", clip)
-        return "break"
-
     def _send(self):
         text = self.entry.get().strip()
         if not text:
@@ -358,13 +487,10 @@ class AssistantApp(ctk.CTk):
 
     def _resume_session(self, session_id: str, messages: list[dict]):
         """بيفتح محادثة محفوظة: بيرسمها من الأول وبيكمّل عليها."""
-        for row in self._rows:
-            row.destroy()
-        self._rows.clear()
+        self._clear_stream()
         self._thinking = None
         self.engine.session_id = session_id
         self.engine.chat_history = list(messages)
-        self.stream._parent_canvas.yview_moveto(0.0)
         self._line("✻", self.t.t("resumed"), self.c["accent"], size=13, bold=True)
         self._blank(8)
         for msg in messages:
@@ -374,13 +500,10 @@ class AssistantApp(ctk.CTk):
                 self._add_assistant(msg.get("content", ""))
 
     def _new_chat(self):
-        for row in self._rows:
-            row.destroy()
-        self._rows.clear()
+        self._clear_stream()
         self._thinking = None
         self.engine.chat_history.clear()
         self.engine.session_id = sessions.new_id()
-        self.stream._parent_canvas.yview_moveto(0.0)
         self._banner()
 
     def _attach_file(self):
@@ -432,7 +555,6 @@ class AssistantApp(ctk.CTk):
         self.c = theme.palette(self.mode)
         for child in self.winfo_children():
             child.destroy()
-        self._rows.clear()
         self._thinking = None
         self._build()
         self._banner()
@@ -883,12 +1005,8 @@ class SettingsPanel(ctk.CTkToplevel):
         self.editing.pack(fill="x")
         self.editing._prov = prov
         self.editing.bind("<Return>", lambda e: self._save_key())
-        # customtkinter's CTkEntry لا يضمن دايمًا Ctrl+V الافتراضي (بيعتمد
-        # على نظام التشغيل ولاي-آوت الكيبورد)، فبنعمل paste يدوي مضمون
-        # بيستبدل محتوى الحقل بالكامل بمحتوى الحافظة (مناسب لحقل مفتاح واحد).
-        self.editing.bind("<Control-v>", self._paste_into_editing)
-        self.editing.bind("<Control-V>", self._paste_into_editing)
-        self.editing.bind("<Button-3>", self._paste_into_editing)  # كليك يمين
+        _attach_entry_shortcuts(self.editing)
+        self.editing.focus_set()
 
         ctk.CTkLabel(
             box, text=prov.signup, text_color=c["accent"],
@@ -900,20 +1018,6 @@ class SettingsPanel(ctk.CTkToplevel):
                 text_color=c["yellow"], font=self.app._font(9),
                 anchor=self.app._anchor,
             ).pack(fill="x")
-
-    def _paste_into_editing(self, event=None):
-        if self.editing is None or not self.editing.winfo_exists():
-            return "break"
-        try:
-            clip = self.editing.clipboard_get()
-        except Exception:
-            return "break"  # الحافظة فاضية أو مفيهاش نص
-        clip = clip.strip()
-        if not clip:
-            return "break"
-        self.editing.delete(0, "end")
-        self.editing.insert(0, clip)
-        return "break"  # يمنع أي معالجة افتراضية تانية تتعارض
 
     # ── التنقل ─────────────────────────────────────────────────────────
     def _move(self, delta: int):
