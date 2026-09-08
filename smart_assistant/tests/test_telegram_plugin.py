@@ -293,7 +293,7 @@ def test_handle_incoming_approved_owner_executes(monkeypatch, bare_engine):
 
     captured = {}
 
-    def fake_run_and_capture(engine, text):
+    def fake_run_and_capture(engine, text, source=None):
         captured["text"] = text
         return "تم التنفيذ"
 

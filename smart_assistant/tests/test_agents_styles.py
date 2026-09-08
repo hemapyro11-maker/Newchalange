@@ -256,7 +256,7 @@ def test_agent_command_needs_a_task(make_ctx, bare_engine):
 def test_agent_command_passes_the_raw_task(make_ctx, bare_engine, monkeypatch):
     """المهمة بتتاخد من ctx.raw مش ctx.args — عشان متتقصّش."""
     seen = {}
-    monkeypatch.setattr(agents, "run", lambda e, n, t: seen.update(task=t) or ("ok", "X"))
+    monkeypatch.setattr(bare_engine, "begin_agent", lambda n, t: seen.update(task=t) or "ok")
     ap._cmd_agent(make_ctx('agent a1 look at "my file.py" please',
                            ["a1", "look", "at", "my file.py", "please"],
                            engine=bare_engine))

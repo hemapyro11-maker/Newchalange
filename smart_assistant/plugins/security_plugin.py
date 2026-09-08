@@ -9,6 +9,7 @@ SUID/SGID). استخدم فحص المنافذ وTLS بس على أجهزة إن
 تشخيص شخصية مش أدوات scanning جماعي.
 """
 from __future__ import annotations
+import sys
 
 import datetime
 import hashlib
@@ -167,6 +168,8 @@ def _cmd_file_perms(ctx) -> str:
     root = pathlib.Path(ctx.args[0])
     if not root.exists():
         return f"❌ path not found: {root}"
+    if sys.platform == "win32":
+        return "Windows ACL inspection is not supported by this POSIX permission audit. Use icacls <path>; no safety verdict was made."
 
     targets: list[pathlib.Path] = []
     if root.is_file():

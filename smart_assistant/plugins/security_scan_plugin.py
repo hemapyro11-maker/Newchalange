@@ -464,13 +464,19 @@ def _run_npm_audit(pkg_dir: pathlib.Path) -> str | None:
     if not shutil.which("npm"):
         return None
     proc = subprocess.run(
-        ["npm", "audit", "--json"], cwd=pkg_dir, capture_output=True, text=True, timeout=120,
+        [shutil.which("npm") or "npm", "audit", "--json"], cwd=pkg_dir, capture_output=True, text=True, timeout=120,
     )
     try:
         data = json.loads(proc.stdout)
     except json.JSONDecodeError:
         return "  ⚠️ could not parse npm audit output"
+    if not isinstance(data, dict) or data.get("error") or proc.returncode not in (0, 1):
+        return "  ⚠️ npm audit failed; no vulnerability verdict is available"
+    if not isinstance(data.get("metadata"), dict) or not isinstance(data["metadata"].get("vulnerabilities"), dict):
+        return "  ⚠️ npm audit returned no vulnerability counts; no verdict is available"
     meta = data.get("metadata", {}).get("vulnerabilities", {})
+    if any(not isinstance(meta.get(k, 0), int) or meta.get(k, 0) < 0 for k in ("critical", "high", "moderate", "low")):
+        return "  ⚠️ npm audit returned invalid vulnerability counts"
     total = sum(meta.get(k, 0) for k in ("critical", "high", "moderate", "low"))
     if total == 0:
         return "  ✅ npm audit: no known vulnerabilities in your packages"

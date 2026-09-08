@@ -48,7 +48,7 @@ def _config_path() -> pathlib.Path:
 def _local_plugins_dir() -> pathlib.Path:
     base = pathlib.Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) \
         else pathlib.Path(__file__).resolve().parent
-    return base
+    return base / "plugins" if getattr(sys, "frozen", False) else base
 
 
 def _load_state() -> dict:

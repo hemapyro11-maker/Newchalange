@@ -35,3 +35,4 @@ smart_assistant/sessions/
 smart_assistant/hooks.json
 smart_assistant/agents/
 smart_assistant/styles/
+smart_assistant/clone_voice_config.json

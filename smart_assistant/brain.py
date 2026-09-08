@@ -97,7 +97,7 @@ PROVIDERS: dict[str, Provider] = {
     "gemini": Provider(
         name="gemini", label="Google Gemini", kind="gemini",
         base_url="https://generativelanguage.googleapis.com/v1beta",
-        model="gemini-2.0-flash", rpm=15, rpd=1500, context=1_000_000,
+        model="gemini-3.6-flash", rpm=15, rpd=1500, context=1_000_000,
         quality=100, signup="https://aistudio.google.com/apikey",
         trains_on_input=True,
     ),
@@ -276,38 +276,36 @@ def estimate_tokens(text: str) -> int:
 
 
 def _fit_to_context(messages: list[dict], limit: int) -> list[dict]:
-    """بيقص أقدم الرسائل عشان الطلب يدخل في سياق المزوّد النشط.
+    """Bound the estimated input budget, including oversized system messages.
 
-    ده الإصلاح للمشكلة رقم 1 في رأس الملف: من غيره، محادثة اتبنت على
-    Gemini (مليون توكن) وبعدين اتحوّلت لنموذج محلي (8 آلاف) كانت
-    هترجّع خطأ بدل رد. بنسيب رسالة الـ system دايمًا (فيها التعليمات
-    وقايمة الأدوات) وآخر رسالة للمستخدم (السؤال الحالي) — الاتنين
-    مش قابلين للحذف — وبنشيل من النص.
+    The first instruction prefix and latest request take precedence over history.
+    This is a character heuristic, not an exact provider tokenizer.
     """
-    budget = int(limit * 0.75)  # نسيب مساحة للرد نفسه
-    system = [m for m in messages if m.get("role") == "system"]
-    rest = [m for m in messages if m.get("role") != "system"]
-
-    used = sum(estimate_tokens(m.get("content", "")) for m in system)
-    kept: list[dict] = []
-    # من الأحدث للأقدم عشان نحافظ على آخر سياق
-    for msg in reversed(rest):
-        cost = estimate_tokens(msg.get("content", ""))
-        if kept and used + cost > budget:
+    budget = max(2, int(limit * 0.75))
+    system = [dict(m) for m in messages if m.get("role") == "system"]
+    rest = [dict(m) for m in messages if m.get("role") != "system"]
+    kept_system = []
+    used = 0
+    system_budget = budget // 2 if rest else budget
+    for msg in system:
+        room = system_budget - used
+        if room <= 0:
             break
-        used += cost
+        msg["content"] = str(msg.get("content", ""))[:room * 3]
+        used += estimate_tokens(msg["content"])
+        kept_system.append(msg)
+    kept = []
+    for msg in reversed(rest):
+        room = budget - used
+        if room <= 0:
+            break
+        cost = estimate_tokens(str(msg.get("content", "")))
+        if kept and cost > room:
+            break
+        msg["content"] = str(msg.get("content", ""))[:room * 3]
+        used += estimate_tokens(msg["content"])
         kept.append(msg)
-    kept.reverse()
-
-    # آخر رسالة مش قابلة للحذف (هي السؤال نفسه)، فلو هي لوحدها أكبر من
-    # الميزانية لازم نقصّ محتواها. من غير الخطوة دي كانت بتعدي كما هي
-    # ويرجّع المزوّد خطأ سياق بدل رد.
-    if kept and used > budget:
-        room = max(200, budget - (used - estimate_tokens(kept[-1].get("content", ""))))
-        trimmed = dict(kept[-1])
-        trimmed["content"] = trimmed.get("content", "")[: room * 3]
-        kept[-1] = trimmed
-    return system + kept
+    return kept_system + list(reversed(kept))
 
 
 # ── المخ ─────────────────────────────────────────────────────────────
@@ -317,6 +315,7 @@ class Brain:
 
     def __init__(self):
         self._states: dict[str, _ProviderState] = {}
+        self._inflight: dict[str, int] = {}
         self._load_state()
 
     # ── حفظ/تحميل العدّادات اليومية ──────────────────────────────
@@ -364,12 +363,14 @@ class Brain:
         if st.day_stamp != today:
             st.day_stamp, st.day_count = today, 0
         rpm, rpd = self._limits_for(prov, cfg)
-        if st.day_count >= rpd:
+        pending = self._inflight.get(prov.name, 0)
+        if st.day_count + pending >= rpd:
             return False
         st.minute_hits = [t for t in st.minute_hits if now - t < 60]
-        return len(st.minute_hits) < rpm
+        return len(st.minute_hits) + pending < rpm
 
     def _note_success(self, name: str, now: float) -> None:
+        self._inflight[name] = max(0, self._inflight.get(name, 0) - 1)
         st = self._states.setdefault(name, _ProviderState())
         st.minute_hits.append(now)
         st.day_count += 1
@@ -381,6 +382,7 @@ class Brain:
         """قاطع الدائرة: بعد فشلين متتاليين نقفل المزوّد مؤقتًا بـ
         backoff تصاعدي بدل ما نفضل نضربه ونحرق الحصة (المشكلة رقم 3)."""
         st = self._states.setdefault(name, _ProviderState())
+        self._inflight[name] = max(0, self._inflight.get(name, 0) - 1)
         st.fails += 1
         if rate_limited:
             # ضربنا الحد فعلاً — نعتبر الدقيقة مليانة ونستنى
@@ -439,6 +441,7 @@ class Brain:
                 if not self._available(prov, cfg, now):
                     errors.append(f"{prov.label}: cooling down")
                     continue
+                self._inflight[prov.name] = self._inflight.get(prov.name, 0) + 1
             model = cfg.get("models", {}).get(prov.name, prov.model)
             fitted = _fit_to_context(messages, prov.context)
             try:
@@ -493,6 +496,7 @@ class Brain:
             with _lock:
                 if not self._available(prov, cfg, now):
                     continue
+                self._inflight[prov.name] = self._inflight.get(prov.name, 0) + 1
             model = cfg.get("models", {}).get(prov.name, prov.model)
             try:
                 text = _call_provider(
@@ -506,6 +510,9 @@ class Brain:
                 with _lock:
                     self._note_success(prov.name, now)
                 drafts.append((prov.label, text.strip()))
+            else:
+                with _lock:
+                    self._note_failure(prov.name, now, rate_limited=False)
 
         if not drafts:
             return BrainReply(text="", error="كل المزوّدين فشلوا في الوضع العميق")

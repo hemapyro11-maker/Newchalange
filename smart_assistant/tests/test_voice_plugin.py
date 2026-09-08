@@ -1358,8 +1358,8 @@ def test_clone_voice_reports_missing_tool(make_ctx, tmp_path, monkeypatch, isola
     f = tmp_path / "ref.wav"
     f.write_bytes(b"x")
     result = vp._cmd_clone_voice(make_ctx("clone_voice", [str(f), "hello", str(tmp_path / "out.wav")]))
-    assert "TTS (Coqui) is not installed" in result
-    assert "pip install TTS" in result
+    assert "Coqui TTS is not installed" in result
+    assert "pip install coqui-tts" in result
 
 
 def test_clone_voice_missing_reference_file(make_ctx, tmp_path, monkeypatch, isolated_clone_config):
@@ -1408,7 +1408,7 @@ def test_clone_voice_success_creates_output_and_sets_tos_env(make_ctx, tmp_path,
 
         def tts_to_file(self, text, speaker_wav, language, file_path):
             calls.append(("synth", text, speaker_wav, language, file_path))
-            pathlib.Path(file_path).write_bytes(b"fake-audio")
+            pathlib.Path(file_path).write_bytes(b"fake-audio" * 8)
 
     fake_module = types.ModuleType("TTS.api")
     fake_module.TTS = _FakeCoquiTTS
@@ -1436,7 +1436,7 @@ def test_clone_voice_caches_model_across_calls(make_ctx, tmp_path, monkeypatch, 
             init_calls.append(model_name)
 
         def tts_to_file(self, text, speaker_wav, language, file_path):
-            pathlib.Path(file_path).write_bytes(b"fake-audio")
+            pathlib.Path(file_path).write_bytes(b"fake-audio" * 8)
 
     fake_module = types.ModuleType("TTS.api")
     fake_module.TTS = _FakeCoquiTTS
@@ -1469,7 +1469,7 @@ def test_clone_voice_reports_when_output_missing(make_ctx, tmp_path, monkeypatch
     f.write_bytes(b"x")
     result = vp._cmd_clone_voice(make_ctx("clone_voice", [str(f), "hi", str(tmp_path / "missing_out.wav")]))
     assert result.startswith("❌")
-    assert "no real output file" in result
+    assert "no usable WAV output" in result
 
 
 def test_clone_voice_model_load_error_reported(make_ctx, tmp_path, monkeypatch, isolated_clone_config):

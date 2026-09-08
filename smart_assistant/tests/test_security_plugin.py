@@ -1,3 +1,4 @@
+import sys
 import hashlib
 import shutil
 import socket
@@ -206,6 +207,7 @@ def test_file_perms_missing_path(make_ctx, tmp_path):
     assert result.startswith("❌")
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits do not represent Windows ACLs")
 def test_file_perms_clean_file_reports_ok(make_ctx, tmp_path):
     f = tmp_path / "clean.txt"
     f.write_text("hi")
@@ -214,6 +216,7 @@ def test_file_perms_clean_file_reports_ok(make_ctx, tmp_path):
     assert result.startswith("✅")
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits do not represent Windows ACLs")
 def test_file_perms_flags_world_writable(make_ctx, tmp_path):
     f = tmp_path / "bad.txt"
     f.write_text("hi")
@@ -223,6 +226,7 @@ def test_file_perms_flags_world_writable(make_ctx, tmp_path):
     assert str(f) in result
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits do not represent Windows ACLs")
 def test_file_perms_flags_suid(make_ctx, tmp_path):
     f = tmp_path / "suid_bin"
     shutil.copy("/bin/true", f)
@@ -231,6 +235,7 @@ def test_file_perms_flags_suid(make_ctx, tmp_path):
     assert "SUID" in result
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits do not represent Windows ACLs")
 def test_file_perms_flags_readable_secret_file(make_ctx, tmp_path):
     f = tmp_path / ".env"
     f.write_text("SECRET_KEY=abc")
@@ -239,6 +244,7 @@ def test_file_perms_flags_readable_secret_file(make_ctx, tmp_path):
     assert "sensitive file readable by others" in result
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits do not represent Windows ACLs")
 def test_file_perms_directory_scan_flags_only_the_bad_file(make_ctx, tmp_path):
     (tmp_path / "normal.txt").write_text("x")
     (tmp_path / "normal.txt").chmod(0o644)
@@ -254,6 +260,7 @@ def test_file_perms_directory_scan_flags_only_the_bad_file(make_ctx, tmp_path):
     assert "secret.txt" not in result
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits do not represent Windows ACLs")
 def test_file_perms_ignores_symlinks(make_ctx, tmp_path):
     target = tmp_path / "target.txt"
     target.write_text("x")
@@ -262,3 +269,11 @@ def test_file_perms_ignores_symlinks(make_ctx, tmp_path):
     link.symlink_to(target)
     result = sp._cmd_file_perms(make_ctx("file_perms", [str(tmp_path)]))
     assert result.startswith("✅")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows behavior")
+def test_file_perms_windows_does_not_report_posix_verdict(make_ctx, tmp_path):
+    path = tmp_path / "ordinary.txt"
+    path.write_text("data")
+    result = sp._cmd_file_perms(make_ctx("file_perms", [str(path)]))
+    assert "Windows ACL" in result and "no safety verdict" in result

@@ -1,36 +1,15 @@
-"""
-plugin_forge_plugin.py — المساعد يقدر يصمم Plugins جديدة بنفسه، ويكتشف
-أخطاءها ويصلحها تلقائياً (generate → validate → feed error back → retry،
-لحد سقف محاولات محدود)، باستخدام نموذج محلي مجاني (Ollama) — بدون أي
-API مدفوع، اتساقاً مع self_improve_plugin.py.
+"""Generate candidate plugins with static syntax checks and bounded retries.
 
-النطاق الآمن: الكود المتولد بيتحط في plugins_pending/ (مش plugins/)
-ومش بيتحمّل **جوه محرك نيزوكو الحي** غير بعد أمر approve_plugin صريح
-منك، بعد ما تقدر تراجعه بـ review_pending — الخطوة الوحيدة المحتاجة
-إذنك فعليًا.
-
-**ملحوظة صادقة مهمة (مش تفصيلة صغيرة):** حلقة "توليد → تحقق → تصحيح
-→ إعادة محاولة" بتنفذ الكود المتولد فعليًا وقت كل محاولة تحقق —
-`_validate_candidate()` بتعمل `exec_module()` وتنادي `register(engine)`
-الحقيقية بتاعة الكود المرشّح، في subprocess منفصل (مهلة 10 ثواني،
-بدون أي عزل/sandboxing حقيقي على مستوى نظام التشغيل — نفس صلاحيات
-حسابك بالظبط) — لحد MAX_ATTEMPTS (4) مرات، **قبل ما تشوفه إنت خالص**
-عبر review_pending. يعني كود غلط أو غير متوقع من النموذج المحلي (حتى
-من غير أي نية سيئة، مجرد هلوسة نموذج) ممكن يتنفذ فعليًا على جهازك —
-مش بس "يتفحص نظريًا" — قبل ما توافق على حاجة. عزل حقيقي (container/
-sandbox) خارج نطاق مشروع مساعد سطح مكتب بسيط زي ده، فالحماية الوحيدة
-العملية دلوقتي هي إنك متستخدمش create_plugin/fix_plugin على وصف مهمة
-حساسة (زي "امسح ملفات قديمة") من غير ما تكون واثق في النموذج المحلي
-بتاعك.
+Candidates stay in plugins_pending until explicit approve_plugin. Validation
+does not import or execute candidates and makes no runtime-safety claim.
+Approved plugins execute with the user's normal process permissions.
 """
 from __future__ import annotations
 
 import datetime
 import json
 import pathlib
-import subprocess
 import sys
-import textwrap
 import urllib.error
 import urllib.request
 
@@ -53,38 +32,6 @@ Plugin API contract for this assistant:
 - Output ONLY the complete Python source code for the file. No markdown code
   fences, no explanations, no comments about what you're doing — just the code.
 """
-
-_VALIDATION_HARNESS = textwrap.dedent("""
-    import importlib.util, sys
-
-    class _FakeRegistry:
-        def __init__(self):
-            self.registered = []
-        def register(self, name, handler, description=""):
-            self.registered.append(name)
-
-    class _FakeEngine:
-        def __init__(self):
-            self.registry = _FakeRegistry()
-            self.log_history = []
-            self.skills = {"plugins": {}, "commands": {}}
-        def _log(self, msg, level="info"):
-            pass
-
-    spec = importlib.util.spec_from_file_location("candidate", sys.argv[1])
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    if not hasattr(module, "register") or not callable(module.register):
-        print("ERROR: file does not define a callable register(engine) function")
-        sys.exit(1)
-    engine = _FakeEngine()
-    module.register(engine)
-    if not engine.registry.registered:
-        print("ERROR: register(engine) ran without raising, but registered zero commands")
-        sys.exit(1)
-    print("OK: registered commands: " + ", ".join(engine.registry.registered))
-""")
-
 
 def _pending_dir() -> pathlib.Path:
     base = pathlib.Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) \
@@ -127,19 +74,19 @@ def _ask_ollama(prompt: str, model: str = DEFAULT_MODEL) -> str:
 
 
 def _validate_candidate(code_path: pathlib.Path) -> tuple[bool, str]:
-    harness_path = code_path.parent / f"_harness_{code_path.stem}.py"
-    harness_path.write_text(_VALIDATION_HARNESS, encoding="utf-8")
+    # Validation must not execute generated code before the approval step.
+    import ast
     try:
-        result = subprocess.run(
-            [sys.executable, str(harness_path), str(code_path)],
-            capture_output=True, text=True, timeout=10,
-        )
-    except subprocess.TimeoutExpired:
-        return False, "TIMEOUT: the code hung for over 10 seconds (possible infinite loop)"
-    finally:
-        harness_path.unlink(missing_ok=True)
-    output = (result.stdout or "") + (result.stderr or "")
-    return result.returncode == 0, output.strip()[-3000:]
+        source = code_path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(code_path))
+        compile(tree, str(code_path), "exec")
+    except (OSError, SyntaxError, ValueError) as exc:
+        return False, f"Static validation failed: {exc}"
+    register = next((node for node in tree.body
+                     if isinstance(node, ast.FunctionDef) and node.name == "register"), None)
+    if register is None or not register.args.args:
+        return False, "A register(engine) function is required"
+    return True, "Syntax and entry point checked only; code has NOT been executed or sandboxed."
 
 
 def _generate_with_retries(engine, initial_prompt: str, name: str, ask=_ask_ollama) -> tuple[bool, str, str, int]:
@@ -209,7 +156,7 @@ def _cmd_create_plugin(ctx) -> str:
         return msg  # Ollama unreachable/connection error — msg already explains
 
     _save_candidate(name, code, description, ok, attempts, msg)
-    status = "✅ generated and verified working" if ok else f"⚠  generated, but still broken after {attempts} attempts"
+    status = "✅ generated; static checks passed" if ok else f"⚠  generated, but still broken after {attempts} attempts"
     return (
         f"{status} — {name}\n"
         f"📁 saved to plugins_pending/{name}.py (not active in the app yet)\n"

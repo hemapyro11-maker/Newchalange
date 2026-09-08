@@ -178,7 +178,7 @@ def _request_pairing(sender_id: int) -> str:
 
 # ── تنفيذ حقيقي عبر نفس طابور core_engine (مش مسار مختصر) ───────────────
 
-def _run_and_capture(engine, text: str) -> str:
+def _run_and_capture(engine, text: str, source: str = "telegram") -> str:
     """بينفذ النص كأمر عادي تمامًا عبر run_task (نفس الطابور بتاع أي
     أمر مكتوب على الجهاز)، ويرجع نتيجته النصية للرد بيها على تليجرام.
     بيلقط الرد عن طريق استبدال engine._log مؤقتًا أثناء تنفيذ المهمة
@@ -196,7 +196,7 @@ def _run_and_capture(engine, text: str) -> str:
 
         engine._log = capturing_log
         try:
-            engine._dispatch(text)
+            engine._dispatch(text, source=source)
         finally:
             engine._log = original_log
         result_holder.put("\n".join(captured) if captured else "(ran, with no text output)")
@@ -214,7 +214,7 @@ def _handle_incoming(engine, sender_id: int, text: str) -> str:
     من غير أي اعتماد على تليجرام نفسه."""
     data = _load_config()
     if sender_id in data["owner_ids"]:
-        return _run_and_capture(engine, text)
+        return _run_and_capture(engine, text, source=f"telegram:{sender_id}")
     code = _request_pairing(sender_id)
     return (
         "🔒 Nezuko does not recognise your account.\n"

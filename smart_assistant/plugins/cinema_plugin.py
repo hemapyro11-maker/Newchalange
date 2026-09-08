@@ -38,9 +38,19 @@ from __future__ import annotations
 
 import json
 import pathlib
-import shutil
+import shutil as _stdlib_shutil
 import subprocess
 import tempfile
+import media_runtime as mr
+
+
+class _MediaTools:
+    @staticmethod
+    def which(name):
+        return _stdlib_shutil.which(name) or (mr.binary(name) if name in {"ffmpeg", "ffprobe", "ffplay"} else None)
+
+
+shutil = _MediaTools()
 
 try:
     from scenedetect import ContentDetector
@@ -52,7 +62,9 @@ except ImportError:
 
 def _run_ffmpeg(args: list[str], timeout: int) -> tuple[bool, str]:
     try:
-        result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+        resolved = list(args)
+        resolved[0] = shutil.which(resolved[0]) or resolved[0]
+        result = subprocess.run(resolved, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     except subprocess.TimeoutExpired:
         return False, f"⏱ timed out after ({timeout}s)"
     except OSError as e:
@@ -72,7 +84,9 @@ def _run_ffprobe(args: list[str]) -> subprocess.CompletedProcess | None:
     يهرب من الدالة اللي بتنادينا ويكسر الـ traceback في وش المستخدم من
     غير رسالة ❌ زي أي فشل تاني في الملف ده."""
     try:
-        return subprocess.run(args, capture_output=True, text=True, timeout=30)
+        resolved = list(args)
+        resolved[0] = shutil.which(resolved[0]) or resolved[0]
+        return subprocess.run(resolved, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
     except (subprocess.TimeoutExpired, OSError):
         return None
 
@@ -750,12 +764,12 @@ def _cmd_generate_subtitles(ctx) -> str:
 def _cmd_burn_subtitles(ctx) -> str:
     if len(ctx.args) < 3:
         return "usage: burn_subtitles <video> <subtitles.srt|.vtt|.ass> <out.mp4>"
-    if not shutil.which("ffmpeg"):
-        return "❌ ffmpeg not found"
     src, subs, dst = ctx.args[0], ctx.args[1], ctx.args[2]
     missing = _missing_files(src, subs)
     if missing:
         return f"❌ file not found: {missing[0]}"
+    if not shutil.which("ffmpeg"):
+        return "❌ ffmpeg not found"
 
     # المسار بيتحط جوه واصف فلتر ffmpeg نصي، فأي `:` أو `'` أو `\` فيه
     # بتتفسر غلط (خصوصًا مسار ويندوز زي C:\...) — لازم تتهرّب صراحة

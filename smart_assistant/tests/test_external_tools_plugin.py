@@ -1,3 +1,5 @@
+import sys
+import shlex
 import json
 
 import external_tools_plugin as ep
@@ -89,7 +91,7 @@ def test_expand_command_no_args():
 # ── actual execution (real subprocess, real echo) ──────────────────────
 
 def test_registered_cli_tool_actually_runs(engine):
-    ep._cmd_external_add(_ctx(engine, "external_add", ["greet", "echo", "hello", "{args}"]))
+    ep._cmd_external_add(_ctx(engine, "external_add", ["greet", shlex.quote(sys.executable), "-c", shlex.quote("import sys; print('hello ' + sys.argv[1])"), "{args}"]))
     cmd = engine.registry.get("greet")
     result = cmd.handler(_ctx(engine, "greet world", ["world"]))
     assert "hello world" in result
@@ -104,7 +106,7 @@ def test_registered_cli_tool_nonexistent_binary(engine):
 
 
 def test_registered_cli_tool_timeout(engine, monkeypatch):
-    ep._cmd_external_add(_ctx(engine, "external_add", ["slow", "sleep", "999"]))
+    ep._cmd_external_add(_ctx(engine, "external_add", ["slow", shlex.quote(sys.executable), "-c", shlex.quote("import time; time.sleep(999)")]))
     monkeypatch.setattr(ep, "TIMEOUT_CLI", 0.1)
     cmd = engine.registry.get("slow")
     result = cmd.handler(_ctx(engine, "slow", []))

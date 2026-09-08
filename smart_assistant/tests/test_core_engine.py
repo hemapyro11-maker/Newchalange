@@ -1,4 +1,6 @@
 """اختبارات Core Engine: CommandRegistry، الـ dispatch، تحميل الإضافات، وسجل المهارات."""
+import sys
+import pathlib
 import threading
 import time
 
@@ -79,7 +81,7 @@ def test_builtin_echo(bare_engine, make_ctx):
 
 
 def test_run_command_executes_and_captures_output(bare_engine, make_ctx):
-    result = bare_engine._cmd_run(make_ctx("run echo hello", ["echo", "hello"]))
+    result = bare_engine._cmd_run(make_ctx("run", [sys.executable, "-c", "print('hello')"]))
     assert "hello" in result
 
 
@@ -362,7 +364,7 @@ def test_local_dictionary_derives_output_path(bare_engine, monkeypatch):
         "auto_trim_silence", lambda ctx: seen.update(args=ctx.args) or "تم"
     )
     bare_engine._dispatch("شيل الصمت من /home/u/vid.mp4")
-    assert seen["args"] == ["/home/u/vid.mp4", "/home/u/vid_trimmed.mp4"]
+    assert seen["args"] == ["/home/u/vid.mp4", str(pathlib.Path("/home/u/vid_trimmed.mp4"))]
 
 
 def test_missing_file_arg_asks_instead_of_calling_brain(bare_engine, monkeypatch):
@@ -422,6 +424,8 @@ def test_learned_phrase_resolves_locally_afterwards(bare_engine, monkeypatch):
         lambda name, args, raw: seen.update(name=name),
     )
     bare_engine._dispatch("اعمللي الحركة الغريبة دي")
+    assert seen == {}
+    bare_engine._dispatch("y")
     assert seen["name"] == "echo"
 
 
@@ -463,7 +467,7 @@ def test_confirming_brain_suggestion_executes_and_learns_the_phrase(bare_engine,
     bare_engine._dispatch("y")
 
     assert any("done" in msg for _, msg in logs)
-    assert intents.load_cache()[intents.normalize("اعمل الحاجة دي بقى")] == "echo"
+    assert intents.load_cache()[intents.normalize("اعمل الحاجة دي بقى")] == {"command": "echo", "args": ["done"]}
 
 
 def test_brain_hallucinated_tool_is_dropped_not_offered(bare_engine, monkeypatch):
@@ -903,21 +907,21 @@ def test_a_command_you_typed_yourself_does_not_start_a_chain(
 
 # ── التنفيذ مش بيتقفل على thread المحرك ─────────────────────────────
 
-def test_brain_call_runs_off_the_worker_thread(bare_engine, monkeypatch):
-    """راجع: نداء النموذج بياخد عشرات الثواني. لو اتنفذ على thread
-    الطابور كان هيقفل كل حاجة تانية (جداول، تليجرام، أوامر تانية)
-    طول المدة دي."""
+def test_brain_call_runs_on_worker_not_ui(bare_engine, monkeypatch):
     monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
-    worker_thread = {}
-
-    def slow_chat(self, messages, **kw):
-        worker_thread["name"] = threading.current_thread().name
-        return brain.BrainReply(text="رد", provider="f", label="F")
-
-    monkeypatch.setattr(brain.Brain, "chat", slow_chat)
-    bare_engine._converse_async("كلام حر")
-    time.sleep(0.4)
-    assert worker_thread.get("name", "").startswith("nezuko-brain")
+    seen = []
+    def chat(self, messages, **kw):
+        seen.append(threading.current_thread())
+        return brain.BrainReply(text="reply", label="Test")
+    monkeypatch.setattr(brain.Brain, "chat", chat)
+    bare_engine.start()
+    try:
+        bare_engine.submit("explain this unusual problem")
+        bare_engine._queue.join()
+        assert seen == [bare_engine._worker]
+        assert seen[0] is not threading.current_thread()
+    finally:
+        bare_engine.stop()
 
 
 
@@ -1061,6 +1065,32 @@ def test_system_prompt_is_not_hardcoded_to_one_language(bare_engine, monkeypatch
     system = captured["m"][0]["content"]
     # التعليمات نفسها إنجليزية، فمش بتجرّ النموذج للعربي
     assert "أنتي نيزوكو" not in system
+
+
+def test_reply_language_can_lock_egyptian_arabic(bare_engine, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
+    monkeypatch.setattr(brain, "load_config", lambda: {"reply_language": "ar"})
+    monkeypatch.setattr(
+        brain.Brain, "chat",
+        lambda self, messages, **kw: captured.setdefault("m", messages)
+        and None or brain.BrainReply(text="تمام", label="X"),
+    )
+    bare_engine._converse("explain this")
+    assert "Reply in natural Egyptian Arabic" in captured["m"][0]["content"]
+
+
+def test_reply_language_can_lock_english(bare_engine, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
+    monkeypatch.setattr(brain, "load_config", lambda: {"reply_language": "en"})
+    monkeypatch.setattr(
+        brain.Brain, "chat",
+        lambda self, messages, **kw: captured.setdefault("m", messages)
+        and None or brain.BrainReply(text="Done", label="X"),
+    )
+    bare_engine._converse("اشرح ده")
+    assert "Reply in clear English" in captured["m"][0]["content"]
 
 
 def test_english_phrase_resolves_locally_without_the_brain(bare_engine, monkeypatch):

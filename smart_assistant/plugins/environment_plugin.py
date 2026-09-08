@@ -268,6 +268,8 @@ def _cmd_env_check(ctx) -> str:
 
 
 def _cmd_env_install(ctx) -> str:
+    if getattr(sys, "frozen", False):
+        return "Install dependencies using an external Python environment; the Nezuko executable cannot run pip. See env_check."
     if not ctx.args:
         return "usage: env_install <tool_key> [--yes]   (env_check lists every available tool_key)"
     key = ctx.args[0].lower()
@@ -300,7 +302,7 @@ def _cmd_env_install(ctx) -> str:
         return f"📋 Would run: {cmd}\n\nIf that is fine, run it again as: env_install {key} --yes"
 
     try:
-        proc = subprocess.run(cmd.split(), capture_output=True, text=True, timeout=300)
+        proc = subprocess.run([sys.executable, "-m", "pip", "install", spec["pip"]], capture_output=True, text=True, timeout=300)
     except subprocess.TimeoutExpired:
         return "❌ the install took longer than expected (5 minutes) and was stopped"
     except OSError as e:
@@ -312,6 +314,8 @@ def _cmd_env_install(ctx) -> str:
 
 
 def _cmd_env_install_all(ctx) -> str:
+    if getattr(sys, "frozen", False):
+        return "Install dependencies using an external Python environment; the Nezuko executable cannot run pip. See env_check."
     confirm = "--yes" in ctx.args
     missing = [k for k in TOOLS if not _is_installed(k)]
     if not missing:

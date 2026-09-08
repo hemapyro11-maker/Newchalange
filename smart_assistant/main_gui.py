@@ -427,6 +427,8 @@ class AssistantApp(ctk.CTk):
         rows = self._brain_rows()
         ready = [r for r in rows if r["has_key"] and r["enabled"]]
         parts = []
+        parts.append(self.engine.project_dir.name)
+        parts.append(self.t.t("coding_plan") if self.engine.coding_mode == "plan" else self.t.t("coding_ask"))
         if ready:
             left = sum(max(0, r["rpd"] - r["used_today"]) for r in ready)
             parts.append(f"{ready[0]['label'].lower()}")
@@ -464,8 +466,17 @@ class AssistantApp(ctk.CTk):
         """أوامر الواجهة نفسها — بتبدأ بـ / زي الطرفية، ومبتلمسش المحرك."""
         if cmd in ("settings", "config", ""):
             self._open_settings()
-        elif cmd == "clear":
+        elif cmd in ("clear", "new"):
             self._new_chat()
+        elif cmd == "cancel":
+            self.engine.cancel()
+            self._hide_thinking()
+        elif cmd in ("plan", "code"):
+            self.engine.submit("mode plan" if cmd == "plan" else "mode ask")
+        elif cmd == "project":
+            path = filedialog.askdirectory(title=self.t.t("pick_dir"))
+            if path:
+                self.engine.submit(f"project {shlex.quote(path)}")
         elif cmd == "theme":
             self._toggle_theme()
         elif cmd == "voice":
@@ -489,8 +500,7 @@ class AssistantApp(ctk.CTk):
         """بيفتح محادثة محفوظة: بيرسمها من الأول وبيكمّل عليها."""
         self._clear_stream()
         self._thinking = None
-        self.engine.session_id = session_id
-        self.engine.chat_history = list(messages)
+        self.engine.new_session(session_id, messages)
         self._line("✻", self.t.t("resumed"), self.c["accent"], size=13, bold=True)
         self._blank(8)
         for msg in messages:
@@ -502,8 +512,7 @@ class AssistantApp(ctk.CTk):
     def _new_chat(self):
         self._clear_stream()
         self._thinking = None
-        self.engine.chat_history.clear()
-        self.engine.session_id = sessions.new_id()
+        self.engine.new_session()
         self._banner()
 
     def _attach_file(self):
@@ -560,6 +569,7 @@ class AssistantApp(ctk.CTk):
         self._banner()
 
     def _speak(self, text: str):
+        text = text.rpartition("\n— ")[0] if "\n— " in text else text
         snippet = " ".join(text.split()).replace('"', "").replace("'", "")
         if len(snippet) > 300:
             snippet = snippet[:300] + "..."
@@ -602,7 +612,10 @@ class AssistantApp(ctk.CTk):
 
     def _on_log(self, msg: str, level: str = "info"):
         self._safe_after(self._render_log, msg, level)
-        if level == "info" and self.voice_enabled and \
+        is_final_model_reply = "\n— " in msg and not any(
+            marker in msg for marker in ("🔧", "↪", "اكتب y", "write y", "❓")
+        )
+        if level == "info" and self.voice_enabled and is_final_model_reply and \
                 self._last_command_name not in ("speak", "voice_status"):
             self._safe_after(self._speak, msg)
 

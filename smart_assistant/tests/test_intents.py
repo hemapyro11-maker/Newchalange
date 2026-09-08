@@ -1,3 +1,4 @@
+import pathlib
 import intents
 import pytest
 
@@ -101,7 +102,7 @@ def test_output_path_is_derived_from_input():
     m = intents.resolve("شيل الصمت من /home/u/vid.mp4", ALL)
     assert m.command == "auto_trim_silence"
     assert m.args[0] == "/home/u/vid.mp4"
-    assert m.args[1] == "/home/u/vid_trimmed.mp4"
+    assert m.args[1] == str(pathlib.Path("/home/u/vid_trimmed.mp4"))
     assert m.is_complete()
 
 
@@ -182,7 +183,7 @@ def test_remember_ignores_empty_input():
 
 def test_cache_survives_reload():
     intents.remember("جملة جديدة خالص", "help")
-    assert intents.load_cache()[intents.normalize("جملة جديدة خالص")] == "help"
+    assert intents.load_cache()[intents.normalize("جملة جديدة خالص")] == {"command": "help", "args": []}
 
 
 def test_forget_all_clears_cache():
@@ -228,12 +229,12 @@ def test_coverage_report_lists_uncovered_commands():
 
 def test_derive_output_keeps_directory():
     spec = intents.ArgSpec(intents.OUT, suffix="_x")
-    assert intents.derive_output("/a/b/c.mp4", spec) == "/a/b/c_x.mp4"
+    assert intents.derive_output("/a/b/c.mp4", spec) == str(pathlib.Path("/a/b/c_x.mp4"))
 
 
 def test_derive_output_applies_extension_override():
     spec = intents.ArgSpec(intents.OUT, suffix="_a", ext=".mp3")
-    assert intents.derive_output("/a/v.mkv", spec) == "/a/v_a.mp3"
+    assert intents.derive_output("/a/v.mkv", spec) == str(pathlib.Path("/a/v_a.mp3"))
 
 
 def test_extract_number_handles_decimals():

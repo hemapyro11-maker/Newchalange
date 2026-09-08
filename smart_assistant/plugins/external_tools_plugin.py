@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import pathlib
 import shlex
+import command_text
 import subprocess
 import sys
 
@@ -54,7 +55,7 @@ def _make_handler(command_template: str, tool_type: str):
     def handler(ctx) -> str:
         expanded = _expand_command(command_template, ctx.args)
         try:
-            argv = shlex.split(expanded)
+            argv = command_text.split(expanded)
         except ValueError as e:
             return f"❌ could not parse the command after substituting {{args}}: {e}"
         if not argv:

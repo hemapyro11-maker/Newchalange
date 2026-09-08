@@ -218,6 +218,8 @@ def _cmd_brain_dict(ctx) -> str:
     if cache:
         lines.append("\nRecently learned:")
         for phrase, cmd in list(cache.items())[-8:]:
+            if isinstance(cmd, dict):
+                cmd = intents.IntentMatch(cmd.get("command", ""), cmd.get("args", [])).command_line()
             lines.append(f"  • \"{phrase}\" → {cmd}")
     return "\n".join(lines)
 

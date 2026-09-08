@@ -84,7 +84,7 @@ echo ====================================
 :: الحالتين — `_record_until_silence` بترجع (None, False) لو النموذج
 :: مش متثبت والنداء اللي فوقها بيرجع للمدة الثابتة، فمفيش أي كسر.
 :: ═══════════════════════════════════════════════════════════════
-py -m pip install customtkinter CTkToolTip pyinstaller mcp typer capstone yara-python Pillow pandas matplotlib edge-tts sherpa-onnx piper-tts sounddevice faster-whisper vosk scenedetect[opencv] python-telegram-bot discord.py keyring --quiet
+py -m pip install customtkinter CTkToolTip pyinstaller mcp typer capstone yara-python Pillow imageio-ffmpeg pandas matplotlib edge-tts sherpa-onnx piper-tts sounddevice faster-whisper vosk scenedetect[opencv] python-telegram-bot discord.py keyring --quiet
 
 :: بناء الـ EXE
 py -m PyInstaller ^
@@ -93,6 +93,9 @@ py -m PyInstaller ^
     --name "Nezuko" ^
     --hidden-import customtkinter ^
     --hidden-import core_engine ^
+    --hidden-import coding ^
+    --hidden-import command_text ^
+    --hidden-import media_runtime ^
     --hidden-import i18n ^
     --hidden-import version ^
     --hidden-import brain ^
@@ -109,6 +112,7 @@ py -m PyInstaller ^
     --collect-all capstone ^
     --collect-all yara ^
     --collect-all PIL ^
+    --collect-all imageio_ffmpeg ^
     --collect-all pandas ^
     --collect-all matplotlib ^
     --collect-all edge_tts ^
@@ -123,6 +127,9 @@ py -m PyInstaller ^
     --collect-all discord ^
     --collect-all keyring ^
     --add-data "core_engine.py;." ^
+    --add-data "coding.py;." ^
+    --add-data "command_text.py;." ^
+    --add-data "media_runtime.py;." ^
     --add-data "i18n.py;." ^
     --add-data "brain.py;." ^
     --add-data "intents.py;." ^

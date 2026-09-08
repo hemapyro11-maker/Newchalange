@@ -10,7 +10,7 @@ def test_macro_loads_and_expands_args(bare_engine, tmp_path, monkeypatch):
 
     from core_engine import CommandContext
     submitted = []
-    bare_engine.submit = lambda text: submitted.append(text)
+    bare_engine.submit_automation = lambda text: submitted.append(text)
     result = cmd.handler(CommandContext(raw="greet Ahmed", args=["Ahmed"], engine=bare_engine))
     assert "echo hi Ahmed" in result
     assert submitted == ["echo hi Ahmed"]

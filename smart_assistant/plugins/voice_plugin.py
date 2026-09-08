@@ -70,7 +70,7 @@ telegram_plugin.py/youtube_strategy_plugin.py عبر `diarize_set_token`.
 
 **استنساخ الصوت (voice cloning):** `clone_voice` بيستنسخ أي صوت من
 عينة صوتية قصيرة (~6 ثواني كفاية) وينطق بيه نص جديد، عبر Coqui
-XTTS-v2 (اختيارية، `pip install TTS` — أول تشغيل بيحمّل نموذج تقيل
+XTTS-v2 (اختيارية، `pip install coqui-tts` — أول تشغيل بيحمّل نموذج تقيل
 ~2GB). زي pyannote، النموذج ده محتاج موافقة صريحة على الترخيص
 (Coqui Public Model License — استخدام غير تجاري بشكل أساسي،
 https://coqui.ai/cpml) قبل أول استخدام؛ نيزوكو **مش** بيوافق نيابة
@@ -89,6 +89,7 @@ clone_voice_agree_license, clone_voice
 from __future__ import annotations
 
 import json
+import inspect
 import os
 import pathlib
 import re
@@ -100,6 +101,7 @@ import tempfile
 import urllib.error
 import urllib.request
 import wave
+import media_runtime as mr
 
 try:
     import sounddevice as sd
@@ -361,7 +363,7 @@ def _safe_extract(archive: pathlib.Path, dest: pathlib.Path) -> bool:
                     return False
                 if member.issym() or member.islnk():
                     return False
-            tar.extractall(dest)
+            tar.extractall(dest, filter="data")
     except (tarfile.TarError, OSError, ValueError):
         return False
     return True
@@ -478,7 +480,11 @@ def _synthesize_with_fallback(text: str, tmp_dir: pathlib.Path,
                               lang: str | None = None) -> tuple[pathlib.Path, str] | None:
     lang = lang or _detect_lang(text)
     voice = _voice_for(lang)
+    import brain
+    local_only = bool(brain.load_config().get("local_only"))
     for label, fn_name, ext, voice_key in _BACKENDS:
+        if local_only and "edge" in fn_name:
+            continue
         synth_fn = globals()[fn_name]
         out_path = tmp_dir / f"speech{ext}"
         if synth_fn(text, out_path, lang):
@@ -736,7 +742,8 @@ def _record_until_silence(out_path: pathlib.Path, max_seconds: int
 _faster_whisper_models: dict[str, object] = {}
 
 
-def _transcribe_faster_whisper(wav_path: pathlib.Path, model_size: str) -> tuple[str | None, bool]:
+def _transcribe_faster_whisper(wav_path: pathlib.Path, model_size: str,
+                               language: str | None = None) -> tuple[str | None, bool]:
     """يرجع (النص أو None، هل المحرك متاح أصلاً). لو متاح لكن مسمعش
     كلام واضح، بيرجع (None, True)."""
     try:
@@ -748,14 +755,22 @@ def _transcribe_faster_whisper(wav_path: pathlib.Path, model_size: str) -> tuple
         if model is None:
             model = WhisperModel(model_size, device="cpu", compute_type="int8")
             _faster_whisper_models[model_size] = model
-        segments, _info = model.transcribe(str(wav_path))
+        try:
+            segments, _info = model.transcribe(
+                str(wav_path), language=language, beam_size=5,
+                vad_filter=True, vad_parameters={"min_silence_duration_ms": 500},
+                condition_on_previous_text=False,
+            )
+        except TypeError:
+            segments, _info = model.transcribe(str(wav_path))
         text = " ".join(seg.text for seg in segments).strip()
     except Exception:
         return None, True
     return (text or None), True
 
 
-def _transcribe_whisper_cli(wav_path: pathlib.Path, model: str) -> tuple[str | None, bool]:
+def _transcribe_whisper_cli(wav_path: pathlib.Path, model: str,
+                            language: str | None = None) -> tuple[str | None, bool]:
     if not shutil.which("whisper"):
         return None, False
     with tempfile.TemporaryDirectory(prefix="nezuko_stt_") as tmp:
@@ -763,6 +778,8 @@ def _transcribe_whisper_cli(wav_path: pathlib.Path, model: str) -> tuple[str | N
             "whisper", str(wav_path), "--model", model,
             "--output_format", "txt", "--output_dir", tmp, "--fp16", "False",
         ]
+        if language:
+            cmd += ["--language", language]
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_TRANSCRIBE_TIMEOUT)
         except subprocess.TimeoutExpired:
@@ -823,14 +840,23 @@ _STT_MISSING_MSG = (
 )
 
 
-def _transcribe(wav_path: pathlib.Path, model: str = WHISPER_MODEL) -> tuple[str | None, str | None]:
+def _transcribe(wav_path: pathlib.Path, model: str = WHISPER_MODEL,
+                language: str | None = None) -> tuple[str | None, str | None]:
     """يرجع (النص، None) لو نجح، أو (None، رسالة خطأ) لو كل المحركات
     فشلت أو مفيش ولا واحد متثبت. بيجرب faster-whisper الأول (أدق
     وأخف)، بعدين whisper CLI، وأخيرًا Vosk (لو نموذجه متحمّل يدويًا)."""
+    def _with_optional_language(fn):
+        """Keep third-party/test STT backends that implement the old API working."""
+        try:
+            accepts_language = len(inspect.signature(fn).parameters) >= 3
+        except (TypeError, ValueError):
+            accepts_language = True
+        return fn(wav_path, model, language) if accepts_language else fn(wav_path, model)
+
     any_available = False
     for backend_fn in (
-        lambda: _transcribe_faster_whisper(wav_path, model),
-        lambda: _transcribe_whisper_cli(wav_path, model),
+        lambda: _with_optional_language(_transcribe_faster_whisper),
+        lambda: _with_optional_language(_transcribe_whisper_cli),
         lambda: _transcribe_vosk(wav_path),
     ):
         text, available = backend_fn()
@@ -987,6 +1013,19 @@ def _cmd_diarize(ctx) -> str:
 _clone_voice_models: dict[str, object] = {}
 
 
+def _reference_duration(path: pathlib.Path) -> float | None:
+    """Read WAV duration locally; other formats are inspected when ffprobe exists."""
+    try:
+        with wave.open(str(path), "rb") as stream:
+            return stream.getnframes() / max(1, stream.getframerate())
+    except (OSError, wave.Error, EOFError):
+        data = mr.probe(path)
+        try:
+            return float(data["format"]["duration"]) if data else None
+        except (KeyError, TypeError, ValueError):
+            return None
+
+
 def _cmd_clone_voice_agree_license(ctx) -> str:
     path = _clone_voice_config_path()
     data = {}
@@ -1025,23 +1064,43 @@ def _cmd_clone_voice(ctx) -> str:
     try:
         from TTS.api import TTS as CoquiTTS
     except ImportError:
-        return "❌ TTS (Coqui) is not installed — pip install TTS (free; first run downloads the ~2GB XTTS-v2 model)"
+        return "❌ Coqui TTS is not installed — install PyTorch for your CPU/GPU, then: pip install coqui-tts"
 
     reference, text, output = ctx.args[0], ctx.args[1], ctx.args[2]
-    if not pathlib.Path(reference).is_file():
+    reference_path, output_path = pathlib.Path(reference), pathlib.Path(output)
+    if not reference_path.is_file():
         return f"❌ reference audio file not found: {reference}"
+    try:
+        if reference_path.resolve() == output_path.resolve():
+            return "❌ reference and output must be different files"
+    except OSError:
+        pass
     if not text.strip():
         return "❌ the text is empty"
     language = ctx.args[3] if len(ctx.args) > 3 else "ar"
     if language not in _CLONE_LANGUAGES:
         return f"❌ language must be one of: {', '.join(sorted(_CLONE_LANGUAGES))}"
+    duration = _reference_duration(reference_path)
+    if duration is not None and not 3 <= duration <= 30:
+        return (f"❌ reference is {duration:.1f}s; use one clean speaker for 3-30 seconds "
+                "(6-12 seconds is usually best). Run prepare_voice_sample first.")
 
     os.environ["COQUI_TOS_AGREED"] = "1"  # موافقتنا الصريحة فوق سجّلت فعلاً — ده بس بيبلّغ مكتبة Coqui نفسها
+    try:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        return f"❌ could not create the output folder: {e}"
 
     model = _clone_voice_models.get(_CLONE_MODEL)
     if model is None:
         try:
-            model = CoquiTTS(_CLONE_MODEL, progress_bar=False, gpu=False)
+            model = CoquiTTS(_CLONE_MODEL, progress_bar=False)
+            try:
+                import torch
+                if torch.cuda.is_available() and hasattr(model, "to"):
+                    model = model.to("cuda")
+            except (ImportError, RuntimeError):
+                pass
         except Exception as e:
             return f"❌ could not load the XTTS-v2 model: {e}"
         _clone_voice_models[_CLONE_MODEL] = model
@@ -1051,8 +1110,8 @@ def _cmd_clone_voice(ctx) -> str:
     except Exception as e:
         return f"❌ voice cloning failed: {e}"
 
-    if not pathlib.Path(output).is_file():
-        return "❌ voice cloning failed — no real output file was produced"
+    if not mr.valid_output(output, minimum_bytes=44):
+        return "❌ voice cloning failed — no usable WAV output was produced"
     return f"✅ voice cloned (language: {language}) at {output}"
 
 
@@ -1072,8 +1131,21 @@ def _listen_smart(ctx) -> tuple[str | None, str | None]:
 
     بيرجع (النص، رسالة الخطأ).
     """
-    explicit = bool(ctx.args)
+    options = [a for a in ctx.args if "=" in a]
+    positional = [a for a in ctx.args if "=" not in a]
+    language, model = None, WHISPER_MODEL
+    for option in options:
+        key, value = option.split("=", 1)
+        if key == "lang" and value in {"auto", "ar", "en"}:
+            language = None if value == "auto" else value
+        elif key == "model" and value in {"tiny", "base", "small", "medium", "large-v3"}:
+            model = value
+        else:
+            return None, "usage: listen [seconds] [lang=auto|ar|en] [model=tiny|base|small|medium|large-v3]"
+    explicit = bool(positional)
+    original_args, ctx.args = ctx.args, positional
     seconds, err = _parse_listen_seconds(ctx)
+    ctx.args = original_args
     if err:
         return None, err
 
@@ -1092,7 +1164,10 @@ def _listen_smart(ctx) -> tuple[str | None, str | None]:
             err = _record_audio(seconds, wav_path)
             if err:
                 return None, f"❌ {err}"
-        return _transcribe(wav_path)
+        try:
+            return _transcribe(wav_path, model, language)
+        except TypeError:
+            return _transcribe(wav_path)
 
 
 def _cmd_listen(ctx) -> str:
@@ -1168,8 +1243,8 @@ def _cmd_stt_status(ctx) -> str:
 def register(engine):
     engine.registry.register("speak", _cmd_speak, "speak <text> — say something in Nezuko's voice (edge-tts → sherpa-onnx offline → espeak-ng fallback)")
     engine.registry.register("voice_status", _cmd_voice_status, "voice_status — which speech engines are available")
-    engine.registry.register("listen", _cmd_listen, "listen [seconds] — record from the mic and transcribe it (does not run anything)")
-    engine.registry.register("listen_run", _cmd_listen_run, "listen_run [seconds] — like listen, but runs what you said as a command")
+    engine.registry.register("listen", _cmd_listen, "listen [seconds] [lang=auto|ar|en] [model=...] — transcribe the mic without executing")
+    engine.registry.register("listen_run", _cmd_listen_run, "listen_run [seconds] [lang=auto|ar|en] — transcribe then submit through normal approvals")
     engine.registry.register("stt_status", _cmd_stt_status, "stt_status — which listening engines are available")
     engine.registry.register("separate_vocals", _cmd_separate_vocals, "separate_vocals <audio> <out_dir> [mode=all|vocals] — split an audio file into stems (Demucs)")
     engine.registry.register("diarize_set_token", _cmd_diarize_set_token, "diarize_set_token <hf_token> — save a Hugging Face token for speaker diarization")

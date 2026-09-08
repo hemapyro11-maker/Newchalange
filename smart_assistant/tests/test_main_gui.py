@@ -14,6 +14,11 @@ import pytest
 
 pytest.importorskip("tkinter", reason="tkinter not available")
 pytest.importorskip("customtkinter", reason="customtkinter not installed")
+import tkinter
+try:
+    tkinter.Tcl()
+except tkinter.TclError as exc:
+    pytest.skip(f"Tcl runtime unavailable: {exc}", allow_module_level=True)
 
 if not os.environ.get("DISPLAY") and os.name != "nt":
     pytest.skip("no display available", allow_module_level=True)

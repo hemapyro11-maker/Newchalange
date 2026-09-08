@@ -1,3 +1,4 @@
+import sys
 import json
 import shutil
 import subprocess
@@ -197,7 +198,7 @@ def test_code_scan_fix_rewrites_yaml_load_without_loader(make_ctx, tmp_path):
     assert "1 fixed" in result
     fixed = f.read_text(encoding="utf-8")
     assert "yaml.safe_load(open('c.yml'))" in fixed
-    subprocess.run(["python3", "-m", "py_compile", str(f)], check=True)
+    subprocess.run([sys.executable, "-m", "py_compile", str(f)], check=True)
 
 
 def test_code_scan_fix_rewrites_unsafe_loader_kwarg(make_ctx, tmp_path):
@@ -206,7 +207,7 @@ def test_code_scan_fix_rewrites_unsafe_loader_kwarg(make_ctx, tmp_path):
     ssp._cmd_code_scan(make_ctx("code_scan", [str(f), "--fix"]))
     fixed = f.read_text(encoding="utf-8")
     assert "Loader=yaml.SafeLoader" in fixed
-    subprocess.run(["python3", "-m", "py_compile", str(f)], check=True)
+    subprocess.run([sys.executable, "-m", "py_compile", str(f)], check=True)
 
 
 def test_code_scan_fix_does_not_touch_already_safe_loader(make_ctx, tmp_path):
@@ -309,9 +310,12 @@ def test_vuln_scan_pip_audit_finds_real_known_vulnerability(make_ctx, tmp_path):
 
 
 @requires_npm
-def test_vuln_scan_npm_audit_finds_real_known_vulnerability(make_ctx, tmp_path):
+def test_vuln_scan_npm_audit_finds_real_known_vulnerability(make_ctx, tmp_path, monkeypatch):
     (tmp_path / "package.json").write_text(json.dumps({"name": "t", "version": "1.0.0", "dependencies": {"lodash": "4.17.4"}}))
-    subprocess.run(["npm", "install", "--silent"], cwd=tmp_path, capture_output=True, timeout=60)
+    monkeypatch.setenv("npm_config_cache", str(tmp_path / "npm-cache"))
+    installed = subprocess.run([shutil.which("npm"), "install", "--package-lock-only", "--ignore-scripts", "--silent"], cwd=tmp_path, capture_output=True, timeout=60)
+    if installed.returncode:
+        pytest.skip("npm registry/lockfile setup unavailable in this environment")
     result = ssp._cmd_vuln_scan(make_ctx("vuln_scan", [str(tmp_path)]))
     assert "npm audit" in result
     assert "critical" in result.lower() or "🛑" in result
@@ -326,7 +330,7 @@ def test_vuln_scan_composes_file_perms_via_registry(tmp_path):
     ctx = CommandContext(raw="vuln_scan", args=[str(tmp_path)], engine=engine)
     result = engine.registry.get("vuln_scan").handler(ctx)
     assert "File permissions" in result
-    assert "world-writable" in result
+    assert ("Windows ACL" if sys.platform == "win32" else "world-writable") in result
 
 
 def test_vuln_scan_gracefully_skips_file_perms_when_security_plugin_not_loaded(make_ctx, tmp_path):

@@ -480,7 +480,7 @@ def _cache_path() -> pathlib.Path:
     return base / "intent_cache.json"
 
 
-def load_cache() -> dict[str, str]:
+def load_cache() -> dict:
     try:
         data = json.loads(_cache_path().read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
@@ -488,20 +488,23 @@ def load_cache() -> dict[str, str]:
         return {}
 
 
-def remember(phrase: str, command: str) -> None:
+def remember(phrase: str, command: str, args: list[str] | None = None) -> None:
     """بيحفظ ربط صيغة كلام ← أمر، عشان المرة الجاية تتحل ببلاش.
 
     ده اللي بيخلي الاستهلاك ينزل ناحية الصفر مع الوقت: كل صيغة بتدفع
     نداء واحد بس أول مرة في حياتها.
     """
     key = normalize(phrase)
+    if command in {"edit_file", "create_file"}:
+        return  # Multiline content cannot be reconstructed from argument tokens.
     if not key or not command:
         return
     with _lock:
         cache = load_cache()
-        if cache.get(key) == command:
+        entry = {"command": command, "args": list(args or [])}
+        if cache.get(key) == entry:
             return
-        cache[key] = command
+        cache[key] = entry
         try:
             _cache_path().write_text(
                 json.dumps(cache, ensure_ascii=False, indent=1), encoding="utf-8"
@@ -579,8 +582,14 @@ def resolve(text: str, known_commands: set[str] | None = None) -> IntentMatch | 
 
     # 2) الذاكرة المتعلّمة — صيغة النموذج فهمها قبل كده
     cached = load_cache().get(norm)
-    if cached and (not known_commands or cached in known_commands):
-        return IntentMatch(cached, source="cache")
+    if isinstance(cached, dict):
+        command, args = cached.get("command"), cached.get("args")
+        if (isinstance(command, str) and isinstance(args, list)
+                and all(isinstance(arg, str) for arg in args)
+                and (not known_commands or command in known_commands)):
+            return IntentMatch(command, args, source="cache")
+    # Legacy entries stored no arguments. Ignore them rather than guessing.
+
 
     # 3) القاموس المنسّق — بنطابق على الصيغة اللي من غير كلمات الحشو
     matchable = match_form(raw)
@@ -612,7 +621,8 @@ def coverage_report(known_commands: set[str]) -> dict:
     """كام أمر من المسجّلين فعلاً عنده تغطية في القاموس — بيتعرض
     للمستخدم في `intents_status` عشان يبقى شايف الحقيقة بالأرقام."""
     covered = {r.command for r in RULES if r.command in known_commands}
-    cache_cmds = {c for c in load_cache().values() if c in known_commands}
+    cached = (entry.get("command") for entry in load_cache().values() if isinstance(entry, dict))
+    cache_cmds = {c for c in cached if isinstance(c, str) and c in known_commands}
     return {
         "total": len(known_commands),
         "dictionary": len(covered),

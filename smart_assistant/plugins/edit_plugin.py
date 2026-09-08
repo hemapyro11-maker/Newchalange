@@ -35,10 +35,31 @@ from __future__ import annotations
 import pathlib
 import re
 import shutil
+import os
+import tempfile
+import command_text
 
 _MAX_READ_BYTES = 400_000
 _MAX_READ_LINES = 2_000
 _BACKUP_SUFFIX = ".nezuko-bak"
+
+
+def _path(ctx, value):
+    path = pathlib.Path(value).expanduser()
+    return path if path.is_absolute() else pathlib.Path(ctx.engine.project_dir) / path
+
+
+def _atomic_write(path, content):
+    fd, temporary = tempfile.mkstemp(prefix=".nezuko-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        shutil.copymode(path, temporary)
+        os.replace(temporary, path)
+    finally:
+        pathlib.Path(temporary).unlink(missing_ok=True)
 
 _BLOCK_RE = re.compile(
     r"^<{5,9} SEARCH\s*$\n(.*?)^={5,9}\s*$\n(.*?)^>{5,9} REPLACE\s*$",
@@ -51,24 +72,19 @@ _BLOCK_RE = re.compile(
 def _cmd_read_file(ctx) -> str:
     if not ctx.args:
         return "usage: read_file <path> [start_line] [end_line]"
-    path = pathlib.Path(ctx.args[0]).expanduser()
+    path = _path(ctx, ctx.args[0])
     if not path.is_file():
         return f"❌ file not found: {path}"
     try:
         size = path.stat().st_size
     except OSError as e:
         return f"❌ could not stat the file: {e}"
-    if size > _MAX_READ_BYTES:
+    if size > _MAX_READ_BYTES and len(ctx.args) == 1:
         return (
             f"❌ {path} is {size / 1024:.0f}KB — over the {_MAX_READ_BYTES // 1024}KB "
             "read limit. Read a line range instead: read_file <path> <start> <end>"
         )
-    try:
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError as e:
-        return f"❌ could not read the file: {e}"
-
-    start, end = 1, len(lines)
+    start, end = 1, None
     if len(ctx.args) > 1:
         try:
             start = max(1, int(ctx.args[1]))
@@ -79,22 +95,39 @@ def _cmd_read_file(ctx) -> str:
             end = int(ctx.args[2])
         except ValueError:
             return "❌ end_line must be a whole number"
-    if end < start:
+    if end is not None and end < start:
         return "❌ end_line must not be before start_line"
-
-    chunk = lines[start - 1:end][:_MAX_READ_LINES]
+    end = min(end or start + _MAX_READ_LINES - 1, start + _MAX_READ_LINES - 1)
+    chunk = []
+    used = 0
+    total = 0
+    try:
+        with path.open(encoding="utf-8", errors="replace") as stream:
+            for total, line in enumerate(stream, 1):
+                if total < start:
+                    continue
+                if total > end:
+                    break
+                line = line.rstrip("\r\n")
+                remaining = _MAX_READ_BYTES - used
+                chunk.append(line[:remaining])
+                used += len(chunk[-1])
+                if used >= _MAX_READ_BYTES:
+                    break
+    except OSError as e:
+        return f"❌ could not read the file: {e}"
     if not chunk:
-        return f"(nothing at lines {start}-{end}; the file has {len(lines)} lines)"
+        return f"(nothing at lines {start}-{end}; the file has {total} lines)"
     width = len(str(start + len(chunk) - 1))
     body = "\n".join(
         f"{start + i:>{width}}  {line}" for i, line in enumerate(chunk)
     )
-    header = f"📄 {path}  ({len(lines)} lines)"
-    if start > 1 or end < len(lines):
-        header += f"  — showing {start}-{start + len(chunk) - 1}"
+    header = f"📄 {path} — showing {start}-{start + len(chunk) - 1}"
+    if total <= end and used < _MAX_READ_BYTES:
+        header += f" ({total} lines)"
     truncated = ""
-    if len(lines[start - 1:end]) > _MAX_READ_LINES:
-        truncated = f"\n… truncated at {_MAX_READ_LINES} lines"
+    if total > end or used >= _MAX_READ_BYTES:
+        truncated = f"\n… truncated; continue with read_file at line {start + len(chunk)}"
     return f"{header}\n{body}{truncated}"
 
 
@@ -122,8 +155,9 @@ def _apply_block(content: str, search: str, replace: str) -> tuple[str | None, s
 
 
 def _cmd_edit_file(ctx) -> str:
-    parts = ctx.raw.split(maxsplit=2)
-    if len(parts) < 2:
+    try:
+        filename, _ = command_text.file_request(ctx.raw)
+    except ValueError:
         return (
             "usage: edit_file <path>\n"
             "<<<<<<< SEARCH\n"
@@ -133,7 +167,7 @@ def _cmd_edit_file(ctx) -> str:
             ">>>>>>> REPLACE\n\n"
             "The search text must match exactly once. Several blocks are fine."
         )
-    path = pathlib.Path(parts[1]).expanduser()
+    path = _path(ctx, filename)
     blocks = parse_blocks(ctx.raw)
     if not blocks:
         return (
@@ -173,7 +207,7 @@ def _cmd_edit_file(ctx) -> str:
     except OSError as e:
         return f"❌ could not write a backup, so nothing was changed: {e}"
     try:
-        path.write_text(content, encoding="utf-8")
+        _atomic_write(path, content)
     except OSError as e:
         return f"❌ could not write the file: {e}   (backup kept at {backup})"
 
@@ -187,16 +221,17 @@ def _cmd_edit_file(ctx) -> str:
 
 
 def _cmd_create_file(ctx) -> str:
-    parts = ctx.raw.split(maxsplit=2)
-    if len(parts) < 2:
+    try:
+        filename, body = command_text.file_request(ctx.raw)
+    except ValueError:
         return "usage: create_file <path>\n<the file contents>"
-    path = pathlib.Path(parts[1]).expanduser()
-    body = parts[2] if len(parts) > 2 else ""
+    path = _path(ctx, filename)
     if path.exists():
         return f"❌ {path} already exists — use edit_file to change it"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(body, encoding="utf-8")
+        with path.open("x", encoding="utf-8", newline="") as stream:
+            stream.write(body)
     except OSError as e:
         return f"❌ could not create the file: {e}"
     return f"✅ created {path} ({len(body.splitlines())} lines)"

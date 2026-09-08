@@ -38,8 +38,7 @@ def _cmd_agent(ctx) -> str:
     task = ctx.raw.split(maxsplit=2)[2] if len(ctx.raw.split(maxsplit=2)) > 2 else ""
     if not task.strip():
         return "usage: agent <name> <task...>"
-    reply, provider = agents.run(ctx.engine, name, task)
-    return f"{reply}\n\n— {name} · {provider}" if provider else reply
+    return ctx.engine.begin_agent(name, task)
 
 
 def _cmd_agent_new(ctx) -> str:

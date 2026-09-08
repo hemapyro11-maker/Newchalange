@@ -1,3 +1,4 @@
+import sys
 import json
 import os
 import pathlib
@@ -217,7 +218,7 @@ def test_scaffold_python_creates_runnable_main(make_ctx, tmp_path):
     py_compile.compile(str(root / "src" / "myscript" / "main.py"), doraise=True)
     assert (root / "pyproject.toml").is_file()
     proc = subprocess.run(
-        ["python3", "-m", "myscript.main"], cwd=root / "src", capture_output=True, text=True,
+        [sys.executable, "-m", "myscript.main"], cwd=root / "src", capture_output=True, text=True,
     )
     assert proc.returncode == 0
     assert "ready" in proc.stdout
@@ -235,7 +236,7 @@ def test_scaffold_game_creates_runnable_pygame_source(make_ctx, tmp_path):
 
 
 requires_pygame = pytest.mark.skipif(
-    subprocess.run(["python3", "-c", "import pygame"], capture_output=True).returncode != 0,
+    subprocess.run([sys.executable, "-c", "import pygame"], capture_output=True).returncode != 0,
     reason="pygame not installed",
 )
 
@@ -246,7 +247,7 @@ def test_scaffold_game_tests_actually_pass_headless(make_ctx, tmp_path):
     assert result.startswith("✅")
     root = tmp_path / "MyGame"
     env = {**os.environ, "SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy"}
-    proc = subprocess.run(["python3", "-m", "pytest", "-q"], cwd=root, capture_output=True, text=True, env=env)
+    proc = subprocess.run([sys.executable, "-m", "pytest", "-q"], cwd=root, capture_output=True, text=True, env=env)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "4 passed" in proc.stdout
 
@@ -307,7 +308,7 @@ def test_scaffold_pytest_is_runnable(make_ctx, tmp_path):
     result = sp._cmd_scaffold(make_ctx("scaffold", ["pytest", "MyTests", str(tmp_path)]))
     assert result.startswith("✅")
     root = tmp_path / "MyTests"
-    proc = subprocess.run(["python3", "-m", "pytest", "-q", str(root)], capture_output=True, text=True)
+    proc = subprocess.run([sys.executable, "-m", "pytest", "-q", str(root)], capture_output=True, text=True)
     assert proc.returncode == 0
     assert "3 passed" in proc.stdout
     assert (root / "tox.ini").is_file()
@@ -324,14 +325,14 @@ def test_scaffold_ml_script_compiles(make_ctx, tmp_path):
 
 
 @pytest.mark.skipif(
-    subprocess.run(["python3", "-c", "import sklearn"], capture_output=True).returncode != 0,
+    subprocess.run([sys.executable, "-c", "import sklearn"], capture_output=True).returncode != 0,
     reason="scikit-learn not installed",
 )
 def test_scaffold_ml_script_actually_trains(make_ctx, tmp_path):
     sp._cmd_scaffold(make_ctx("scaffold", ["ml", "MyML", str(tmp_path)]))
     root = tmp_path / "MyML"
     proc = subprocess.run(
-        ["python3", "-m", "myml"], cwd=root / "src", capture_output=True, text=True,
+        [sys.executable, "-m", "myml"], cwd=root / "src", capture_output=True, text=True,
     )
     assert proc.returncode == 0, proc.stderr
     assert "accuracy:" in proc.stdout
@@ -348,7 +349,7 @@ def test_scaffold_quantum_script_compiles(make_ctx, tmp_path):
 
 
 requires_qiskit_aer = pytest.mark.skipif(
-    subprocess.run(["python3", "-c", "import qiskit_aer"], capture_output=True).returncode != 0,
+    subprocess.run([sys.executable, "-c", "import qiskit_aer"], capture_output=True).returncode != 0,
     reason="qiskit-aer not installed",
 )
 
@@ -358,7 +359,7 @@ def test_scaffold_quantum_tests_actually_pass(make_ctx, tmp_path):
     result = sp._cmd_scaffold(make_ctx("scaffold", ["quantum", "MyQ", str(tmp_path)]))
     assert result.startswith("✅")
     root = tmp_path / "MyQ"
-    proc = subprocess.run(["python3", "-m", "pytest", "-q"], cwd=root, capture_output=True, text=True)
+    proc = subprocess.run([sys.executable, "-m", "pytest", "-q"], cwd=root, capture_output=True, text=True)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "3 passed" in proc.stdout
 
@@ -368,7 +369,7 @@ def test_scaffold_quantum_bell_state_runs_and_shows_entanglement(make_ctx, tmp_p
     result = sp._cmd_scaffold(make_ctx("scaffold", ["quantum", "MyQ", str(tmp_path)]))
     assert result.startswith("✅")
     root = tmp_path / "MyQ"
-    proc = subprocess.run(["python3", "bell_state.py"], cwd=root, capture_output=True, text=True)
+    proc = subprocess.run([sys.executable, "bell_state.py"], cwd=root, capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
     # الـ dict بيتطبع بمفاتيح متعلّمة بـ quotes زي {'11': 499, '00': 501} —
     # بندوّر على المفاتيح المقتبسة بالظبط عشان مانتلخبطش مع أرقام الـ counts
@@ -469,7 +470,7 @@ def test_scaffold_multiplayer_server_actually_accepts_connections(make_ctx, tmp_
     sp._cmd_scaffold(make_ctx("scaffold", ["multiplayer_server", "MyMP", str(tmp_path)]))
     root = tmp_path / "MyMP"
     proc = subprocess.Popen(
-        ["python3", "server.py"], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        [sys.executable, "server.py"], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
     try:
         for _ in range(30):
@@ -480,7 +481,7 @@ def test_scaffold_multiplayer_server_actually_accepts_connections(make_ctx, tmp_
                     break
         else:
             pytest.fail("server never opened its port")
-        client = subprocess.run(["python3", "client.py"], cwd=root, capture_output=True, text=True, timeout=5)
+        client = subprocess.run([sys.executable, "client.py"], cwd=root, capture_output=True, text=True, timeout=5)
         assert client.returncode == 0
     finally:
         proc.terminate()

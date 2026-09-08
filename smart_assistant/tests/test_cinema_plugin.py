@@ -775,7 +775,9 @@ def test_burn_subtitles_missing_video(make_ctx, tmp_path, srt_file):
     assert result.startswith("❌ file not found")
 
 
-def test_burn_subtitles_missing_srt(make_ctx, tmp_path, clip1):
+def test_burn_subtitles_missing_srt(make_ctx, tmp_path):
+    clip1 = tmp_path / "placeholder.mp4"
+    clip1.touch()  # File validation must not require FFmpeg to generate a clip.
     result = cp._cmd_burn_subtitles(make_ctx(
         "burn_subtitles", [str(clip1), str(tmp_path / "nope.srt"), str(tmp_path / "o.mp4")]
     ))

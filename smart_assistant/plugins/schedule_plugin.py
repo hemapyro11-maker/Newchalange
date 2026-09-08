@@ -118,7 +118,7 @@ def _tick(engine) -> None:
                 continue
             if next_run > now:
                 continue
-            engine.submit(job["command"])
+            engine.submit_automation(job["command"])
             job["last_run"] = now.isoformat(timespec="seconds")
             parsed = _parse_spec(job["spec"])
             if parsed is None:
@@ -247,7 +247,7 @@ def _handle_run_now(ctx) -> str:
     job = _find_job(data, job_id)
     if job is None:
         return f"❌ no schedule numbered #{job_id}"
-    ctx.engine.submit(job["command"])
+    ctx.engine.submit_automation(job["command"])
     return f"▶️ sent #{job_id} ({job['command']}) to run now"
 
 

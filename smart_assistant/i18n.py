@@ -11,6 +11,8 @@ from __future__ import annotations
 
 STRINGS: dict[str, dict[str, str]] = {
     "en": {
+        "coding_plan": "plan · read only",
+        "coding_ask": "code · approval required",
         # الهوية
         "app_title": "nezuko",
         "app_subtitle": "your local AI assistant",
@@ -33,7 +35,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "resumed": "conversation resumed",
         "thinking": "…",
         # أوامر الشرطة
-        "slash_unknown": "/settings  /resume  /clear  /theme  /voice  /lang  /quit",
+        "slash_unknown": "/project  /plan  /code  /cancel  /settings  /resume  /clear  /theme  /voice  /lang  /quit",
         # حوارات الملفات
         "pick_file": "Choose a file",
         "pick_dir": "Choose a folder",
@@ -144,6 +146,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "untitled": "untitled conversation",
     },
     "ar": {
+        "coding_plan": "تخطيط · قراءة فقط",
+        "coding_ask": "برمجة · بتأكيدك",
         "app_title": "نيزوكو",
         "app_subtitle": "مساعدتك الذكية المحلية",
         "status_running": "شغالة",
@@ -161,7 +165,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "greet_setup": "عشان أفهم كلامك العادي، دوس ⚙ وظبّط مخ مجاني.",
         "resumed": "محادثة مستكملة",
         "thinking": "…",
-        "slash_unknown": "/settings  /resume  /clear  /theme  /voice  /lang  /quit",
+        "slash_unknown": "/project  /plan  /code  /cancel  /settings  /resume  /clear  /theme  /voice  /lang  /quit",
         "pick_file": "اختار ملف",
         "pick_dir": "اختار مجلد",
         "pick_file_scan": "اختار الملف اللي عايز تفحصه",

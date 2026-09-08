@@ -36,7 +36,15 @@ _lock = threading.Lock()
 _NEVER = frozenset({
     "run", "create_plugin", "fix_plugin", "approve_plugin",
     "android_shell", "db_query", "external_add", "quarantine_restore",
-    "edit_file", "create_file",
+    "edit_file", "create_file", "schedule", "schedule_run", "macro_run",
+    "allow", "reload_plugins", "db_migrate", "env_install", "project",
+    "test", "agent", "listen_run", "mode", "env_install_all",
+    "convert", "trim", "merge_av", "concat", "extract_audio", "thumbnail",
+    "overlay_text", "color_grade", "transition", "letterbox", "stabilize",
+    "speed_ramp", "pip", "chroma_key", "master_audio", "denoise_audio",
+    "title_card", "auto_trim_silence", "upscale_image", "upscale_video",
+    "generate_subtitles", "burn_subtitles", "separate_vocals", "clone_voice",
+    "encode_video", "create_video", "master_audio_pro", "prepare_voice_sample",
 })
 
 

@@ -175,7 +175,8 @@ def test_run_now_submits_to_queue(make_ctx, bare_engine):
     assert "▶️" in result
     text, _fn = bare_engine._queue.get_nowait()
     assert text == "echo hi"
-    assert _fn is None
+    from core_engine import _HOOK_SENTINEL
+    assert _fn is _HOOK_SENTINEL
 
 
 def test_run_now_unknown_job(make_ctx, bare_engine):

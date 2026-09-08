@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+brain_config.json
+brain_state.json
+skills.json
+intent_cache.json
+sessions/
+connectors.json
+youtube_config.json
+clone_voice_config.json

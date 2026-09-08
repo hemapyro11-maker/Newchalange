@@ -30,27 +30,27 @@ def test_validate_candidate_rejects_missing_register(tmp_path):
     assert "register" in msg
 
 
-def test_validate_candidate_rejects_zero_commands(tmp_path):
+def test_static_validation_does_not_claim_registered_commands(tmp_path):
     p = tmp_path / "c.py"
     p.write_text("def register(engine):\n    pass\n", encoding="utf-8")
     ok, msg = pf._validate_candidate(p)
-    assert not ok
-    assert "zero commands" in msg
+    assert ok
+    assert "NOT been executed" in msg
 
 
-def test_validate_candidate_catches_infinite_loop(tmp_path):
+def test_static_validation_never_runs_infinite_loop(tmp_path):
     p = tmp_path / "c.py"
     p.write_text("def register(engine):\n    while True:\n        pass\n", encoding="utf-8")
     ok, msg = pf._validate_candidate(p)
-    assert not ok
-    assert "TIMEOUT" in msg
+    assert ok
+    assert "NOT been executed" in msg
 
 
-def test_validate_candidate_catches_runtime_error(tmp_path):
+def test_static_validation_does_not_claim_runtime_verification(tmp_path):
     p = tmp_path / "c.py"
     p.write_text("def register(engine):\n    1 / 0\n", encoding="utf-8")
     ok, msg = pf._validate_candidate(p)
-    assert not ok
+    assert ok
 
 
 def test_generate_with_retries_self_corrects(monkeypatch, tmp_path, bare_engine):
@@ -62,7 +62,7 @@ def test_generate_with_retries_self_corrects(monkeypatch, tmp_path, bare_engine)
         if calls["n"] == 1:
             return "def register(engine)\n    pass"  # syntax error
         if calls["n"] == 2:
-            return "def register(engine):\n    pass"  # zero commands
+            return "def other_function():\n    pass"  # missing entry point
         return (
             "def _h(ctx):\n    return 'pong'\n\n"
             "def register(engine):\n    engine.registry.register('ping', _h, 'd')\n"

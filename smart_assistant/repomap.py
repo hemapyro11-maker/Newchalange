@@ -62,11 +62,11 @@ def _parser_for(lang: str):
 
 
 def available() -> bool:
-    try:
-        import tree_sitter_language_pack  # noqa: F401
-    except ImportError:
-        return False
-    return True
+    # Importing the package is not enough: recent language-pack releases
+    # download parsers lazily and can be unusable when their cache is blocked
+    # or the first-run download is offline.  Report the capability we can
+    # actually use so benchmarks/tests do not claim a broken repo map exists.
+    return _parser_for("python") is not None
 
 
 def _walk(node):

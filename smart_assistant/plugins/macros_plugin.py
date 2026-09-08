@@ -27,7 +27,7 @@ def _make_macro_handler(lines: list[str]):
             expanded = line.replace("{args}", args_text).strip()
             if not expanded or expanded.startswith("#"):
                 continue
-            ctx.engine.submit(expanded)
+            ctx.engine.submit_automation(expanded)
             outputs.append(f"→ {expanded}")
         return "\n".join(outputs) if outputs else "(empty macro)"
     return handler

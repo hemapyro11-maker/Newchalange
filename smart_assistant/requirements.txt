@@ -8,6 +8,7 @@ capstone>=5.0.0
 # rule-based hunting — reports matches only, never quarantines.
 yara-python>=4.5.0
 Pillow>=10.0.0
+imageio-ffmpeg>=0.6.0
 pandas>=2.0.0
 matplotlib>=3.8.0
 edge-tts>=6.1.0

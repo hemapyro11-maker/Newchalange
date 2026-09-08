@@ -231,8 +231,25 @@ def _cmd_db_migrate(ctx) -> str:
                     )
                 continue  # applied and unchanged — skip
             try:
-                conn.executescript(sql_text)
+                conn.executescript("BEGIN IMMEDIATE;")
+                def authorize(action, arg1, arg2, database, trigger):
+                    if action in {sqlite3.SQLITE_TRANSACTION, sqlite3.SQLITE_SAVEPOINT,
+                                  sqlite3.SQLITE_ATTACH, sqlite3.SQLITE_DETACH}:
+                        return sqlite3.SQLITE_DENY
+                    return sqlite3.SQLITE_OK
+                conn.set_authorizer(authorize)
+                # Execute complete statements without executescript's implicit COMMIT.
+                statement = ""
+                for char in sql_text:
+                    statement += char
+                    if char == ";" and sqlite3.complete_statement(statement):
+                        conn.execute(statement)
+                        statement = ""
+                if statement.strip():
+                    conn.execute(statement)
+                conn.set_authorizer(None)
             except sqlite3.Error as e:
+                conn.set_authorizer(None)
                 conn.rollback()
                 return (
                     f"❌ migration {f.name} failed: {e}"

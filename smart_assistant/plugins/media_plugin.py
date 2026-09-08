@@ -11,9 +11,19 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-import shutil
+import shutil as _stdlib_shutil
 import subprocess
 import tempfile
+import media_runtime as mr
+
+
+class _MediaTools:
+    @staticmethod
+    def which(name):
+        return _stdlib_shutil.which(name) or (mr.binary(name) if name in {"ffmpeg", "ffprobe", "ffplay"} else None)
+
+
+shutil = _MediaTools()
 
 
 def _missing_files(*paths: str) -> list[str]:
@@ -25,13 +35,17 @@ def _run_ffmpeg(args: list[str], timeout: int) -> tuple[bool, str]:
     حالات الفشل الممكنة (timeout, binary اتشال أثناء التشغيل, ...) بدل
     ما يسيب استثناء خام يوصل للمستخدم."""
     try:
-        result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+        resolved = list(args)
+        resolved[0] = shutil.which(resolved[0]) or resolved[0]
+        result = subprocess.run(resolved, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     except subprocess.TimeoutExpired:
         return False, f"⏱ timed out after {timeout}s — the file is very large, or ffmpeg hung"
     except OSError as e:
         return False, f"❌ could not run {args[0]}: {e}"
     if result.returncode != 0:
         return False, result.stderr.strip()[-500:]
+    if args[0] == "ffmpeg" and args[-1] != "-" and not mr.valid_output(args[-1], minimum_bytes=1):
+        return False, "ffmpeg exited successfully but produced no output file"
     return True, result.stdout
 
 
@@ -85,12 +99,12 @@ def _cmd_probe(ctx) -> str:
 def _cmd_convert(ctx) -> str:
     if len(ctx.args) < 2:
         return "usage: convert <input> <output>"
-    if not shutil.which("ffmpeg"):
-        return "❌ ffmpeg not found — install it from ffmpeg.org"
     src, dst = ctx.args[0], ctx.args[1]
     missing = _missing_files(src)
     if missing:
         return f"❌ file not found: {missing[0]}"
+    if not shutil.which("ffmpeg"):
+        return "❌ ffmpeg not found — install it from ffmpeg.org"
     ok, err = _run_ffmpeg(["ffmpeg", "-y", "-i", src, dst], timeout=300)
     if not ok:
         return f"❌ conversion failed:\n{err}"

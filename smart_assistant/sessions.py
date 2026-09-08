@@ -66,7 +66,7 @@ def _path(session_id: str) -> pathlib.Path:
     return sessions_dir() / f"{safe}.json"
 
 
-def save(session_id: str, messages: list[dict], *, title: str = "") -> None:
+def save(session_id: str, messages: list[dict], *, title: str = "", project: str = "") -> None:
     """بيحفظ الجلسة. الرسايل الفاضية مبتتحفظش عشان مانملاش القايمة
     بجلسات فاضية كل ما المستخدم يفتح البرنامج ويقفله."""
     if not messages:
@@ -75,7 +75,10 @@ def save(session_id: str, messages: list[dict], *, title: str = "") -> None:
         path = _path(session_id)
         existing_created = ""
         try:
-            existing_created = json.loads(path.read_text(encoding="utf-8")).get("created", "")
+            existing = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(existing, dict):
+                existing_created = existing.get("created", "")
+                project = project or existing.get("project", "")
         except (OSError, json.JSONDecodeError):
             pass
         now = datetime.datetime.now().isoformat(timespec="seconds")
@@ -85,6 +88,7 @@ def save(session_id: str, messages: list[dict], *, title: str = "") -> None:
             "created": existing_created or now,
             "updated": now,
             "messages": messages,
+            "project": project,
         }
         try:
             # كتابة على ملف مؤقت وبعدين استبدال ذري — عشان لو البرنامج
@@ -103,14 +107,21 @@ def load(session_id: str) -> list[dict] | None:
         data = json.loads(_path(session_id).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    messages = data.get("messages")
-    return messages if isinstance(messages, list) else None
+    messages = data.get("messages") if isinstance(data, dict) else None
+    if not isinstance(messages, list) or not all(
+        isinstance(m, dict) and m.get("role") in {"system", "user", "assistant"}
+        and isinstance(m.get("content"), str) for m in messages
+    ):
+        return None
+    return messages
 
 
 def meta(session_id: str) -> dict | None:
     try:
         data = json.loads(_path(session_id).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
         return None
     data.pop("messages", None)
     return data
@@ -128,12 +139,14 @@ def list_all() -> list[dict]:
         if not isinstance(data, dict) or "id" not in data:
             continue
         msgs = data.get("messages") or []
+        if not isinstance(msgs, list):
+            continue
         out.append({
             "id": data["id"],
             "title": data.get("title") or "—",
             "created": data.get("created", ""),
             "updated": data.get("updated", ""),
-            "turns": sum(1 for m in msgs if m.get("role") == "user"),
+            "turns": sum(1 for m in msgs if isinstance(m, dict) and m.get("role") == "user"),
         })
     out.sort(key=lambda s: s["updated"], reverse=True)
     return out
