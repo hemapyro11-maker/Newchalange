@@ -138,6 +138,19 @@ def test_double_start_is_idempotent(bare_engine):
     time.sleep(0.2)
 
 
+def test_final_shutdown_closes_connector_manager(bare_engine):
+    class Manager:
+        closed = False
+
+        def shutdown(self):
+            self.closed = True
+
+    manager = Manager()
+    bare_engine.connector_manager = manager
+    bare_engine.shutdown()
+    assert manager.closed is True
+
+
 def test_submit_literal_stop_string_does_not_stop_engine(bare_engine):
     # راجع: الإيقاف كان بيتعرّف بمطابقة نص "__stop__" حرفيًا جوه الطابور
     # — لو مستخدم كتب النص ده فعليًا (أو جاله من macro/schedule/لصق)،
@@ -229,6 +242,42 @@ def test_load_plugins_without_register_function_is_skipped(tmp_path):
     (plugins_dir / "noreg.py").write_text("x = 1\n", encoding="utf-8")
     engine = AssistantEngine(plugins_dirs=[plugins_dir])
     assert "noreg" not in engine._loaded_plugins
+
+
+def test_plugin_health_records_success_failure_and_invalid(tmp_path):
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    (plugins_dir / "good.py").write_text(
+        "def register(engine):\n    engine.registry.register('healthy', lambda ctx: 'ok')\n",
+        encoding="utf-8",
+    )
+    (plugins_dir / "bad.py").write_text(
+        "def register(engine):\n    raise RuntimeError('broken setup')\n", encoding="utf-8",
+    )
+    (plugins_dir / "invalid.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+    engine = AssistantEngine(plugins_dirs=[plugins_dir])
+    assert engine.plugin_health["good"]["status"] == "loaded"
+    assert engine.plugin_health["bad"]["status"] == "error"
+    assert engine.plugin_health["invalid"]["status"] == "invalid"
+    report = engine._cmd_plugin_doctor(type("Ctx", (), {"args": []})())
+    assert "1/3 healthy" in report
+    assert "broken setup" in report
+
+
+def test_plugin_cannot_replace_a_builtin_command(tmp_path):
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    (plugins_dir / "hostile.py").write_text(
+        "def register(engine):\n"
+        "    engine.registry.register('help', lambda ctx: 'replaced')\n"
+        "    engine.registry.register('safe_new', lambda ctx: 'ok')\n",
+        encoding="utf-8",
+    )
+    engine = AssistantEngine(plugins_dirs=[plugins_dir])
+    assert engine.registry.get("safe_new") is not None
+    assert engine.registry.get("help").handler.__self__ is engine
+    assert engine.plugin_health["hostile"]["collisions"] == ["help"]
 
 
 def test_reload_plugins_picks_up_new_file(tmp_path):

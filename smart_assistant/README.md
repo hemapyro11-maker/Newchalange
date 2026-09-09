@@ -658,41 +658,47 @@ discord_status                   # حالة القناة
 عام (مش رسائل خاصة بس)، الأفضل تستخدمه في DM بس لتجربة أنضف — الحماية
 نفسها (allowlist) شغالة في الحالتين على أي حال.
 
-## Connectors (MCP) — زي الموجودة في Claude
+## Connectors (MCP) — GitHub وGmail وCanva وأي منصة MCP
 
-المساعد بيدعم **Model Context Protocol (MCP)** — نفس البروتوكول المفتوح
-المصدر اللي Claude / Claude Desktop بيستخدمه للـ Connectors (Google Drive،
-Gmail، GitHub، filesystem محلي، ...). أي MCP server بتوصّله (محلي ومجاني
-زي `filesystem`/`git`/`fetch`، أو أي server تاني) بتظهر أدواته تلقائياً
-كأوامر في المساعد.
+نيزوكو بقت MCP host كامل يدعم النوعين القياسيين: خادم محلي `stdio` وخادم
+بعيد `Streamable HTTP`. الأدوات بتتكتشف من الخادم وقت الاتصال، وتتسجل
+تلقائيًا باسم `<connector>.<tool>` بدل افتراض أسماء قديمة ممكن تتغير.
 
-**الإعداد:**
+ابدأ بالأوامر دي:
 
-1. `pip install mcp` (موجود في `requirements.txt`).
-2. انسخ `connectors.example.json` إلى `connectors.json` وعدّل السيرفرات
-   اللي عايزها — نفس شكل ملف إعداد Claude Desktop بالظبط:
-   ```json
-   {
-     "mcpServers": {
-       "filesystem": {
-         "command": "npx",
-         "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
-       }
-     }
-   }
-   ```
-3. شغّل التطبيق — بيتصل تلقائياً بكل connector معرّف. تابع الحالة بأمر
-   `connectors`، أو اتصل/افصل يدوياً بـ `connectors connect <name>` /
-   `connectors disconnect <name>`.
-4. أدوات كل connector بتظهر كأوامر باسم `<connector>.<tool>`، وباخد
-   الوسيطة كـ JSON، مثلاً:
-   ```
-   filesystem.read_file {"path": "/tmp/notes.txt"}
-   ```
+```text
+connectors catalog
+connectors add github
+connectors add gmail
+connectors add canva
+connectors doctor
+connectors connect canva
+connectors tools canva
+```
 
-ملحوظة: بعض الـ MCP servers الجاهزة (زي `@modelcontextprotocol/server-*`)
-محتاجة Node.js (`npx`) أو Python (`uvx`) متثبتين على الجهاز — دول أدوات
-مجانية ومفتوحة المصدر برضه، مفيش أي اشتراك أو تكلفة.
+الـ catalog المدمج يحتوي GitHub MCP الرسمي، وCanva AI Connector الرسمي،
+وWorkspace MCP المجتمعي لـ Gmail. إضافة منصة أخرى لا تحتاج تعديل كود نيزوكو:
+
+```text
+connectors add-http sentry https://example.com/mcp
+connectors add-stdio local-tool uvx package-name
+```
+
+GitHub يحتاج `GITHUB_PERSONAL_ACCESS_TOKEN` في Environment، وGmail يحتاج
+`GOOGLE_OAUTH_CLIENT_ID` و`GOOGLE_OAUTH_CLIENT_SECRET` من OAuth Desktop App
+مع تفعيل Gmail API. Canva يفتح OAuth في المتصفح عبر `mcp-remote` ويحتاج
+Node.js 22.16+ وحساب Canva مؤهل. نيزوكو لا يكتب التوكنات في
+`connectors.json`؛ الملف يحتفظ بمراجع `${env:VARIABLE}` فقط، ويرفض الاتصال
+لو السر المطلوب ناقص. الاتصالات لا تبدأ تلقائيًا إلا لو وضعت
+`"autoConnect": true` صراحةً.
+
+كل عنوان بعيد لازم يكون HTTPS؛ HTTP مسموح فقط لـ localhost. الإعداد يتكتب
+ذريًا، وإعادة الاتصال لا تنشئ جلسات متسابقة، و`connectors doctor` يعرض
+الأدوات المطلوبة وحالة الإعداد. مثال استدعاء أداة:
+
+```text
+github.search_repositories {"query": "language:python"}
+```
 
 ## أوامر مخصصة (Macros) — زي Custom Slash Commands في Claude Code
 

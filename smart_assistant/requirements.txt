@@ -1,7 +1,8 @@
 customtkinter>=5.2.0
 CTkToolTip>=0.8
 pyinstaller>=6.0.0
-mcp>=1.0.0
+mcp>=1.10.0
+pywin32>=312; sys_platform == "win32"
 capstone>=5.0.0
 # yara-python: pattern-matching malware/threat detection (VirusTotal's
 # engine). Complements virus_scan (ClamAV, curated signatures) with

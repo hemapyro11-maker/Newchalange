@@ -578,7 +578,7 @@ class AssistantApp(ctk.CTk):
             self.engine.submit(f"speak {snippet}")
 
     def _on_close(self):
-        self.engine.stop()
+        self.engine.shutdown()
         self.destroy()
 
     # ── ربط اختيار الملف ───────────────────────────────────────────────
@@ -771,6 +771,12 @@ class SettingsPanel(ctk.CTkToplevel):
             configured = mgr.load_config()
         except Exception:  # noqa: BLE001
             configured = {}
+        items.append({"kind": "cmd", "label": self._tr("mcp_doctor"),
+                      "cmd": "connectors doctor", "value": ""})
+        for preset in ("github", "gmail", "canva"):
+            if preset not in configured:
+                items.append({"kind": "cmd", "label": self._tr("mcp_add", name=preset),
+                              "cmd": f"connectors add {preset}", "value": ""})
         if not configured:
             items.append({"kind": "info", "label": self._tr("mcp_none"),
                           "value": "connectors.json"})
@@ -807,6 +813,8 @@ class SettingsPanel(ctk.CTkToplevel):
         items.append({"kind": "head", "label": self._tr("sec_actions")})
         items.append({"kind": "cmd", "label": self._tr("reload_plugins"),
                       "cmd": "reload_plugins", "value": ""})
+        items.append({"kind": "cmd", "label": self._tr("plugin_doctor"),
+                      "cmd": "plugin_doctor", "value": ""})
         return items
 
     def _page_skills(self) -> list[dict]:

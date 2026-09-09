@@ -1,16 +1,34 @@
 {
   "mcpServers": {
-    "filesystem": {
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": {
+        "Authorization": "Bearer ${env:GITHUB_PERSONAL_ACCESS_TOKEN}"
+      },
+      "autoConnect": false
+    },
+    "canva": {
+      "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/folder"]
+      "args": ["-y", "mcp-remote@latest", "https://mcp.canva.com/mcp"],
+      "autoConnect": false
     },
-    "fetch": {
+    "gmail": {
+      "type": "stdio",
       "command": "uvx",
-      "args": ["mcp-server-fetch"]
+      "args": ["workspace-mcp", "--tools", "gmail"],
+      "env": {
+        "GOOGLE_OAUTH_CLIENT_ID": "${env:GOOGLE_OAUTH_CLIENT_ID}",
+        "GOOGLE_OAUTH_CLIENT_SECRET": "${env:GOOGLE_OAUTH_CLIENT_SECRET}"
+      },
+      "autoConnect": false
     },
-    "git": {
-      "command": "uvx",
-      "args": ["mcp-server-git", "--repository", "/path/to/repo"]
+    "filesystem": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:/path/to/allowed/folder"],
+      "autoConnect": false
     }
   }
 }

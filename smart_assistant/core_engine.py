@@ -194,18 +194,31 @@ class Command:
 class CommandRegistry:
     def __init__(self):
         self._commands: dict[str, Command] = {}
+        self._lock = threading.RLock()
 
     def register(self, name: str, handler: CommandHandler, description: str = ""):
-        self._commands[name.lower()] = Command(name.lower(), handler, description)
+        with self._lock:
+            self._commands[name.lower()] = Command(name.lower(), handler, description)
 
     def unregister(self, name: str):
-        self._commands.pop(name.lower(), None)
+        with self._lock:
+            self._commands.pop(name.lower(), None)
 
     def get(self, name: str) -> Command | None:
-        return self._commands.get(name.lower())
+        with self._lock:
+            return self._commands.get(name.lower())
 
     def list_commands(self) -> list[Command]:
-        return sorted(self._commands.values(), key=lambda c: c.name)
+        with self._lock:
+            return sorted(self._commands.values(), key=lambda c: c.name)
+
+    def snapshot(self) -> dict[str, Command]:
+        with self._lock:
+            return dict(self._commands)
+
+    def restore(self, snapshot: dict[str, Command]) -> None:
+        with self._lock:
+            self._commands = dict(snapshot)
 
 
 def default_state_dir() -> pathlib.Path:
@@ -291,6 +304,7 @@ class AssistantEngine:
         self._source = "desktop"
         self._pending_source = "desktop"
         self._plugin_commands: set[str] = set()
+        self.plugin_health: dict[str, dict] = {}
         self._agent_scope = None
         self._agent_instructions = ""
         self.coding_mode = "ask"
@@ -350,6 +364,13 @@ class AssistantEngine:
         hooks.fire(self, "session_end")
         self._stop_flag.set()
         self._queue.put(("", _STOP_SENTINEL))
+
+    def shutdown(self):
+        """Final application shutdown, including external connector processes."""
+        self.stop()
+        manager = getattr(self, "connector_manager", None)
+        if manager is not None:
+            manager.shutdown()
 
     def is_running(self) -> bool:
         return bool(self._worker and self._worker.is_alive())
@@ -424,11 +445,13 @@ class AssistantEngine:
         self._plugin_commands.clear()
         self._register_builtin_commands()
         loaded: list[str] = []
+        health: dict[str, dict] = {}
         for plugins_dir in self.plugins_dirs:
             plugins_dir.mkdir(parents=True, exist_ok=True)
             for path in sorted(plugins_dir.glob("*.py")):
                 if path.name.startswith("_"):
                     continue
+                started = time.perf_counter()
                 try:
                     spec = importlib.util.spec_from_file_location(f"assistant_plugin_{path.stem}", path)
                     module = importlib.util.module_from_spec(spec)
@@ -436,26 +459,55 @@ class AssistantEngine:
                     register = getattr(module, "register", None)
                     if not callable(register):
                         self._log(f"⚠ plugin {path.stem} has no register(engine)", "warn")
+                        health[path.stem] = {
+                            "status": "invalid", "commands": [],
+                            "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                            "error": "missing register(engine)", "path": str(path),
+                        }
                         continue
-                    before = dict(self.registry._commands)
+                    before = self.registry.snapshot()
                     try:
                         register(self)
                     except Exception:
-                        self.registry._commands = before
+                        self.registry.restore(before)
                         raise
-                    self._plugin_commands.update(
-                        name for name, command in self.registry._commands.items()
-                        if before.get(name) is not command
+                    after = self.registry.snapshot()
+                    collisions = sorted(
+                        name for name, command in after.items()
+                        if name in before and before[name] is not command
                     )
+                    if collisions:
+                        clean = dict(after)
+                        for name in collisions:
+                            clean[name] = before[name]
+                        self.registry.restore(clean)
+                        after = clean
+                    new_commands = sorted(
+                        name for name, command in after.items()
+                        if name not in before
+                    )
+                    self._plugin_commands.update(new_commands)
                     loaded.append(path.stem)
+                    health[path.stem] = {
+                        "status": "loaded", "commands": new_commands,
+                        "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                        "error": "", "path": str(path), "collisions": collisions,
+                    }
                     self._record_plugin_learned(path.stem)
-                    self._log(f"🧩 plugin loaded: {path.stem}", "ok")
-                except Exception:
+                    collision_note = f"; blocked command collisions: {', '.join(collisions)}" if collisions else ""
+                    self._log(f"🧩 plugin loaded: {path.stem} ({len(new_commands)} commands{collision_note})", "ok")
+                except Exception as exc:
+                    health[path.stem] = {
+                        "status": "error", "commands": [],
+                        "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                        "error": f"{type(exc).__name__}: {exc}", "path": str(path),
+                    }
                     self._log(f"❌ failed to load plugin {path.name}:\n{traceback.format_exc()}", "error")
         # self._loaded_plugins بيعكس نتيجة آخر مسح بس (مش تراكمي) — عشان
         # أمر "plugins" يفضل صادق لو ملف اتشال والمستخدم عمل reload_plugins.
         # (سجل "اتعلمت قبل كده" الدائم هو self.skills["plugins"] مش ده.)
         self._loaded_plugins = sorted(loaded)
+        self.plugin_health = health
         return loaded
 
     # ── builtin commands ──────────────────────────────────────────────
@@ -466,6 +518,7 @@ class AssistantEngine:
         self.registry.register("echo", self._cmd_echo, "طباعة نص")
         self.registry.register("run", self._cmd_run, "تنفيذ أمر نظام (subprocess, بدون shell)")
         self.registry.register("plugins", self._cmd_plugins, "عرض الإضافات المحمّلة حالياً")
+        self.registry.register("plugin_doctor", self._cmd_plugin_doctor, "فحص صحة الإضافات والأوامر والتعارضات")
         self.registry.register("reload_plugins", self._cmd_reload_plugins, "إعادة مسح مجلد plugins/ وتحميل أي إضافة جديدة")
         self.registry.register("skills", self._cmd_skills, "عرض كل المهارات (إضافات/أوامر) اللي اتعلمتها من الأول — تراكمي ومبيتنساش")
 
@@ -496,6 +549,27 @@ class AssistantEngine:
         if not self._loaded_plugins:
             return "no plugins loaded — drop a .py file with a register(engine) function into plugins/"
         return "loaded plugins: " + ", ".join(self._loaded_plugins)
+
+    def _cmd_plugin_doctor(self, ctx: CommandContext) -> str:
+        """Reports the last real plugin load instead of guessing from filenames."""
+        selected = ctx.args[0].lower() if ctx.args else None
+        reports = self.plugin_health
+        if selected:
+            reports = {selected: reports[selected]} if selected in reports else {}
+        if not reports:
+            return f"❌ plugin not found: {selected}" if selected else "no plugins were scanned"
+        lines = ["Plugin health:"]
+        for name, info in sorted(reports.items()):
+            icon = "✅" if info["status"] == "loaded" else "❌"
+            line = f"  {icon} {name}: {info['status']}, {len(info['commands'])} commands, {info['duration_ms']} ms"
+            if info.get("collisions"):
+                line += f"; blocked collisions: {', '.join(info['collisions'])}"
+            if info.get("error"):
+                line += f"; {info['error']}"
+            lines.append(line)
+        ok = sum(1 for item in reports.values() if item["status"] == "loaded")
+        lines.append(f"Summary: {ok}/{len(reports)} healthy")
+        return "\n".join(lines)
 
     def _cmd_reload_plugins(self, ctx: CommandContext) -> str:
         before = set(self._loaded_plugins)
