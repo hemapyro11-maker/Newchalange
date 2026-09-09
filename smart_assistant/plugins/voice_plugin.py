@@ -106,6 +106,7 @@ import urllib.request
 import unicodedata
 import wave
 import media_runtime as mr
+import natural_voice_runtime as nvr
 
 try:
     import sounddevice as sd
@@ -524,6 +525,20 @@ def _synthesize_espeak(text: str, out_path: pathlib.Path, lang: str = "ar") -> b
     return proc.returncode == 0 and out_path.is_file() and out_path.stat().st_size > 0
 
 
+def _natural_reference() -> pathlib.Path | None:
+    import brain
+    value = str(brain.load_config().get("natural_voice_reference", "")).strip()
+    path = pathlib.Path(value).expanduser() if value else None
+    return path.resolve() if path and path.is_file() else None
+
+
+def _synthesize_natural(text: str, out_path: pathlib.Path, lang: str = "ar") -> bool:
+    if not nvr.available():
+        return False
+    ok, _detail = nvr.render(text, lang, out_path, _natural_reference())
+    return ok
+
+
 # الترتيب بيمثّل أولوية الجودة الحقيقية: صوت أنثوي مصري طبيعي أولاً،
 # وبعدين احتياطي محلي أفضل من إسبيك، وأخيرًا الضمانة اللي بتشتغل دايمًا.
 # بنخزّن **أسماء** الدوال مش الدوال نفسها، وبنجيبها وقت النداء.
@@ -532,6 +547,7 @@ def _synthesize_espeak(text: str, out_path: pathlib.Path, lang: str = "ar") -> b
 # العنصر الرابع هو مفتاح اسم الصوت في `_VOICES` — بيخلي إضافة محرك
 # جديد تعديل في مكان واحد بدل اتنين.
 _BACKENDS = [
+    ("Chatterbox Multilingual V3", "_synthesize_natural", ".wav", "edge"),
     ("edge-tts", "_synthesize_edge", ".mp3", "edge"),
     ("sherpa-onnx", "_synthesize_sherpa", ".wav", "piper_name"),
     ("Piper", "_synthesize_piper", ".wav", "piper_name"),
@@ -616,9 +632,38 @@ def _cmd_voice_profile(ctx) -> str:
     return f"✅ voice profile set to {name} for Arabic and English"
 
 
+def _cmd_voice_reference(ctx) -> str:
+    import brain
+    cfg = brain.load_config()
+    if not ctx.args:
+        current = cfg.get("natural_voice_reference") or "none"
+        return f"Natural voice reference: {current}\nusage: voice_reference <authorized-audio.wav|clear>"
+    if len(ctx.args) != 1:
+        return "usage: voice_reference <authorized-audio.wav|clear>"
+    if ctx.args[0].lower() == "clear":
+        cfg.pop("natural_voice_reference", None)
+        brain.save_config(cfg)
+        return "✅ natural voice reference cleared"
+    path = pathlib.Path(ctx.args[0]).expanduser().resolve()
+    if not path.is_file() or path.suffix.lower() not in {".wav", ".mp3", ".flac", ".ogg"}:
+        return "❌ choose an existing WAV, MP3, FLAC, or OGG file"
+    cfg["natural_voice_reference"] = str(path)
+    brain.save_config(cfg)
+    return "✅ natural voice reference saved; only use audio you are authorized to clone"
+
+
 def _cmd_voice_status(ctx) -> str:
     profile_name, _profile_cfg = _profile()
     lines = [f"🔊 Speech engines, in the order they are tried (profile: {profile_name}):"]
+
+    natural_ok = nvr.available()
+    reference = _natural_reference()
+    lines.append(
+        f"  {'✅' if natural_ok else '❌'} Chatterbox Multilingual V3 (natural Arabic/English, isolated)"
+        + (f" — reference: {reference}" if natural_ok and reference else
+           " — ready; optional voice_reference can set an authorized voice" if natural_ok else
+           " — set NEZUKO_NATURAL_VOICE_PYTHON")
+    )
 
     edge_ok = _edge_available()
     lines.append(
@@ -664,7 +709,7 @@ def _cmd_voice_status(ctx) -> str:
         f"  {'✅' if ffplay_ok else '❌'} ffplay to play the audio (part of FFmpeg)"
     )
 
-    if not (edge_ok or sherpa_ok or piper_ok or espeak_ok):
+    if not (natural_ok or edge_ok or sherpa_ok or piper_ok or espeak_ok):
         lines.append("\n⚠️ No speech engine installed — `speak` will not work at all.")
     elif piper_ok:
         lines.append(
@@ -1380,6 +1425,7 @@ def _cmd_stt_status(ctx) -> str:
 def register(engine):
     engine.registry.register("speak", _cmd_speak, "speak <text> — say something in Nezuko's voice (edge-tts → sherpa-onnx offline → espeak-ng fallback)")
     engine.registry.register("voice_profile", _cmd_voice_profile, "voice_profile natural|warm|clear|fast — tune speech pacing, pitch, and clarity")
+    engine.registry.register("voice_reference", _cmd_voice_reference, "voice_reference <authorized-audio|clear> — set the natural Nezuko voice")
     engine.registry.register("voice_status", _cmd_voice_status, "voice_status — which speech engines are available")
     engine.registry.register("listen", _cmd_listen, "listen [seconds] [lang=auto|ar|en] [model=...] — transcribe the mic without executing")
     engine.registry.register("listen_run", _cmd_listen_run, "listen_run [seconds] [lang=auto|ar|en] — transcribe then submit through normal approvals")

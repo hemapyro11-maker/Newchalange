@@ -641,6 +641,18 @@ def test_verification_questions_see_the_draft(monkeypatch):
     assert "the sky is green" in calls[1][-1]["content"]
 
 
+def test_verification_preserves_original_context_and_tool_evidence(monkeypatch):
+    calls = _scripted(monkeypatch, ["draft", "q", "a", "final"])
+    original = [
+        {"role": "system", "content": "Reply in Arabic; only use available tools."},
+        {"role": "user", "content": "Fix the failed export."},
+        {"role": "assistant", "content": "Tool result: export failed, exit 1."},
+    ]
+    brain.get_brain().verified_chat(original)
+    for stage in calls:
+        assert stage[:len(original)] == original
+
+
 def test_the_rewrite_sees_both_questions_and_answers(monkeypatch):
     calls = _scripted(monkeypatch, ["draft", "is it green?", "no, blue", "final"])
     brain.get_brain().verified_chat([{"role": "user", "content": "س"}])

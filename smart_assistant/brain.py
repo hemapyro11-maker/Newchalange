@@ -525,13 +525,16 @@ class Brain:
         merged = "\n\n".join(
             f"--- إجابة {i + 1} ---\n{text}" for i, (_, text) in enumerate(drafts)
         )
-        synth = [
+        synth = [*messages,
             {"role": "system", "content": (
                 "أنت مُجمِّع إجابات. هتلاقي تحت سؤال المستخدم وكذا إجابة من "
                 "نماذج مختلفة. اكتب إجابة نهائية واحدة أفضل منهم كلهم: خد "
                 "الصح من كل واحدة، تجاهل الغلط والتكرار، ولو فيه تعارض "
                 "رجّح الأدق. اكتب بنفس لغة السؤال. مترجعش مقارنة بين "
-                "الإجابات — رجّع الإجابة النهائية بس."
+                "الإجابات — رجّع الإجابة النهائية بس. "
+                "Preserve the original task constraints, available tools and observed "
+                "tool results. Drafts are suggestions, not evidence of execution. "
+                "Never claim a tool ran unless its result exists in the conversation."
             )},
             {"role": "user", "content": f"سؤال المستخدم:\n{question}\n\n{merged}"},
         ]
@@ -569,7 +572,7 @@ class Brain:
             (m["content"] for m in reversed(messages) if m.get("role") == "user"), ""
         )
 
-        checks = self.chat([
+        checks = self.chat([*messages,
             {"role": "system", "content": (
                 "You check answers for mistakes. Given a question and a draft "
                 "answer, write 2-4 short verification questions that would "
@@ -582,7 +585,7 @@ class Brain:
         if not checks or not checks.text.strip():
             return draft
 
-        answers = self.chat([
+        answers = self.chat([*messages,
             {"role": "system", "content": (
                 "Answer each verification question briefly and independently. "
                 "Do not try to defend any earlier answer — judge each question "
@@ -593,7 +596,7 @@ class Brain:
         if not answers:
             return draft
 
-        final = self.chat([
+        final = self.chat([*messages,
             {"role": "system", "content": (
                 "Rewrite the draft answer using the verification results.\n"
                 "- Correct anything the checks contradict.\n"

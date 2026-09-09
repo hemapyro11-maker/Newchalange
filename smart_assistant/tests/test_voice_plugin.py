@@ -291,7 +291,7 @@ def test_download_cleans_up_partial_file_on_failure(monkeypatch, tmp_path):
 def test_voice_status_reports_all_missing(make_ctx, monkeypatch):
     _deny_all_backends(monkeypatch)
     result = vp._cmd_voice_status(make_ctx("voice_status", []))
-    assert result.count("❌") == 4
+    assert result.count("❌") == 5
     assert "No speech engine installed" in result
 
 
@@ -442,6 +442,16 @@ def test_sherpa_rejects_empty_audio(tmp_path, monkeypatch):
 def test_sherpa_is_tried_before_the_archived_piper_binary():
     order = [name for _label, name, _ext, _key in vp._BACKENDS]
     assert order.index("_synthesize_sherpa") < order.index("_synthesize_piper")
+
+
+def test_natural_voice_is_first_when_configured():
+    order = [name for _label, name, _ext, _key in vp._BACKENDS]
+    assert order[0] == "_synthesize_natural"
+
+
+def test_natural_voice_falls_back_when_runtime_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(vp.nvr, "available", lambda: False)
+    assert vp._synthesize_natural("أهلاً", tmp_path / "o.wav", "ar") is False
 
 
 def test_every_language_has_a_sherpa_voice():

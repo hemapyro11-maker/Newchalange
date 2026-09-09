@@ -1,0 +1,5 @@
+# Install in a separate virtual environment. Keeping this outside requirements.txt
+# prevents Chatterbox's Transformers 5.x requirement from breaking XTTS/Coqui.
+# PyPI 0.1.7 lacks the V3 selector although the version number is unchanged.
+# Pin the reviewed upstream revision that contains Multilingual V3.
+https://github.com/resemble-ai/chatterbox/archive/5de7a54aa4e5e2baadb0182dde554908b48b85c2.zip

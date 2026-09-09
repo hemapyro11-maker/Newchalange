@@ -977,6 +977,36 @@ Ghidra/radare2). كل النتائج اتقارنت واتأكد إنها مطا
 
 ## صوت نيزوكو (Text-to-Speech) — `voice_plugin.py`
 
+### الصوت الطبيعي العربي والإنجليزي (Chatterbox V3)
+
+يستخدم `speak` محرك Chatterbox Multilingual V3 أولًا عند إعداده، كما
+يصدّر `natural_voice` ملفات WAV. ثبّته في بيئة مستقلة حتى لا يتعارض إصدار
+Transformers الخاص به مع XTTS/Coqui:
+
+```powershell
+py -3.11 -m venv natural-voice-env
+natural-voice-env\Scripts\python -m pip install -r requirements-natural-voice.txt
+$env:NEZUKO_NATURAL_VOICE_PYTHON="$PWD\natural-voice-env\Scripts\python.exe"
+```
+
+بدل متغير البيئة المؤقت، نفّذ مرة واحدة
+`natural_voice_setup C:\path\to\natural-voice-env\Scripts\python.exe` ليُحفظ
+المسار في إعدادات نيزوكو.
+
+استخدم `voice_reference <audio.wav>` لاختيار عينة صوت مصرية هادئة تملك
+إذنًا باستخدامها في `speak`، أو نفّذ
+`natural_voice ar "أهلاً بيك" output.wav reference.wav`. أول تشغيل ينزّل
+النموذج مرة واحدة. التوليد على CPU يعمل لكنه أبطأ بكثير من CUDA GPU.
+
+### توليد صور وفيديو عبر ComfyUI وWan
+
+إضافة `comfyui_plugin.py` تربط نيزوكو بواجهة ComfyUI الرسمية محليًا على
+`http://127.0.0.1:8188` أو بعنوان HTTPS. استخدم `comfy_status` للفحص،
+وصدّر الـworkflow من ComfyUI بصيغة **API Format** ثم شغّله عبر
+`comfy_queue workflow-api.json`. الأمر `comfy_history <prompt_id>` يعرض
+الحالة والمخرجات، لذلك يمكن تشغيل workflows حديثة مثل Wan من غير ربط
+نيزوكو بإصدار نموذج محدد أو تنزيل الأوزان داخل ملف EXE.
+
 الأمر `speak <نص>` بينطق أي نص بصوت نيزوكو عبر سلسلة احتياطية حقيقية
 من أربع محركات، من الأفضل جودة للأضمن توفر — كل واحدة بيتجرب لو اللي
 قبلها فشل فعليًا، مش اختيار عشوائي:

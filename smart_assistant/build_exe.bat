@@ -107,6 +107,7 @@ py -m PyInstaller ^
     --hidden-import agents ^
     --hidden-import styles ^
     --hidden-import benchmark ^
+    --hidden-import natural_voice_runtime ^
     --collect-all CTkToolTip ^
     --collect-all mcp ^
     --hidden-import pywintypes ^
@@ -143,6 +144,8 @@ py -m PyInstaller ^
     --add-data "agents.py;." ^
     --add-data "styles.py;." ^
     --add-data "benchmark.py;." ^
+    --add-data "natural_voice_runtime.py;." ^
+    --add-data "natural_voice_worker.py;." ^
     --add-data "version.py;." ^
     --add-data "version.json;." ^
     --add-data "connectors.example.json;." ^
