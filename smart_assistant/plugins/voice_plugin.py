@@ -88,8 +88,11 @@ clone_voice_agree_license, clone_voice
 """
 from __future__ import annotations
 
+import asyncio
+import importlib.util
 import json
 import inspect
+import html
 import os
 import pathlib
 import re
@@ -100,6 +103,7 @@ import tarfile
 import tempfile
 import urllib.error
 import urllib.request
+import unicodedata
 import wave
 import media_runtime as mr
 
@@ -158,20 +162,60 @@ PIPER_MODEL_URL = _VOICES["ar"]["piper_base"] + ".onnx?download=true"
 PIPER_CONFIG_URL = _VOICES["ar"]["piper_base"] + ".onnx.json?download=true.json"
 
 _ARABIC_RANGE = re.compile(r"[\u0600-\u06FF]")
+_LATIN_RANGE = re.compile(r"[A-Za-z]")
+_VOICE_PROFILES = {
+    "natural": {"rate": "+0%", "pitch": "+0Hz", "volume": "+0%", "speed": 1.0, "espeak_rate": 155, "espeak_pitch": 70},
+    "warm": {"rate": "-6%", "pitch": "-2Hz", "volume": "+0%", "speed": 0.94, "espeak_rate": 145, "espeak_pitch": 65},
+    "clear": {"rate": "-10%", "pitch": "+0Hz", "volume": "+5%", "speed": 0.9, "espeak_rate": 140, "espeak_pitch": 70},
+    "fast": {"rate": "+16%", "pitch": "+0Hz", "volume": "+0%", "speed": 1.16, "espeak_rate": 180, "espeak_pitch": 70},
+}
 
 
 def _detect_lang(text: str) -> str:
     """بيحدد لغة النص من الحروف نفسها.
 
-    مش محتاج مكتبة ولا نموذج: وجود حرف عربي واحد كفاية يخلي النص عربي
-    (النصوص المختلطة زي "افحص file.exe" عربية في جوهرها). أي حاجة تانية
-    بتتعامل كإنجليزي.
+    مش محتاج مكتبة ولا نموذج: بنقارن عدد الحروف العربية واللاتينية مع
+    وزن للعربي، عشان اسم ملف إنجليزي طويل جوه أمر عربي ما يقلبش الصوت.
+    حرف عربي وحيد جوه فقرة إنجليزية لا يغيّر صوت الفقرة كلها.
     """
-    return "ar" if _ARABIC_RANGE.search(text or "") else "en"
+    text = text or ""
+    arabic = len(_ARABIC_RANGE.findall(text))
+    latin = len(_LATIN_RANGE.findall(text))
+    # A short Arabic instruction can contain a longer Latin filename.  Weight
+    # script counts instead of treating a single Arabic glyph as the language.
+    return "ar" if arabic >= 2 and arabic * 2 >= latin else "en"
 
 
 def _voice_for(lang: str) -> dict:
     return _VOICES.get(lang, _VOICES["en"])
+
+
+def _profile() -> tuple[str, dict]:
+    import brain
+    name = str(brain.load_config().get("voice_profile", "natural")).lower()
+    if name not in _VOICE_PROFILES:
+        name = "natural"
+    return name, _VOICE_PROFILES[name]
+
+
+def _prepare_speech_text(text: str) -> str:
+    """Turn formatted assistant output into text that sounds natural aloud."""
+    value = unicodedata.normalize("NFKC", html.unescape(text or ""))
+    value = re.sub(r"```.*?```", " ", value, flags=re.DOTALL)
+    value = re.sub(r"!\[([^]]*)\]\([^)]+\)", r"\1", value)
+    value = re.sub(r"\[([^]]+)\]\([^)]+\)", r"\1", value)
+    value = re.sub(r"https?://\S+", " ", value)
+    value = re.sub(r"[`*_#>|~]+", " ", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    return value
+
+
+def _edge_available() -> bool:
+    return (
+        shutil.which("edge-tts") is not None
+        or "edge_tts" in sys.modules
+        or importlib.util.find_spec("edge_tts") is not None
+    )
 
 _NETWORK_TIMEOUT = 20
 _SYNTH_TIMEOUT = 30
@@ -304,17 +348,33 @@ def _ensure_piper_voice(lang: str = "ar") -> tuple[pathlib.Path, pathlib.Path] |
 
 
 def _synthesize_edge(text: str, out_path: pathlib.Path, lang: str = "ar") -> bool:
-    if not shutil.which("edge-tts"):
-        return False
+    executable = shutil.which("edge-tts")
     try:
-        proc = subprocess.run(
-            ["edge-tts", "-t", text, "-v", _voice_for(lang)["edge"],
-             "--write-media", str(out_path)],
-            capture_output=True, text=True, timeout=_SYNTH_TIMEOUT,
+        _name, profile = _profile()
+        if executable:
+            proc = subprocess.run(
+                ["edge-tts", "-t", text, "-v", _voice_for(lang)["edge"],
+                 f"--rate={profile['rate']}", f"--pitch={profile['pitch']}",
+                 f"--volume={profile['volume']}",
+                 "--write-media", str(out_path)],
+                capture_output=True, text=True,
+                timeout=max(_SYNTH_TIMEOUT, min(180, 20 + len(text) // 12)),
+            )
+            return proc.returncode == 0 and out_path.is_file() and out_path.stat().st_size > 0
+
+        # Target-directory and embedded installs can expose the Python package
+        # without installing the edge-tts console launcher into PATH.
+        if not _edge_available():
+            return False
+        import edge_tts
+        speech = edge_tts.Communicate(
+            text, _voice_for(lang)["edge"], rate=profile["rate"],
+            volume=profile["volume"], pitch=profile["pitch"],
         )
-    except subprocess.TimeoutExpired:
+        asyncio.run(speech.save(str(out_path)))
+    except (ImportError, OSError, RuntimeError, subprocess.TimeoutExpired):
         return False
-    return proc.returncode == 0 and out_path.is_file() and out_path.stat().st_size > 0
+    return out_path.is_file() and out_path.stat().st_size > 0
 
 
 def _synthesize_piper(text: str, out_path: pathlib.Path, lang: str = "ar") -> bool:
@@ -426,7 +486,8 @@ def _synthesize_sherpa(text: str, out_path: pathlib.Path, lang: str = "ar") -> b
     try:
         import numpy as np
 
-        audio = tts.generate(text, sid=0, speed=1.0)
+        _name, profile = _profile()
+        audio = tts.generate(text, sid=0, speed=profile["speed"])
         if not len(audio.samples):
             return False
         pcm = (np.array(audio.samples, dtype=np.float32) * 32767).astype(np.int16)
@@ -452,8 +513,10 @@ def _synthesize_espeak(text: str, out_path: pathlib.Path, lang: str = "ar") -> b
     if not shutil.which("espeak-ng"):
         return False
     try:
+        _name, profile = _profile()
         proc = subprocess.run(
-            ["espeak-ng", "-v", _voice_for(lang)["espeak"], "-s", "155", "-p", "70", "-w", str(out_path), text],
+            ["espeak-ng", "-v", _voice_for(lang)["espeak"], "-s", str(profile["espeak_rate"]),
+             "-p", str(profile["espeak_pitch"]), "-w", str(out_path), text],
             capture_output=True, text=True, timeout=_SYNTH_TIMEOUT,
         )
     except subprocess.TimeoutExpired:
@@ -498,6 +561,10 @@ def _cmd_speak(ctx) -> str:
     if not text:
         return "usage: speak <text>   [lang=ar|en]"
 
+    text = _prepare_speech_text(text)
+    if not text:
+        return "❌ there is no speakable text after removing formatting"
+
     # lang=xx صريحة بتتقدّم على الاكتشاف التلقائي — مفيدة للنصوص
     # المختلطة اللي الاكتشاف ممكن يقراها غلط
     lang = None
@@ -535,10 +602,25 @@ def _cmd_speak(ctx) -> str:
     return f"🔊 spoken with {backend_label}"
 
 
-def _cmd_voice_status(ctx) -> str:
-    lines = ["🔊 Speech engines, in the order they are tried:"]
+def _cmd_voice_profile(ctx) -> str:
+    import brain
+    cfg = brain.load_config()
+    if not ctx.args:
+        return (f"Voice profile: {cfg.get('voice_profile', 'natural')}\n"
+                "usage: voice_profile natural|warm|clear|fast")
+    name = ctx.args[0].lower()
+    if name not in _VOICE_PROFILES:
+        return "usage: voice_profile natural|warm|clear|fast"
+    cfg["voice_profile"] = name
+    brain.save_config(cfg)
+    return f"✅ voice profile set to {name} for Arabic and English"
 
-    edge_ok = shutil.which("edge-tts") is not None
+
+def _cmd_voice_status(ctx) -> str:
+    profile_name, _profile_cfg = _profile()
+    lines = [f"🔊 Speech engines, in the order they are tried (profile: {profile_name}):"]
+
+    edge_ok = _edge_available()
     lines.append(
         f"  {'✅' if edge_ok else '❌'} edge-tts"
         + (f" — voice: {EDGE_VOICE} (needs internet at speak time)"
@@ -1026,6 +1108,30 @@ def _reference_duration(path: pathlib.Path) -> float | None:
             return None
 
 
+def _polish_cloned_wav(path: pathlib.Path) -> bool:
+    """Apply a consistent speech master while keeping a valid original on failure."""
+    try:
+        if path.read_bytes()[:4] != b"RIFF" or mr.binary("ffmpeg") is None:
+            return False
+    except OSError:
+        return False
+    polished = path.with_name(f".{path.stem}.polished.wav")
+    try:
+        result = mr.run([
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(path),
+            "-af", "highpass=f=55,lowpass=f=11000,loudnorm=I=-18:TP=-2:LRA=7",
+            "-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le", str(polished),
+        ], 600)
+        if result.returncode == 0 and mr.valid_output(polished, minimum_bytes=44):
+            os.replace(polished, path)
+            return True
+    except (OSError, subprocess.SubprocessError):
+        pass
+    finally:
+        polished.unlink(missing_ok=True)
+    return False
+
+
 def _cmd_clone_voice_agree_license(ctx) -> str:
     path = _clone_voice_config_path()
     data = {}
@@ -1075,7 +1181,8 @@ def _cmd_clone_voice(ctx) -> str:
             return "❌ reference and output must be different files"
     except OSError:
         pass
-    if not text.strip():
+    text = _prepare_speech_text(text)
+    if not text:
         return "❌ the text is empty"
     language = ctx.args[3] if len(ctx.args) > 3 else "ar"
     if language not in _CLONE_LANGUAGES:
@@ -1086,6 +1193,7 @@ def _cmd_clone_voice(ctx) -> str:
                 "(6-12 seconds is usually best). Run prepare_voice_sample first.")
 
     os.environ["COQUI_TOS_AGREED"] = "1"  # موافقتنا الصريحة فوق سجّلت فعلاً — ده بس بيبلّغ مكتبة Coqui نفسها
+    os.environ.setdefault("TTS_HOME", str(_voice_cache_dir() / "coqui"))
     try:
         output_path.parent.mkdir(parents=True, exist_ok=True)
     except OSError as e:
@@ -1097,8 +1205,11 @@ def _cmd_clone_voice(ctx) -> str:
             model = CoquiTTS(_CLONE_MODEL, progress_bar=False)
             try:
                 import torch
-                if torch.cuda.is_available() and hasattr(model, "to"):
-                    model = model.to("cuda")
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                if device == "cpu":
+                    torch.set_num_threads(max(1, min(8, os.cpu_count() or 1)))
+                if hasattr(model, "to"):
+                    model = model.to(device)
             except (ImportError, RuntimeError):
                 pass
         except Exception as e:
@@ -1112,7 +1223,33 @@ def _cmd_clone_voice(ctx) -> str:
 
     if not mr.valid_output(output, minimum_bytes=44):
         return "❌ voice cloning failed — no usable WAV output was produced"
-    return f"✅ voice cloned (language: {language}) at {output}"
+    polished = _polish_cloned_wav(output_path)
+    master = "; speech loudness mastered" if polished else ""
+    return f"✅ voice cloned (language: {language}{master}) at {output}"
+
+
+def _cmd_clone_voice_status(ctx) -> str:
+    try:
+        import torch
+        from TTS.api import TTS as _CoquiTTS  # noqa: F401
+        import transformers
+    except (ImportError, OSError) as exc:
+        return ("❌ XTTS runtime is incomplete: " + str(exc) + "\n"
+                "Install PyTorch/torchaudio first, then requirements-media-pro.txt")
+    major = int(transformers.__version__.split(".", 1)[0])
+    compatible = major < 5
+    device = "CUDA GPU" if torch.cuda.is_available() else "CPU"
+    cached = _CLONE_MODEL in _clone_voice_models
+    lines = [
+        "XTTS voice cloning:",
+        f"  ✅ Coqui TTS import",
+        f"  {'✅' if compatible else '❌'} Transformers {transformers.__version__} (requires <5)",
+        f"  ✅ PyTorch {torch.__version__} on {device}",
+        f"  {'✅' if cached else '⬜'} XTTS model loaded in this session",
+    ]
+    if device == "CPU":
+        lines.append("  ℹ️ CPU works but synthesis is slower; CUDA is selected automatically when available.")
+    return "\n".join(lines)
 
 
 def _parse_listen_seconds(ctx) -> tuple[int, str | None]:
@@ -1242,6 +1379,7 @@ def _cmd_stt_status(ctx) -> str:
 
 def register(engine):
     engine.registry.register("speak", _cmd_speak, "speak <text> — say something in Nezuko's voice (edge-tts → sherpa-onnx offline → espeak-ng fallback)")
+    engine.registry.register("voice_profile", _cmd_voice_profile, "voice_profile natural|warm|clear|fast — tune speech pacing, pitch, and clarity")
     engine.registry.register("voice_status", _cmd_voice_status, "voice_status — which speech engines are available")
     engine.registry.register("listen", _cmd_listen, "listen [seconds] [lang=auto|ar|en] [model=...] — transcribe the mic without executing")
     engine.registry.register("listen_run", _cmd_listen_run, "listen_run [seconds] [lang=auto|ar|en] — transcribe then submit through normal approvals")
@@ -1251,4 +1389,5 @@ def register(engine):
     engine.registry.register("diarize_key_status", _cmd_diarize_key_status, "diarize_key_status — is a Hugging Face token configured?")
     engine.registry.register("diarize", _cmd_diarize, "diarize <audio> — work out who spoke when (speaker diarization, pyannote.audio)")
     engine.registry.register("clone_voice_agree_license", _cmd_clone_voice_agree_license, "clone_voice_agree_license — accept the voice-cloning model's licence, once, explicitly")
+    engine.registry.register("clone_voice_status", _cmd_clone_voice_status, "clone_voice_status — verify Coqui, Transformers, PyTorch, device, and model cache")
     engine.registry.register("clone_voice", _cmd_clone_voice, "clone_voice <reference.wav> <text> <output.wav> [language=ar] — clone a voice from a sample (Coqui XTTS-v2)")

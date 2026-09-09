@@ -1,0 +1,7 @@
+# Reproducible XTTS-v2 runtime for Windows/Python 3.12.
+# Install from the PyTorch CPU index first, or choose matching CUDA 12.x wheels.
+torch==2.8.0
+torchaudio==2.8.0
+coqui-tts>=0.27.4,<0.28
+transformers>=4.57,<5
+soundfile>=0.13

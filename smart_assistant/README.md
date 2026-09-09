@@ -1025,6 +1025,10 @@ sherpa-onnx بيحل المشكلتين مرة واحدة: محرك **مصان**
 — افتراضيًا مقفول، زي أي فحص في المشروع ده: مبيشتغلش غير لما تختاره
 إنت بنفسك.
 
+`voice_profile natural|warm|clear|fast` بيضبط سرعة ونبرة ووضوح النطق
+في العربي والإنجليزي على كل المحركات. قبل النطق، نيزوكو بتنظف Markdown
+والروابط وكتل الكود عشان الرد يتقري ككلام طبيعي بدل رموز تقنية.
+
 ## استماع صوتي (Speech-to-Text) — `listen`, `listen_run`, `stt_status`
 
 الاتجاه التاني اللي كان ناقص من نيزوكو (كان عنده نطق بس من غير استماع
@@ -1123,6 +1127,21 @@ core_engine بالظبط زي أي نص متكتوب يدويًا، فمفيش �
   استخدامك الشخصي. **مهم:** استخدمه لصوتك إنت أو صوت عندك إذن صريح
   تستنسخه، مش لتقليد حد من غير موافقته. بطيء جدًا من غير GPU حقيقي —
   قيد حقيقي في التكنولوجيا، مش قرار تصميم.
+- **`clone_voice_status`** — يفحص Coqui وPyTorch ونسخة Transformers
+  والجهاز المستخدم (CPU/CUDA) وهل XTTS محمّل في الجلسة. لازم
+  `transformers>=4.57,<5` مع Coqui 0.27.x لأن Transformers 5 حذف API
+  يحتاجه XTTS.
+
+على Windows مع Python 3.12، البيئة اللي اتجرّبت فعليًا هي PyTorch وTorchaudio
+2.8 على CPU، وبعدها متطلبات XTTS المثبتة في ملف مستقل:
+
+```powershell
+pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0 torchaudio==2.8.0
+pip install -r requirements-voice-clone-windows.txt
+```
+
+أمر `clone_voice` يختار CUDA تلقائيًا لو متاحة، يحتفظ بالنموذج في cache بين
+الأوامر، ثم يعمل mastering للصوت النهائي إلى mono/24 kHz مع ضبط مستوى الصوت.
 
 **ملحوظة معمارية مهمة:** `pyannote.audio` و`coqui-tts` مكتبات ML تقيلة جدًا
 (PyTorch كامل + عشرات الحزم الفرعية) — عن قصد **مش** مضمومين في

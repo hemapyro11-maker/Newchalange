@@ -86,6 +86,7 @@ def _no_network(monkeypatch):
 
 def _deny_all_backends(monkeypatch):
     monkeypatch.setattr(vp.shutil, "which", lambda name: None)
+    monkeypatch.setattr(vp, "_edge_available", lambda: False)
     monkeypatch.setattr(vp, "sherpa_available", lambda: False)
     monkeypatch.setattr(vp, "_load_sherpa", lambda lang="ar": None)
 
@@ -95,6 +96,25 @@ def _deny_all_backends(monkeypatch):
 def test_speak_no_text(make_ctx):
     result = vp._cmd_speak(make_ctx("speak", []))
     assert result.startswith("usage")
+
+
+def test_language_detection_handles_mixed_arabic_and_english():
+    assert vp._detect_lang("افحص file.exe") == "ar"
+    assert vp._detect_lang("This is English مع حرف") == "en"
+    assert vp._detect_lang("Hello world") == "en"
+
+
+def test_speech_text_removes_markdown_urls_and_code_blocks():
+    text = vp._prepare_speech_text("**أهلاً** [بك](https://example.com) ```print('x')```")
+    assert text == "أهلاً بك"
+
+
+def test_voice_profile_is_persisted(make_ctx):
+    import brain
+    result = vp._cmd_voice_profile(make_ctx("voice_profile", ["clear"]))
+    assert result.startswith("✅")
+    assert brain.load_config()["voice_profile"] == "clear"
+    assert "clear" in vp._cmd_voice_profile(make_ctx("voice_profile", []))
 
 
 def test_speak_all_backends_unavailable_is_honest(make_ctx, monkeypatch):
@@ -280,6 +300,7 @@ def test_voice_status_reports_available_backends(make_ctx, monkeypatch):
         return f"/usr/bin/{name}" if name in ("espeak-ng", "ffplay") else None
 
     monkeypatch.setattr(vp.shutil, "which", fake_which)
+    monkeypatch.setattr(vp, "_edge_available", lambda: False)
     monkeypatch.setattr(vp, "sherpa_available", lambda: False)
     result = vp._cmd_voice_status(make_ctx("voice_status", []))
     assert "✅ espeak-ng" in result
@@ -998,9 +1019,9 @@ def test_register_adds_stt_commands():
 
     vp.register(FakeEngine)
     for cmd in (
-        "speak", "voice_status", "listen", "listen_run", "stt_status", "separate_vocals",
+        "speak", "voice_profile", "voice_status", "listen", "listen_run", "stt_status", "separate_vocals",
         "diarize_set_token", "diarize_key_status", "diarize",
-        "clone_voice_agree_license", "clone_voice",
+        "clone_voice_agree_license", "clone_voice_status", "clone_voice",
     ):
         assert cmd in FakeEngine.registry.names
 
@@ -1427,6 +1448,22 @@ def test_clone_voice_success_creates_output_and_sets_tos_env(make_ctx, tmp_path,
     assert calls[1] == ("synth", "أهلاً بيكي", str(f), "ar", str(out))
 
 
+def test_polish_cloned_wav_replaces_output_atomically(monkeypatch, tmp_path):
+    output = tmp_path / "clone.wav"
+    output.write_bytes(b"RIFF" + b"original" * 8)
+
+    def fake_run(cmd, timeout):
+        pathlib.Path(cmd[-1]).write_bytes(b"RIFF" + b"polished" * 8)
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(vp.mr, "binary", lambda name: pathlib.Path("ffmpeg"))
+    monkeypatch.setattr(vp.mr, "run", fake_run)
+
+    assert vp._polish_cloned_wav(output) is True
+    assert output.read_bytes().startswith(b"RIFFpolished")
+    assert not (tmp_path / ".clone.polished.wav").exists()
+
+
 def test_clone_voice_caches_model_across_calls(make_ctx, tmp_path, monkeypatch, isolated_clone_config):
     vp._cmd_clone_voice_agree_license(make_ctx("clone_voice_agree_license", []))
     init_calls = []
@@ -1561,6 +1598,26 @@ def test_edge_synthesis_passes_the_arabic_voice(monkeypatch, tmp_path):
     monkeypatch.setattr(vp.subprocess, "run", fake_run)
     vp._synthesize_edge("أهلاً بيك", tmp_path / "out.mp3", "ar")
     assert vp._voice_for("ar")["edge"] in captured["cmd"]
+
+
+def test_edge_synthesis_uses_python_api_without_console_launcher(monkeypatch, tmp_path):
+    captured = {}
+
+    class FakeCommunicate:
+        def __init__(self, text, voice, **options):
+            captured.update(text=text, voice=voice, options=options)
+
+        async def save(self, output):
+            pathlib.Path(output).write_bytes(b"audio" * 20)
+
+    fake_module = types.ModuleType("edge_tts")
+    fake_module.Communicate = FakeCommunicate
+    monkeypatch.setattr(vp.shutil, "which", lambda _name: None)
+    monkeypatch.setitem(sys.modules, "edge_tts", fake_module)
+
+    output = tmp_path / "out.mp3"
+    assert vp._synthesize_edge("hello", output, "en") is True
+    assert captured["voice"] == vp._voice_for("en")["edge"]
 
 
 def test_espeak_synthesis_passes_the_right_voice_flag(monkeypatch, tmp_path):

@@ -1,7 +1,10 @@
 # Optional high-quality local media/voice environment.
-# Install PyTorch/torchaudio first for the machine's CPU/CUDA/ROCm backend:
+# Install PyTorch/torchaudio first for the machine's CPU/CUDA/ROCm backend.
+# On Windows, requirements-voice-clone-windows.txt pins the tested pair that
+# reads WAV directly; PyTorch 2.9+ also needs TorchCodec and shared FFmpeg DLLs.
 # https://pytorch.org/get-started/locally/
 coqui-tts>=0.27.4
+transformers>=4.57,<5  # XTTS 0.27.x imports APIs removed by Transformers 5
 faster-whisper>=1.1.0
 sounddevice>=0.5.0
 soundfile>=0.13.0

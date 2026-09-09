@@ -142,7 +142,7 @@ def _cmd_brain_mode(ctx) -> str:
             cur = "normal"
         return (
             f"Current mode: {cur}\n"
-            "usage: brain_mode normal|verify|auto|deep\n"
+            "usage: brain_mode normal|verify|smart|deep\n"
             "  normal — 1 call, fastest\n"
             "  verify — 4 calls on hard questions, answers then checks itself\n"
             "  auto   — 4 calls on hard questions, several models merged\n"
@@ -151,18 +151,20 @@ def _cmd_brain_mode(ctx) -> str:
     mode = ctx.args[0].lower()
     if mode in ("deep", "عميق"):
         cfg["deep_mode"] = True
+        cfg["auto_deep"] = False
+        cfg["verify_mode"] = False
         brain.save_config(cfg)
         return (
             "🧠 Deep mode on — several models answer and the strongest merges them.\n"
             "⚠️ Uses ~4× the quota and is slower. Save it for questions that matter."
         )
-    if mode in ("auto", "تلقائي", "تلقاءي"):
+    if mode in ("auto", "smart", "pro", "ذكي", "تلقائي", "تلقاءي"):
         cfg["deep_mode"] = False
         cfg["auto_deep"] = True
         cfg["verify_mode"] = False
         brain.save_config(cfg)
         return (
-            "🎯 Auto mode — normal speed for ordinary messages, deep mode only for\n"
+            "🎯 Smart mode — normal speed for ordinary messages, deep mode only for\n"
             "questions that need working out (why/compare/calculate/debug).\n"
             "Costs the extra quota on those questions only, not on every message."
         )
@@ -179,11 +181,13 @@ def _cmd_brain_mode(ctx) -> str:
             "Costs 4 calls instead of 1 — but the quota is free, so the real\n"
             "price is time, not money."
         )
-    cfg["deep_mode"] = False
-    cfg["auto_deep"] = False
-    cfg["verify_mode"] = False
-    brain.save_config(cfg)
-    return "⚡ Normal mode — one model, faster and cheaper."
+    if mode in ("normal", "عادي"):
+        cfg["deep_mode"] = False
+        cfg["auto_deep"] = False
+        cfg["verify_mode"] = False
+        brain.save_config(cfg)
+        return "⚡ Normal mode — one model, faster and cheaper."
+    return "usage: brain_mode normal|verify|smart|deep"
 
 
 def _cmd_brain_local(ctx) -> str:

@@ -154,10 +154,12 @@ _HARD_MARKERS = (
     "which is better", "step by step", "explain", "prove", "derive",
     "calculate", "optimi", "refactor", "debug", "root cause", "design",
     "architect", "algorithm", "complexity", "figure out", "work out",
+    "investigate", "review", "audit", "plan", "improve", "upgrade",
     # عربي (بعد التطبيع: ا بدل أإآ، ه بدل ة، ي بدل ى)
     "ليه", "ازاي", "قارن", "مقارنه", "الفرق بين", "افضل", "اثبت", "علل",
     "احسب", "حساب", "خطوه بخطوه", "حلل", "تحليل", "صمم", "تصميم",
     "ايه السبب", "سبب المشكله", "ينفع ازاي", "امتي",
+    "راجع", "مراجعه", "دقق", "تدقيق", "طور", "خطط", "حسن",
 )
 
 # رقم + عملية حسابية = مسألة، حتى من غير أي كلمة مفتاحية
@@ -795,7 +797,7 @@ class AssistantEngine:
         if _MATH_RE.search(text):
             return True
         # سؤال طويل غالبًا فيه شروط متعددة لازم تتحل بالترتيب
-        return len(text) > 220 and "?" in text + "؟"
+        return len(text) > 220 and ("?" in text or "؟" in text)
 
     @staticmethod
     def _looks_like_code_work(text: str) -> bool:

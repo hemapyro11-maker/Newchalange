@@ -148,6 +148,19 @@ def test_mode_reports_auto_when_set(make_ctx):
     assert "auto" in bp._cmd_brain_mode(make_ctx("brain_mode", []))
 
 
+def test_smart_alias_enables_adaptive_deep_mode(make_ctx):
+    out = bp._cmd_brain_mode(make_ctx("brain_mode smart", ["smart"]))
+    assert "Smart mode" in out
+    assert brain.load_config()["auto_deep"] is True
+
+
+def test_unknown_mode_does_not_silently_switch_to_normal(make_ctx):
+    bp._cmd_brain_mode(make_ctx("brain_mode deep", ["deep"]))
+    out = bp._cmd_brain_mode(make_ctx("brain_mode nonsense", ["nonsense"]))
+    assert out.startswith("usage")
+    assert brain.load_config()["deep_mode"] is True
+
+
 def test_local_on_blocks_cloud_and_says_so(make_ctx):
     out = bp._cmd_brain_local(make_ctx("brain_local on", ["on"]))
     assert "nothing leaves your machine" in out

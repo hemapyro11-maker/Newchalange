@@ -659,8 +659,8 @@ def test_think_step_by_step_is_injected_only_when_hard(bare_engine, monkeypatch)
     assert "step by step" in seen["system"]
 
 
-def test_auto_deep_stays_off_unless_you_turn_it_on(bare_engine, monkeypatch):
-    """الوضع العميق بيستهلك ~4 أضعاف الحصة — قرار المستخدم مش قرارنا."""
+def test_smart_mode_is_default_for_hard_questions(bare_engine, monkeypatch):
+    """الأسئلة الصعبة تتراجع بعمق افتراضيًا، والرسائل البسيطة تفضل سريعة."""
     monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
     used = {}
     monkeypatch.setattr(
@@ -678,7 +678,7 @@ def test_auto_deep_stays_off_unless_you_turn_it_on(bare_engine, monkeypatch):
         ][1],
     )
     bare_engine._converse("ليه ده بيحصل؟")
-    assert used == {"normal": True}
+    assert used == {"deep": True}
 
 
 def test_auto_deep_escalates_hard_questions_when_enabled(bare_engine, monkeypatch):
