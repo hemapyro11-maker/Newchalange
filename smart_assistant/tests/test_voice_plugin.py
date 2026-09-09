@@ -89,6 +89,8 @@ def _deny_all_backends(monkeypatch):
     monkeypatch.setattr(vp, "_edge_available", lambda: False)
     monkeypatch.setattr(vp, "sherpa_available", lambda: False)
     monkeypatch.setattr(vp, "_load_sherpa", lambda lang="ar": None)
+    monkeypatch.setattr(vp.vtr, "available", lambda: False)
+    monkeypatch.setattr(vp.nvr, "available", lambda: False)
 
 
 # ── speak: usage / no backends ──────────────────────────────────────────
@@ -291,7 +293,7 @@ def test_download_cleans_up_partial_file_on_failure(monkeypatch, tmp_path):
 def test_voice_status_reports_all_missing(make_ctx, monkeypatch):
     _deny_all_backends(monkeypatch)
     result = vp._cmd_voice_status(make_ctx("voice_status", []))
-    assert result.count("❌") == 5
+    assert result.count("❌") == 6
     assert "No speech engine installed" in result
 
 
@@ -444,9 +446,28 @@ def test_sherpa_is_tried_before_the_archived_piper_binary():
     assert order.index("_synthesize_sherpa") < order.index("_synthesize_piper")
 
 
-def test_natural_voice_is_first_when_configured():
+def test_human_voice_is_first_and_chatterbox_is_its_fallback():
     order = [name for _label, name, _ext, _key in vp._BACKENDS]
-    assert order[0] == "_synthesize_natural"
+    assert order[:2] == ["_synthesize_human", "_synthesize_natural"]
+
+
+def test_human_voice_falls_back_when_runtime_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(vp.vtr, "available", lambda: False)
+    assert vp._synthesize_human("أهلاً", tmp_path / "o.wav", "ar") is False
+
+
+def test_human_voice_uses_studio_speaker_not_chatterbox_reference(tmp_path, monkeypatch):
+    monkeypatch.setattr(vp.vtr, "available", lambda: True)
+    monkeypatch.setattr(vp, "_natural_reference", lambda: tmp_path / "synthetic.wav")
+    seen = {}
+
+    def fake_render(text, language, output, reference=None):
+        seen["reference"] = reference
+        return True, "ok"
+
+    monkeypatch.setattr(vp.vtr, "render", fake_render)
+    assert vp._synthesize_human("أهلاً", tmp_path / "o.wav", "ar") is True
+    assert seen["reference"] is None
 
 
 def test_natural_voice_falls_back_when_runtime_missing(tmp_path, monkeypatch):

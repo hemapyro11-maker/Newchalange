@@ -1,0 +1,4 @@
+# Install PyTorch for the target CPU/CUDA first, then this file.
+# The pinned versions are the exact stack validated by Nezuko on Windows.
+omnivoice==0.2.1
+voicetut-tts==0.1.1

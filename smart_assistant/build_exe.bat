@@ -108,6 +108,7 @@ py -m PyInstaller ^
     --hidden-import styles ^
     --hidden-import benchmark ^
     --hidden-import natural_voice_runtime ^
+    --hidden-import voicetut_runtime ^
     --collect-all CTkToolTip ^
     --collect-all mcp ^
     --hidden-import pywintypes ^
@@ -146,6 +147,8 @@ py -m PyInstaller ^
     --add-data "benchmark.py;." ^
     --add-data "natural_voice_runtime.py;." ^
     --add-data "natural_voice_worker.py;." ^
+    --add-data "voicetut_runtime.py;." ^
+    --add-data "voicetut_voice_worker.py;." ^
     --add-data "version.py;." ^
     --add-data "version.json;." ^
     --add-data "connectors.example.json;." ^
@@ -175,8 +178,10 @@ echo   - code_scan بيستخدم bandit (اختياري: pip install bandit) ك
 echo     إضافي فوق تحليل AST الأساسي بتاعنا — من غيره بيفضل يشتغل
 echo     بالفحص الأساسي بس.
 echo   - أمر speak (صوت نيزوكو) محتاج ffplay (جزء من FFmpeg، شوف فوق)
-echo     عشان يشغّل الصوت. أفضل جودة (صوت مصري أنثوي حقيقي) محتاجة
-echo     إنترنت وقت الاستخدام (edge-tts، مجاني بالكامل). من غير إنترنت،
+echo     عشان يشغّل الصوت. أفضل جودة تستخدم VoiceTut المصري في بيئة
+echo     Python معزولة (requirements-human-voice.txt) ونموذجه المحلي،
+echo     وتُضبط مرة واحدة بأمر human_voice_setup. النموذج لا يدخل جوه
+echo     الـ EXE بسبب حجمه. بعده Chatterbox ثم Edge TTS، ومن غيرهم
 echo     بيرجع لـ Piper (صوت عربي محلي، بيتحمّل مرة واحدة ~60MB) وبعدين
 echo     espeak-ng (لازم يتثبت يدوي من espeak-ng.github.io، صوت روبوتي
 echo     بس ضامن يشتغل offline بالكامل من غير أي تحميل).

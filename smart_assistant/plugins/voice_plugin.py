@@ -1,17 +1,20 @@
 """
-voice_plugin.py — نطق نصوص بصوت أنثوي مصري (نيزوكو) عبر سلسلة احتياطية
-حقيقية من ثلاث محركات TTS، من الأفضل جودة للأضمن توفر:
+voice_plugin.py — نطق عربي/إنجليزي عبر سلسلة محركات تبدأ بصوت VoiceTut
+المصري المدرّب على كلام بشري، ثم Chatterbox والمحركات الأخف المتاحة.
 
-1. Microsoft Edge TTS (عبر مكتبة `edge-tts` مفتوحة المصدر) — مجاني
+1. VoiceTut-TTS — نموذج مصري محلي يدعم العربية والإنجليزية والمزج
+   بينهما، بأصوات استوديو أنثوية واستنساخ اختياري من مرجع مصرح به.
+2. Chatterbox Multilingual V3 — محرك عصبي محلي متعدد اللغات واستنساخ.
+3. Microsoft Edge TTS (عبر مكتبة `edge-tts` مفتوحة المصدر) — مجاني
    بالكامل من غير API key أو اشتراك، وفيه صوت مصري أنثوي حقيقي
    (ar-EG-SalmaNeural). العيب الوحيد: التوليد نفسه بيحصل على سيرفرات
    مايكروسوفت، يعني محتاج إنترنت وقت الاستخدام — مش نموذج محلي بالكامل.
-2. Piper (محرك TTS عصبي محلي، مفتوح المصدر GPL) — صوت عربي واحد بس
+4. Piper (محرك TTS عصبي محلي، مفتوح المصدر GPL) — صوت عربي واحد بس
    متاح رسميًا (`ar_JO-kareem`، أردني، رجالي) بيتحمّل مرة واحدة
    (~60MB) ويشتغل offline تمامًا بعد كده. مفيش صوت عربي أنثوي في
    مكتبة أصوات Piper الرسمية للأسف — قيد حقيقي في الأدوات المتاحة،
    مش قرار تصميم.
-3. espeak-ng (مضمّن محليًا دايمًا، بدون إنترنت خالص) — صوت عربي
+5. espeak-ng (مضمّن محليًا دايمًا، بدون إنترنت خالص) — صوت عربي
    روبوتي (formant synthesis قديم)، لكنه الضمانة الأخيرة اللي هتشتغل
    في كل الحالات.
 
@@ -107,6 +110,7 @@ import unicodedata
 import wave
 import media_runtime as mr
 import natural_voice_runtime as nvr
+import voicetut_runtime as vtr
 
 try:
     import sounddevice as sd
@@ -539,6 +543,17 @@ def _synthesize_natural(text: str, out_path: pathlib.Path, lang: str = "ar") -> 
     return ok
 
 
+def _synthesize_human(text: str, out_path: pathlib.Path, lang: str = "ar") -> bool:
+    if not vtr.available():
+        return False
+    # The default assistant voice must use VoiceTut's clean studio reference.
+    # `natural_voice_reference` may belong to Chatterbox (and may itself be
+    # synthetic), so never leak it into this engine.  Explicit cloning remains
+    # available through the `human_voice ... reference.wav` command.
+    ok, _detail = vtr.render(text, lang, out_path)
+    return ok
+
+
 # الترتيب بيمثّل أولوية الجودة الحقيقية: صوت أنثوي مصري طبيعي أولاً،
 # وبعدين احتياطي محلي أفضل من إسبيك، وأخيرًا الضمانة اللي بتشتغل دايمًا.
 # بنخزّن **أسماء** الدوال مش الدوال نفسها، وبنجيبها وقت النداء.
@@ -547,6 +562,7 @@ def _synthesize_natural(text: str, out_path: pathlib.Path, lang: str = "ar") -> 
 # العنصر الرابع هو مفتاح اسم الصوت في `_VOICES` — بيخلي إضافة محرك
 # جديد تعديل في مكان واحد بدل اتنين.
 _BACKENDS = [
+    ("VoiceTut Egyptian", "_synthesize_human", ".wav", "edge"),
     ("Chatterbox Multilingual V3", "_synthesize_natural", ".wav", "edge"),
     ("edge-tts", "_synthesize_edge", ".mp3", "edge"),
     ("sherpa-onnx", "_synthesize_sherpa", ".wav", "piper_name"),
@@ -567,7 +583,8 @@ def _synthesize_with_fallback(text: str, tmp_dir: pathlib.Path,
         synth_fn = globals()[fn_name]
         out_path = tmp_dir / f"speech{ext}"
         if synth_fn(text, out_path, lang):
-            return out_path, f"{label} ({voice.get(voice_key, lang)})"
+            voice_name = vtr._settings()[2] if fn_name == "_synthesize_human" else voice.get(voice_key, lang)
+            return out_path, f"{label} ({voice_name})"
     return None
 
 
@@ -656,6 +673,14 @@ def _cmd_voice_status(ctx) -> str:
     profile_name, _profile_cfg = _profile()
     lines = [f"🔊 Speech engines, in the order they are tried (profile: {profile_name}):"]
 
+    human_ok = vtr.available()
+    _runtime, _model, human_speaker, human_steps = vtr._settings()
+    lines.append(
+        f"  {'✅' if human_ok else '❌'} VoiceTut Egyptian (human-trained, Arabic/English, isolated)"
+        + (f" — speaker: {human_speaker}, quality steps: {human_steps}" if human_ok else
+           " — run human_voice_setup <python.exe> <model-directory>")
+    )
+
     natural_ok = nvr.available()
     reference = _natural_reference()
     lines.append(
@@ -709,7 +734,7 @@ def _cmd_voice_status(ctx) -> str:
         f"  {'✅' if ffplay_ok else '❌'} ffplay to play the audio (part of FFmpeg)"
     )
 
-    if not (natural_ok or edge_ok or sherpa_ok or piper_ok or espeak_ok):
+    if not (human_ok or natural_ok or edge_ok or sherpa_ok or piper_ok or espeak_ok):
         lines.append("\n⚠️ No speech engine installed — `speak` will not work at all.")
     elif piper_ok:
         lines.append(
