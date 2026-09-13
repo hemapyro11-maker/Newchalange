@@ -1,5 +1,6 @@
 import json
 import time
+import urllib.error
 
 import brain
 import pytest
@@ -542,6 +543,23 @@ def test_post_json_wraps_other_http_errors(monkeypatch):
     monkeypatch.setattr(brain.urllib.request, "urlopen", raise_500)
     with pytest.raises(RuntimeError, match="HTTP 500"):
         brain._post_json("http://x", {}, {}, 5)
+
+
+def test_post_json_retries_a_transient_503_once(monkeypatch):
+    calls = {"n": 0}
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def read(self): return b'{"ok": true}'
+    def flaky(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise urllib.error.HTTPError("u", 503, "busy", {}, None)
+        return Response()
+    monkeypatch.setattr(brain.urllib.request, "urlopen", flaky)
+    monkeypatch.setattr(brain.time, "sleep", lambda seconds: None)
+    assert brain._post_json("http://x", {}, {}, 5) == {"ok": True}
+    assert calls["n"] == 2
 
 
 # ── الحالة ───────────────────────────────────────────────────────────

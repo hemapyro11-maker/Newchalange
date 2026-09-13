@@ -42,6 +42,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import random
 import sys
 import threading
 import time
@@ -448,6 +449,9 @@ class Brain:
             except _RateLimited as e:
                 with _lock:
                     self._note_failure(prov.name, now, rate_limited=True)
+                    if e.retry_after is not None:
+                        state = self._states.setdefault(prov.name, _ProviderState())
+                        state.cold_until = max(state.cold_until, now + min(e.retry_after, 3600))
                 errors.append(f"{prov.label}: rate limited ({e})")
                 continue
             except Exception as e:  # noqa: BLE001 - أي فشل = جرّب اللي بعده
@@ -664,6 +668,13 @@ class Brain:
 class _RateLimited(Exception):
     """المزوّد رجّع 429 — نتعامل معاه غير الأخطاء العادية."""
 
+    def __init__(self, message: str, retry_after=None):
+        super().__init__(message)
+        try:
+            self.retry_after = max(0.0, float(retry_after))
+        except (TypeError, ValueError):
+            self.retry_after = None
+
 
 # ── فحص المزوّد المحلي ───────────────────────────────────────────────
 # مزوّد محلي "مش محتاج مفتاح"، بس ده **مش** معناه إنه شغال. من غير
@@ -695,19 +706,31 @@ def is_local_alive(prov: Provider, *, timeout: float = 1.0) -> bool:
 
 def _post_json(url: str, payload: dict, headers: dict, timeout: int) -> dict:
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        body = ""
+    transient = {408, 500, 502, 503, 504}
+    for attempt in range(2):
+        req = urllib.request.Request(url, data=data, headers=headers, method="POST")
         try:
-            body = e.read().decode("utf-8", "replace")[:300]
-        except Exception:  # noqa: BLE001
-            pass
-        if e.code == 429:
-            raise _RateLimited(body or "429") from e
-        raise RuntimeError(f"HTTP {e.code}: {body}") from e
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", "replace")[:300]
+            except Exception:  # noqa: BLE001
+                pass
+            retry_after = e.headers.get("Retry-After") if e.headers else None
+            if e.code == 429:
+                raise _RateLimited(body or "429", retry_after=retry_after) from e
+            if e.code in transient and attempt == 0:
+                time.sleep(0.2 + random.random() * 0.2)
+                continue
+            raise RuntimeError(f"HTTP {e.code}: {body}") from e
+        except (urllib.error.URLError, TimeoutError):
+            if attempt == 0:
+                time.sleep(0.2 + random.random() * 0.2)
+                continue
+            raise
+    raise RuntimeError("provider request failed after retry")
 
 
 def _call_provider(prov: Provider, model: str, messages: list[dict],

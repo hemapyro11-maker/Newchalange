@@ -450,63 +450,68 @@ class AssistantEngine:
         self._register_builtin_commands()
         loaded: list[str] = []
         health: dict[str, dict] = {}
+        # Later plugin directories override earlier ones by filename. In a
+        # frozen build this lets a repaired/updated plugin beside the EXE
+        # replace its bundled copy instead of being rejected as a collision.
+        candidates: dict[str, pathlib.Path] = {}
         for plugins_dir in self.plugins_dirs:
             plugins_dir.mkdir(parents=True, exist_ok=True)
-            for path in sorted(plugins_dir.glob("*.py")):
-                if path.name.startswith("_"):
+            for candidate in sorted(plugins_dir.glob("*.py")):
+                if not candidate.name.startswith("_"):
+                    candidates[candidate.name] = candidate
+        for path in candidates.values():
+            started = time.perf_counter()
+            try:
+                spec = importlib.util.spec_from_file_location(f"assistant_plugin_{path.stem}", path)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)  # type: ignore[union-attr]
+                register = getattr(module, "register", None)
+                if not callable(register):
+                    self._log(f"⚠ plugin {path.stem} has no register(engine)", "warn")
+                    health[path.stem] = {
+                        "status": "invalid", "commands": [],
+                        "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                        "error": "missing register(engine)", "path": str(path),
+                    }
                     continue
-                started = time.perf_counter()
+                before = self.registry.snapshot()
                 try:
-                    spec = importlib.util.spec_from_file_location(f"assistant_plugin_{path.stem}", path)
-                    module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(module)  # type: ignore[union-attr]
-                    register = getattr(module, "register", None)
-                    if not callable(register):
-                        self._log(f"⚠ plugin {path.stem} has no register(engine)", "warn")
-                        health[path.stem] = {
-                            "status": "invalid", "commands": [],
-                            "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-                            "error": "missing register(engine)", "path": str(path),
-                        }
-                        continue
-                    before = self.registry.snapshot()
-                    try:
-                        register(self)
-                    except Exception:
-                        self.registry.restore(before)
-                        raise
-                    after = self.registry.snapshot()
-                    collisions = sorted(
-                        name for name, command in after.items()
-                        if name in before and before[name] is not command
-                    )
-                    if collisions:
-                        clean = dict(after)
-                        for name in collisions:
-                            clean[name] = before[name]
-                        self.registry.restore(clean)
-                        after = clean
-                    new_commands = sorted(
-                        name for name, command in after.items()
-                        if name not in before
-                    )
-                    self._plugin_commands.update(new_commands)
-                    loaded.append(path.stem)
-                    health[path.stem] = {
-                        "status": "loaded", "commands": new_commands,
-                        "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-                        "error": "", "path": str(path), "collisions": collisions,
-                    }
-                    self._record_plugin_learned(path.stem)
-                    collision_note = f"; blocked command collisions: {', '.join(collisions)}" if collisions else ""
-                    self._log(f"🧩 plugin loaded: {path.stem} ({len(new_commands)} commands{collision_note})", "ok")
-                except Exception as exc:
-                    health[path.stem] = {
-                        "status": "error", "commands": [],
-                        "duration_ms": round((time.perf_counter() - started) * 1000, 1),
-                        "error": f"{type(exc).__name__}: {exc}", "path": str(path),
-                    }
-                    self._log(f"❌ failed to load plugin {path.name}:\n{traceback.format_exc()}", "error")
+                    register(self)
+                except Exception:
+                    self.registry.restore(before)
+                    raise
+                after = self.registry.snapshot()
+                collisions = sorted(
+                    name for name, command in after.items()
+                    if name in before and before[name] is not command
+                )
+                if collisions:
+                    clean = dict(after)
+                    for name in collisions:
+                        clean[name] = before[name]
+                    self.registry.restore(clean)
+                    after = clean
+                new_commands = sorted(
+                    name for name, command in after.items()
+                    if name not in before
+                )
+                self._plugin_commands.update(new_commands)
+                loaded.append(path.stem)
+                health[path.stem] = {
+                    "status": "loaded", "commands": new_commands,
+                    "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                    "error": "", "path": str(path), "collisions": collisions,
+                }
+                self._record_plugin_learned(path.stem)
+                collision_note = f"; blocked command collisions: {', '.join(collisions)}" if collisions else ""
+                self._log(f"🧩 plugin loaded: {path.stem} ({len(new_commands)} commands{collision_note})", "ok")
+            except Exception as exc:
+                health[path.stem] = {
+                    "status": "error", "commands": [],
+                    "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                    "error": f"{type(exc).__name__}: {exc}", "path": str(path),
+                }
+                self._log(f"❌ failed to load plugin {path.name}:\n{traceback.format_exc()}", "error")
         # self._loaded_plugins بيعكس نتيجة آخر مسح بس (مش تراكمي) — عشان
         # أمر "plugins" يفضل صادق لو ملف اتشال والمستخدم عمل reload_plugins.
         # (سجل "اتعلمت قبل كده" الدائم هو self.skills["plugins"] مش ده.)

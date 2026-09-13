@@ -214,6 +214,19 @@ def test_load_plugins_from_directory(tmp_path):
     assert engine.registry.get("ping") is not None
 
 
+def test_later_plugin_directory_overrides_bundled_filename(tmp_path):
+    bundled, external = tmp_path / "bundled", tmp_path / "external"
+    bundled.mkdir(); external.mkdir()
+    for folder, value in ((bundled, "old"), (external, "repaired")):
+        (folder / "same_plugin.py").write_text(
+            f"def register(engine):\n    engine.registry.register('same', lambda ctx: '{value}')\n",
+            encoding="utf-8",
+        )
+    engine = AssistantEngine(plugins_dirs=[bundled, external])
+    assert engine.registry.get("same").handler(None) == "repaired"
+    assert engine.plugin_health["same_plugin"]["path"] == str(external / "same_plugin.py")
+
+
 def test_load_plugins_skips_underscore_files(tmp_path):
     plugins_dir = tmp_path / "plugins"
     plugins_dir.mkdir()
