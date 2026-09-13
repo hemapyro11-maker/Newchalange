@@ -109,10 +109,12 @@ import urllib.error
 import urllib.request
 import unicodedata
 import wave
+import brain
 import media_runtime as mr
 import natural_voice_runtime as nvr
 import voicetut_runtime as vtr
 import english_voice_runtime as evr
+from voice_worker_runtime import hidden_process_kwargs
 
 try:
     import sounddevice as sd
@@ -366,6 +368,7 @@ def _synthesize_edge(text: str, out_path: pathlib.Path, lang: str = "ar") -> boo
                  "--write-media", str(out_path)],
                 capture_output=True, text=True,
                 timeout=max(_SYNTH_TIMEOUT, min(180, 20 + len(text) // 12)),
+                **hidden_process_kwargs(),
             )
             return proc.returncode == 0 and out_path.is_file() and out_path.stat().st_size > 0
 
@@ -395,6 +398,7 @@ def _synthesize_piper(text: str, out_path: pathlib.Path, lang: str = "ar") -> bo
         proc = subprocess.run(
             ["piper", "-m", str(model), "-c", str(config), "-f", str(out_path)],
             input=text, capture_output=True, text=True, timeout=_SYNTH_TIMEOUT,
+            **hidden_process_kwargs(),
         )
     except subprocess.TimeoutExpired:
         return False
@@ -525,6 +529,7 @@ def _synthesize_espeak(text: str, out_path: pathlib.Path, lang: str = "ar") -> b
             ["espeak-ng", "-v", _voice_for(lang)["espeak"], "-s", str(profile["espeak_rate"]),
              "-p", str(profile["espeak_pitch"]), "-w", str(out_path), text],
             capture_output=True, text=True, timeout=_SYNTH_TIMEOUT,
+            **hidden_process_kwargs(),
         )
     except subprocess.TimeoutExpired:
         return False
@@ -586,9 +591,17 @@ def _synthesize_with_fallback(text: str, tmp_dir: pathlib.Path,
                               lang: str | None = None) -> tuple[pathlib.Path, str] | None:
     lang = lang or _detect_lang(text)
     voice = _voice_for(lang)
-    import brain
-    local_only = bool(brain.load_config().get("local_only"))
-    for label, fn_name, ext, voice_key in _BACKENDS:
+    cfg = brain.load_config()
+    local_only = bool(cfg.get("local_only"))
+    backends = list(_BACKENDS)
+    # VoiceTut sounds like a studio model but diffusion inference is slow on CPU.
+    # Conversation mode prefers Microsoft's Egyptian neural voice and retains
+    # VoiceTut as the high-quality offline fallback. English remains local Kokoro.
+    if lang == "ar" and not local_only and cfg.get("voice_latency_mode", "instant") == "instant":
+        edge = next(item for item in backends if item[1] == "_synthesize_edge")
+        backends.remove(edge)
+        backends.insert(0, edge)
+    for label, fn_name, ext, voice_key in backends:
         if local_only and "edge" in fn_name:
             continue
         synth_fn = globals()[fn_name]
@@ -634,14 +647,19 @@ def _cmd_speak(ctx) -> str:
             )
         audio_path, backend_label = result
 
-        if not shutil.which("ffplay"):
-            return f"✅ audio generated with {backend_label} — but ffplay (part of FFmpeg) is not installed to play it"
-
         try:
-            play_proc = subprocess.run(
-                ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", str(audio_path)],
-                capture_output=True, text=True, timeout=_PLAYBACK_TIMEOUT,
-            )
+            if os.name == "nt" and audio_path.suffix.lower() == ".wav":
+                import winsound
+                winsound.PlaySound(str(audio_path), winsound.SND_FILENAME)
+                play_proc = type("Result", (), {"returncode": 0})()
+            elif shutil.which("ffplay"):
+                play_proc = subprocess.run(
+                    ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", str(audio_path)],
+                    capture_output=True, text=True, timeout=_PLAYBACK_TIMEOUT,
+                    **hidden_process_kwargs(),
+                )
+            else:
+                return f"✅ audio generated with {backend_label} — but ffplay (or a native WAV player) is not available"
         except subprocess.TimeoutExpired:
             return f"⚠️ audio generated with {backend_label} but playback took too long"
 
@@ -957,7 +975,8 @@ def _transcribe_whisper_cli(wav_path: pathlib.Path, model: str,
         if language:
             cmd += ["--language", language]
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_TRANSCRIBE_TIMEOUT)
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_TRANSCRIBE_TIMEOUT,
+                                  **hidden_process_kwargs())
         except subprocess.TimeoutExpired:
             return None, True
         if proc.returncode != 0:
@@ -1486,3 +1505,11 @@ def register(engine):
     engine.registry.register("clone_voice_agree_license", _cmd_clone_voice_agree_license, "clone_voice_agree_license — accept the voice-cloning model's licence, once, explicitly")
     engine.registry.register("clone_voice_status", _cmd_clone_voice_status, "clone_voice_status — verify Coqui, Transformers, PyTorch, device, and model cache")
     engine.registry.register("clone_voice", _cmd_clone_voice, "clone_voice <reference.wav> <text> <output.wav> [language=ar] — clone a voice from a sample (Coqui XTTS-v2)")
+    # Prepare only the current interface language in the background. Loading both
+    # large models at once wastes RAM, while this removes the first-reply delay.
+    try:
+        cfg = brain.load_config()
+        preferred = cfg.get("preferred_voice_language") or cfg.get("ui_lang", "ar")
+        (vtr.prewarm if preferred == "ar" else evr.prewarm)()
+    except Exception:
+        pass

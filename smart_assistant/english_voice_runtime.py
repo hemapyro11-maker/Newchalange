@@ -7,10 +7,16 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import wave
+
+from voice_worker_runtime import PersistentVoiceWorker
 
 DEFAULT_VOICE = "af_heart"
 DEFAULT_SPEED = 0.96
+_worker: PersistentVoiceWorker | None = None
+_worker_lock = threading.Lock()
+_warming = False
 
 
 def _settings() -> tuple[Path | None, str, float]:
@@ -51,7 +57,33 @@ def configure(runtime: Path | None, voice: str = DEFAULT_VOICE,
     brain.save_config(cfg)
 
 
-def render(text: str, output: Path, timeout: int = 900) -> tuple[bool, str]:
+def _ensure_worker(runtime: Path, worker_script: Path, env: dict[str, str]) -> PersistentVoiceWorker:
+    global _worker
+    with _worker_lock:
+        if _worker is None or not _worker.alive:
+            _worker = PersistentVoiceWorker(runtime, worker_script, env)
+        return _worker
+
+
+def prewarm() -> None:
+    global _warming
+    if _warming or not available():
+        return
+    _warming = True
+
+    def warm() -> None:
+        global _warming
+        try:
+            with tempfile.TemporaryDirectory(prefix="nezuko_english_warmup_") as tmp:
+                render("Ready", Path(tmp) / "warm.wav", timeout=900, persistent=True)
+        finally:
+            _warming = False
+
+    threading.Thread(target=warm, name="nezuko-english-warmup", daemon=True).start()
+
+
+def render(text: str, output: Path, timeout: int = 900,
+           persistent: bool = False) -> tuple[bool, str]:
     runtime, voice, speed = _settings()
     if runtime is None:
         return False, "configure the isolated Kokoro Python executable"
@@ -71,14 +103,20 @@ def render(text: str, output: Path, timeout: int = 900) -> tuple[bool, str]:
         env.pop("PYTHONHOME", None)
         env["PYTHONUTF8"] = "1"
         env.setdefault("HF_HOME", str(runtime.parent.parent / "nezuko-kokoro-cache"))
-        try:
-            result = subprocess.run(
-                [str(runtime), str(worker), str(job)], env=env, capture_output=True,
-                text=True, encoding="utf-8", errors="replace", timeout=timeout,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            return False, str(exc)
+        if persistent or (_worker is not None and _worker.alive):
+            result_ok, detail = _ensure_worker(runtime, worker, env).submit(
+                {"text": text, "output": str(output), "voice": voice, "speed": speed}, timeout)
+            result = type("Result", (), {"returncode": 0 if result_ok else 1,
+                                          "stdout": "", "stderr": detail})()
+        else:
+            try:
+                result = subprocess.run(
+                    [str(runtime), str(worker), str(job)], env=env, capture_output=True,
+                    text=True, encoding="utf-8", errors="replace", timeout=timeout,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                return False, str(exc)
     if result.returncode:
         return False, (result.stderr or result.stdout or "worker failed")[-2000:]
     try:

@@ -170,8 +170,8 @@ class AssistantApp(ctk.CTk):
         self._activity = "starting"
 
         self.title(self.t.t("app_title"))
-        self.geometry("1280x800")
-        self.minsize(980, 620)
+        self.geometry("1480x900")
+        self.minsize(1100, 680)
 
         self._build()
         self.engine.start()
@@ -206,29 +206,48 @@ class AssistantApp(ctk.CTk):
         self.configure(fg_color=c["bg"])
         self._rows = []  # lightweight rendering history; also useful to GUI diagnostics
 
+        self.app_menu = ctk.CTkFrame(self, height=32, fg_color=c["panel"], corner_radius=0)
+        self.app_menu.pack(fill="x")
+        self.app_menu.pack_propagate(False)
+        for label, callback in (
+            ("File", self._new_chat), ("Edit", self._copy_chat),
+            ("View", self._toggle_theme), ("Help", lambda: self._seed_prompt("help")),
+        ):
+            ctk.CTkButton(
+                self.app_menu, text=label, command=callback, width=48, height=28,
+                fg_color="transparent", hover_color=c["panel_hi"], corner_radius=4,
+                text_color=c["dim"], font=self._font(11),
+            ).pack(side="left", padx=(6, 0), pady=2)
+
         self.root = ctk.CTkFrame(self, fg_color=c["bg"], corner_radius=0)
         self.root.pack(fill="both", expand=True)
         self.root.grid_rowconfigure(0, weight=1)
-        self.root.grid_columnconfigure(1, weight=1)
+        self.root.grid_columnconfigure(1, weight=1, minsize=560)
 
         # Left navigation mirrors a modern coding assistant: identity, new chat,
         # recent conversations and settings stay visible instead of hiding in commands.
         self.sidebar = ctk.CTkFrame(
-            self.root, width=230, fg_color="#0b0b0b" if self.mode == "dark" else "#f2f2ef",
+            self.root, width=258, fg_color="#171717" if self.mode == "dark" else "#f2f2ef",
             corner_radius=0, border_width=0,
         )
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         self.sidebar.grid_propagate(False)
         ctk.CTkLabel(
-            self.sidebar, text="◉  " + self.t.t("app_title"), text_color=c["text"],
-            font=self._font(18, True), anchor=self._anchor,
-        ).pack(fill="x", padx=18, pady=(20, 14))
-        ctk.CTkButton(
-            self.sidebar, text="＋  " + self.t.t("new_chat"), command=self._new_chat,
-            height=42, corner_radius=10, fg_color=c["panel"], hover_color=c["panel_hi"],
-            border_width=1, border_color=c["border"], text_color=c["text"],
-            font=self._font(13, True), anchor=self._anchor,
-        ).pack(fill="x", padx=12)
+            self.sidebar, text="◈  " + self.t.t("app_title") + " ⌄", text_color=c["text"],
+            font=self._font(17, True), anchor=self._anchor,
+        ).pack(fill="x", padx=16, pady=(20, 14))
+        for icon, label, callback in (
+            ("✎", self.t.t("new_chat"), self._new_chat),
+            ("⌂", self.t.t("nav_projects"), self._choose_project),
+            ("◷", self.t.t("nav_scheduled"), lambda: self._open_settings_page("macros")),
+            ("⬡", self.t.t("tool_plugins"), lambda: self._open_settings_page("plugins")),
+            ("◎", self.t.t("nav_explore"), lambda: self._open_settings_page("skills")),
+        ):
+            ctk.CTkButton(
+                self.sidebar, text=f"{icon}  {label}", command=callback,
+                height=34, corner_radius=7, fg_color="transparent", hover_color=c["panel_hi"],
+                text_color=c["dim"], font=self._font(12), anchor=self._anchor,
+            ).pack(fill="x", padx=8, pady=1)
         ctk.CTkLabel(
             self.sidebar, text=self.t.t("recent_chats"), text_color=c["faint"],
             font=self._font(11, True), anchor=self._anchor,
@@ -236,6 +255,11 @@ class AssistantApp(ctk.CTk):
         self.session_list = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         self.session_list.pack(fill="both", expand=True, padx=8)
         self._refresh_session_list()
+        ctk.CTkButton(
+            self.sidebar, text="♬  " + self.t.t("voice"), command=self._toggle_voice,
+            height=34, corner_radius=8, fg_color="transparent", hover_color=c["panel_hi"],
+            text_color=c["dim"], font=self._font(12), anchor=self._anchor,
+        ).pack(fill="x", padx=10, pady=(2, 0))
         ctk.CTkButton(
             self.sidebar, text="⚙  " + self.t.t("settings"), command=self._open_settings,
             height=38, corner_radius=8, fg_color="transparent", hover_color=c["panel_hi"],
@@ -248,19 +272,24 @@ class AssistantApp(ctk.CTk):
         self.main.grid_columnconfigure(0, weight=1)
 
         header = ctk.CTkFrame(self.main, height=64, fg_color=c["bg"], corner_radius=0,
-                              border_width=0)
-        header.grid(row=0, column=0, sticky="ew", padx=24)
+                              border_width=1, border_color=c["border"])
+        header.grid(row=0, column=0, sticky="ew")
         header.grid_propagate(False)
         ctk.CTkLabel(
             header, text=self.t.t("workspace_title"), text_color=c["text"],
             font=self._font(16, True), anchor=self._anchor,
-        ).pack(side=self._side, pady=18)
+        ).pack(side=self._side, padx=20, pady=18)
         badge_side = "left" if self._rtl else "right"
         self.mode_badge = ctk.CTkLabel(
             header, text=self.t.t("coding_ask"), fg_color=c["panel"], text_color=c["dim"],
             corner_radius=8, font=self._font(10), padx=10, pady=5,
         )
-        self.mode_badge.pack(side=badge_side, pady=17)
+        self.mode_badge.pack(side=badge_side, padx=(4, 16), pady=17)
+        ctk.CTkButton(
+            header, text="⧉  " + self.t.t("share_chat"), command=self._copy_chat,
+            width=92, height=30, corner_radius=7, fg_color="transparent",
+            hover_color=c["panel_hi"], text_color=c["dim"], font=self._font(11),
+        ).pack(side=badge_side, padx=2, pady=17)
         self.activity_label = ctk.CTkLabel(
             header, text="", text_color=c["green"], font=self._font(11, True),
         )
@@ -273,13 +302,13 @@ class AssistantApp(ctk.CTk):
             scrollbar_button_hover_color=c["dim"],
             font=self._font(14),
         )
-        self.stream.grid(row=1, column=0, sticky="nsew", padx=30, pady=(6, 4))
+        self.stream.grid(row=1, column=0, sticky="nsew", padx=(60, 48), pady=(18, 4))
         self.stream.configure(state="disabled")  # للقراءة بس — المستخدم بيكتب في self.entry
         _attach_readonly_textbox_shortcuts(self.stream)
         self._tag_cache: set = set()
 
         bottom = ctk.CTkFrame(self.main, fg_color=c["bg"], corner_radius=0)
-        bottom.grid(row=2, column=0, sticky="ew", padx=30, pady=(4, 18))
+        bottom.grid(row=2, column=0, sticky="ew", padx=(60, 48), pady=(4, 18))
 
         # صندوق الإدخال — حد رفيع وزوايا شبه مربعة، زي إطار الطرفية
         box = ctk.CTkFrame(
@@ -295,16 +324,16 @@ class AssistantApp(ctk.CTk):
 
         send_side = "left" if self._rtl else "right"
         self.send_button = ctk.CTkButton(
-            box, text=self.t.t("tool_send"), command=self._send, width=72, height=34,
-            corner_radius=10, fg_color=c["accent"], hover_color=c["green"],
-            text_color="#ffffff", font=self._font(12, True),
+            box, text="➤", command=self._send, width=38, height=38,
+            corner_radius=19, fg_color="#2463b4", hover_color="#3478d4",
+            text_color="#ffffff", font=self._font(15, True),
         )
         self.send_button.pack(side=send_side, padx=7, pady=7)
 
         self.talk_button = ctk.CTkButton(
-            box, text="🎤  " + self.t.t("tool_mic"), command=self._listen,
-            width=138, height=34, corner_radius=10, fg_color=c["panel_hi"],
-            hover_color=c["border"], text_color=c["text"], font=self._font(11, True),
+            box, text="🎙", command=self._listen,
+            width=38, height=38, corner_radius=19, fg_color="transparent",
+            hover_color=c["panel_hi"], text_color=c["text"], font=self._font(16, True),
         )
         self.talk_button.pack(side=send_side, padx=(0, 2), pady=7)
 
@@ -341,21 +370,41 @@ class AssistantApp(ctk.CTk):
             b._key = key
             self.tool_btns.append(b)
 
-        # The tools rail makes capabilities discoverable, with words and categories.
+        # Codex-style outputs rail: generated work, sources and tools stay visible.
         self.tools_panel = ctk.CTkFrame(
-            self.root, width=250, fg_color=c["panel"], corner_radius=0,
+            self.root, width=300, fg_color=c["panel"], corner_radius=18,
             border_width=1, border_color=c["border"],
         )
-        self.tools_panel.grid(row=0, column=2, sticky="nsew")
+        self.tools_panel.grid(row=0, column=2, sticky="nsew", padx=(0, 12), pady=12)
         self.tools_panel.grid_propagate(False)
+        output_head = ctk.CTkFrame(self.tools_panel, fg_color="transparent")
+        output_head.pack(fill="x", padx=12, pady=(14, 4))
         ctk.CTkLabel(
-            self.tools_panel, text=self.t.t("tools"), text_color=c["text"],
+            output_head, text=self.t.t("outputs"), text_color=c["text"],
             font=self._font(16, True), anchor=self._anchor,
-        ).pack(fill="x", padx=16, pady=(20, 4))
+        ).pack(side=self._side, padx=4)
+        ctk.CTkButton(
+            output_head, text="＋", command=lambda: self._seed_prompt(
+                "اعمل ملف جديد " if self._rtl else "Create a new file "),
+            width=30, height=28, corner_radius=6, fg_color="transparent",
+            hover_color=c["panel_hi"], text_color=c["dim"], font=self._font(15),
+        ).pack(side="left" if self._rtl else "right")
         ctk.CTkLabel(
-            self.tools_panel, text=self.t.t("tools_subtitle"), text_color=c["faint"],
+            self.tools_panel, text=self.t.t("create_output"), text_color=c["faint"],
             font=self._font(10), anchor=self._anchor, wraplength=210,
         ).pack(fill="x", padx=16, pady=(0, 14))
+        ctk.CTkButton(
+            self.tools_panel, text="＋  " + self.t.t("create_output"),
+            command=lambda: self._seed_prompt("اعمل فيديو احترافي عن " if self._rtl else "Create a professional video about "),
+            height=40, corner_radius=8, fg_color="transparent", hover_color=c["panel_hi"],
+            border_width=1, border_color=c["border"], text_color=c["dim"],
+            font=self._font(11), anchor=self._anchor,
+        ).pack(fill="x", padx=12, pady=(0, 12))
+        ctk.CTkLabel(self.tools_panel, text=self.t.t("sources"), text_color=c["text"],
+                     font=self._font(12, True), anchor=self._anchor).pack(fill="x", padx=16, pady=(3, 2))
+        ctk.CTkLabel(self.tools_panel, text=self.t.t("sources_empty"), text_color=c["faint"],
+                     font=self._font(10), anchor=self._anchor, wraplength=250,
+                     justify=self._justify).pack(fill="x", padx=16, pady=(0, 12))
         for section, entries in (
             (self.t.t("tool_files"), (("📎", "attach", self._attach_file), ("🛡", "scan", self._scan_file))),
             (self.t.t("tool_voice"), (("🎤", "mic", self._listen), ("🔊", "voices", lambda: self._open_settings_page("voices")))),
@@ -402,6 +451,30 @@ class AssistantApp(ctk.CTk):
             self._settings.page = page
             self._settings.cursor = 0
             self._settings._build()
+
+    def _choose_project(self):
+        path = filedialog.askdirectory(title=self.t.t("pick_dir"))
+        if path:
+            self._add_user(f"⌂ {path}")
+            self._last_command_name = "project"
+            self._show_thinking()
+            self.engine.submit(f"project {shlex.quote(path)}")
+
+    def _copy_chat(self):
+        try:
+            content = self.stream.get("1.0", "end-1c").strip()
+        except Exception:
+            content = ""
+        if content:
+            self.clipboard_clear()
+            self.clipboard_append(content)
+            self._activity = "ready"
+            self._refresh_status()
+
+    def _seed_prompt(self, text: str):
+        self.entry.delete(0, "end")
+        self.entry.insert(0, text)
+        self.entry.focus_set()
 
     # ── أسطر المحادثة ──────────────────────────────────────────────────
     def _stream_tag(self, color: str, size: int, bold: bool) -> str:
@@ -698,8 +771,11 @@ class AssistantApp(ctk.CTk):
     def _speak(self, text: str):
         text = text.rpartition("\n— ")[0] if "\n— " in text else text
         snippet = " ".join(text.split()).replace('"', "").replace("'", "")
-        if len(snippet) > 300:
-            snippet = snippet[:300] + "..."
+        # Short conversational turns begin speaking much sooner and feel more
+        # natural than waiting to synthesize a long formatted answer.
+        if len(snippet) > 180:
+            cut = max(snippet.rfind(mark, 0, 180) for mark in (".", "!", "?", "؟", "،"))
+            snippet = snippet[:cut + 1] if cut >= 60 else snippet[:180] + "..."
         if snippet:
             self._last_command_name = "speak"
             self.engine.submit(f"speak {snippet}")

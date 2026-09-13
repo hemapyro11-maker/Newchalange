@@ -451,6 +451,31 @@ def test_native_english_then_human_arabic_are_the_quality_first_backends():
     assert order[:3] == ["_synthesize_english_native", "_synthesize_human", "_synthesize_natural"]
 
 
+def test_instant_arabic_conversation_prefers_neural_edge_voice(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(vp.brain, "load_config", lambda: {
+        "local_only": False, "voice_latency_mode": "instant",
+    })
+    monkeypatch.setattr(vp, "_synthesize_edge", lambda text, out, lang: calls.append("edge") or out.write_bytes(b"x") or True)
+    monkeypatch.setattr(vp, "_synthesize_human", lambda text, out, lang: calls.append("human") or out.write_bytes(b"x") or True)
+    result = vp._synthesize_with_fallback("أهلاً", tmp_path, "ar")
+    assert result is not None
+    assert calls == ["edge"]
+    assert result[1].startswith("edge-tts")
+
+
+def test_local_only_arabic_keeps_human_voice_ahead_of_network(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(vp.brain, "load_config", lambda: {
+        "local_only": True, "voice_latency_mode": "instant",
+    })
+    monkeypatch.setattr(vp, "_synthesize_human", lambda text, out, lang: calls.append("human") or out.write_bytes(b"x") or True)
+    monkeypatch.setattr(vp, "_synthesize_edge", lambda text, out, lang: calls.append("edge") or out.write_bytes(b"x") or True)
+    result = vp._synthesize_with_fallback("أهلاً", tmp_path, "ar")
+    assert result is not None
+    assert calls == ["human"]
+
+
 def test_native_english_engine_only_accepts_english(tmp_path, monkeypatch):
     monkeypatch.setattr(vp.evr, "available", lambda: True)
     seen = {}

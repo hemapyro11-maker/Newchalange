@@ -7,10 +7,18 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import wave
 
+from voice_worker_runtime import PersistentVoiceWorker
+
 DEFAULT_SPEAKER = "Omnia"
-DEFAULT_STEPS = 48
+# 32 diffusion steps keeps the studio character while cutting synthesis latency
+# materially on CPU. Users can still select 16-64 in configuration.
+DEFAULT_STEPS = 32
+_worker: PersistentVoiceWorker | None = None
+_worker_lock = threading.Lock()
+_warming = False
 
 
 def _settings() -> tuple[Path | None, Path | None, str, int]:
@@ -67,8 +75,45 @@ def configure(runtime: Path | None, model: Path | None = None,
     brain.save_config(cfg)
 
 
+def _job(text: str, language: str, output: Path, model: Path, speaker: str,
+         steps: int, reference: Path | None, reference_text: str | None) -> dict:
+    return {
+        "text": text, "language": language, "output": str(output),
+        "model": str(model), "speaker": speaker, "steps": steps,
+        "reference": str(reference.resolve()) if reference else None,
+        "reference_text": reference_text,
+    }
+
+
+def _ensure_worker(runtime: Path, worker_script: Path, env: dict[str, str]) -> PersistentVoiceWorker:
+    global _worker
+    with _worker_lock:
+        if _worker is None or not _worker.alive:
+            _worker = PersistentVoiceWorker(runtime, worker_script, env)
+        return _worker
+
+
+def prewarm() -> None:
+    """Load VoiceTut off the UI thread so the first spoken reply starts faster."""
+    global _warming
+    if _warming or not available():
+        return
+    _warming = True
+
+    def warm() -> None:
+        global _warming
+        try:
+            with tempfile.TemporaryDirectory(prefix="nezuko_voice_warmup_") as tmp:
+                render("جاهزة", "ar", Path(tmp) / "warm.wav", timeout=1800, persistent=True)
+        finally:
+            _warming = False
+
+    threading.Thread(target=warm, name="nezuko-voice-warmup", daemon=True).start()
+
+
 def render(text: str, language: str, output: Path, reference: Path | None = None,
-           reference_text: str | None = None, timeout: int = 1800) -> tuple[bool, str]:
+           reference_text: str | None = None, timeout: int = 1800,
+           persistent: bool = False) -> tuple[bool, str]:
     runtime, model, speaker, steps = _settings()
     if runtime is None or model is None:
         return False, "configure the isolated VoiceTut Python executable and local model directory"
@@ -80,29 +125,26 @@ def render(text: str, language: str, output: Path, reference: Path | None = None
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="nezuko_human_voice_") as temporary:
         job = Path(temporary) / "job.json"
-        job.write_text(json.dumps({
-            "text": text,
-            "language": language,
-            "output": str(output),
-            "model": str(model),
-            "speaker": speaker,
-            "steps": steps,
-            "reference": str(reference.resolve()) if reference else None,
-            "reference_text": reference_text,
-        }, ensure_ascii=False), encoding="utf-8")
+        payload = _job(text, language, output, model, speaker, steps, reference, reference_text)
+        job.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         env = dict(os.environ)
         env.pop("PYTHONPATH", None)
         env.pop("PYTHONHOME", None)
         env["PYTHONUTF8"] = "1"
         env.setdefault("HF_HOME", str(runtime.parent.parent / "nezuko-voicetut-cache"))
-        try:
-            result = subprocess.run(
-                [str(runtime), str(worker), str(job)], env=env, capture_output=True,
-                text=True, encoding="utf-8", errors="replace", timeout=timeout,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            return False, str(exc)
+        if persistent or (_worker is not None and _worker.alive):
+            result_ok, detail = _ensure_worker(runtime, worker, env).submit(payload, timeout)
+            result = type("Result", (), {"returncode": 0 if result_ok else 1,
+                                          "stdout": "", "stderr": detail})()
+        else:
+            try:
+                result = subprocess.run(
+                    [str(runtime), str(worker), str(job)], env=env, capture_output=True,
+                    text=True, encoding="utf-8", errors="replace", timeout=timeout,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                return False, str(exc)
     if result.returncode:
         return False, (result.stderr or result.stdout or "worker failed")[-2000:]
     try:
