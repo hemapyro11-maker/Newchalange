@@ -331,6 +331,17 @@ def test_chat_error_mentions_every_provider_that_failed(monkeypatch):
     assert "Gemini" in reply.error and "Ollama" in reply.error
 
 
+def test_missing_model_is_cooled_immediately(monkeypatch):
+    provider = brain.PROVIDERS["ollama"]
+    b = brain.Brain()
+    monkeypatch.setattr(b, "chain", lambda cfg=None: [provider])
+    monkeypatch.setattr(brain, "_call_provider", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("HTTP 404: model not found")))
+    before = __import__("time").time()
+    reply = b.chat([{"role": "user", "content": "hello"}])
+    assert not reply
+    assert b._states["ollama"].cold_until >= before + 3500
+
+
 def test_chat_marks_local_provider_as_local(monkeypatch):
     monkeypatch.setattr(brain, "_call_provider", lambda *a, **k: "رد محلي")
     cfg = brain.load_config()

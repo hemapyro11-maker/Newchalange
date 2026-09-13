@@ -43,6 +43,43 @@ import subprocess
 import tempfile
 import media_runtime as mr
 
+try:
+    from PIL import Image, ImageDraw, ImageFont
+    _HAS_PIL = True
+except ImportError:
+    _HAS_PIL = False
+
+try:
+    import arabic_reshaper
+    from bidi.algorithm import get_display as _bidi_display
+    _HAS_ARABIC_LAYOUT = True
+except ImportError:
+    _HAS_ARABIC_LAYOUT = False
+
+_TITLE_FONTS = (
+    "C:/Windows/Fonts/seguisb.ttf", "C:/Windows/Fonts/segoeui.ttf",
+    "C:/Windows/Fonts/tahomabd.ttf", "C:/Windows/Fonts/arialbd.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+)
+
+
+def _title_font(size: int):
+    for candidate in _TITLE_FONTS:
+        if pathlib.Path(candidate).is_file():
+            try:
+                return ImageFont.truetype(candidate, size)
+            except OSError:
+                pass
+    return ImageFont.load_default()
+
+
+def _display_text(text: str) -> str:
+    """Shape Arabic for Pillow builds that do not include libraqm."""
+    if _HAS_ARABIC_LAYOUT and any("\u0600" <= char <= "\u06ff" for char in text):
+        return _bidi_display(arabic_reshaper.reshape(text))
+    return text
+
 
 class _MediaTools:
     @staticmethod
@@ -485,20 +522,57 @@ def _cmd_title_card(ctx) -> str:
         return "❌ duration must be over 1 second (half a second fade in, half fade out)"
     size = ctx.args[3] if len(ctx.args) > 3 else "1920x1080"
 
-    escaped = text.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+    try:
+        width, height = (int(part) for part in size.lower().split("x", 1))
+    except (ValueError, AttributeError):
+        return "❌ size must look like 1920x1080"
+    if not (64 <= width <= 7680 and 64 <= height <= 4320):
+        return "❌ size must be between 64x64 and 7680x4320"
+    if not _HAS_PIL:
+        return "❌ Pillow is required for portable Arabic/English title cards — pip install Pillow"
+    if any("\u0600" <= char <= "\u06ff" for char in text) and not _HAS_ARABIC_LAYOUT:
+        return "❌ Arabic title cards need arabic-reshaper and python-bidi"
+
     fade = 0.5
-    alpha_expr = f"if(lt(t\\,{fade})\\,t/{fade}\\,if(gt(t\\,{duration - fade})\\,({duration}-t)/{fade}\\,1))"
-    vf = (
-        f"drawtext=text='{escaped}':fontsize=80:fontcolor=white:"
-        f"x=(w-text_w)/2:y=(h-text_h)/2:alpha='{alpha_expr}'"
-    )
-    ok, err = _run_ffmpeg(
-        ["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=black:s={size}:d={duration}",
-         "-vf", vf, dst],
-        timeout=120,
-    )
+    pathlib.Path(dst).parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="nezuko_title_") as folder:
+        frame = pathlib.Path(folder) / "title.png"
+        canvas = Image.new("RGB", (width, height), "black")
+        draw = ImageDraw.Draw(canvas)
+        font_size = max(22, min(120, width // 16))
+        font = _title_font(font_size)
+        max_width = int(width * 0.82)
+        words, lines, current = text.split(), [], ""
+        for word in words or [text]:
+            candidate = f"{current} {word}".strip()
+            box = draw.textbbox((0, 0), _display_text(candidate), font=font)
+            if current and box[2] - box[0] > max_width:
+                lines.append(current)
+                current = word
+            else:
+                current = candidate
+        if current:
+            lines.append(current)
+        line_gap = max(8, font_size // 4)
+        display_lines = [_display_text(line) for line in lines]
+        boxes = [draw.textbbox((0, 0), line, font=font) for line in display_lines]
+        total_h = sum(box[3] - box[1] for box in boxes) + line_gap * max(0, len(lines) - 1)
+        y = (height - total_h) // 2
+        for line, box in zip(display_lines, boxes):
+            line_w, line_h = box[2] - box[0], box[3] - box[1]
+            draw.text(((width - line_w) // 2, y - box[1]), line, font=font, fill="white")
+            y += line_h + line_gap
+        canvas.save(frame, "PNG")
+        vf = f"fade=t=in:st=0:d={fade},fade=t=out:st={duration - fade}:d={fade},format=yuv420p"
+        ok, err = _run_ffmpeg(
+            ["ffmpeg", "-y", "-loop", "1", "-framerate", "30", "-i", str(frame),
+             "-t", str(duration), "-vf", vf, "-c:v", "libx264", "-movflags", "+faststart", dst],
+            timeout=120,
+        )
     if not ok:
         return f"❌ failed: {err}"
+    if not pathlib.Path(dst).is_file() or pathlib.Path(dst).stat().st_size == 0:
+        return "❌ FFmpeg finished without creating a usable title card"
     return f"✅ title card written to {dst}"
 
 
@@ -801,6 +875,6 @@ def register(engine):
     engine.registry.register("detect_scenes", _cmd_detect_scenes, "detect_scenes <video> [threshold=27.0] — find scene changes automatically (PySceneDetect)")
     engine.registry.register("upscale_image", _cmd_upscale_image, "upscale_image <in> <out> [scale=4] [model] — AI image upscaling (Real-ESRGAN)")
     engine.registry.register("upscale_video", _cmd_upscale_video, "upscale_video <in> <out> [scale=4] [model] — upscale video frame by frame (Real-ESRGAN; very slow without a GPU)")
-    engine.registry.register("title_card", _cmd_title_card, "title_card <text> <out> [duration] [size] — animated title card")
+    engine.registry.register("title_card", _cmd_title_card, "title_card <quoted text> <out.mp4> [duration] [size] — portable Arabic/English animated title card; text first, video second")
     engine.registry.register("generate_subtitles", _cmd_generate_subtitles, "generate_subtitles <video> <out.srt|out.vtt> [model=base] [lang=auto] — real speech-to-text subtitles with timestamps (faster-whisper)")
     engine.registry.register("burn_subtitles", _cmd_burn_subtitles, "burn_subtitles <video> <subs.srt> <out.mp4> — hardcode subtitles onto the video (ffmpeg/libass)")

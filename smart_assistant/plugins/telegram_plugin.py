@@ -297,6 +297,9 @@ def _cmd_telegram_status(ctx) -> str:
     ]
     if data["pending_pairs"]:
         lines.append(f"  Pending approval requests: {len(data['pending_pairs'])}")
+    last_error = getattr(ctx.engine, "_telegram_error", "")
+    if last_error:
+        lines.append(f"  Last error: {last_error}")
     if not _HAS_KEYRING:
         lines.append("  ⚠️ keyring is not installed — the token is stored as plain text (pip install keyring for safer storage)")
     if not _HAS_PTB:
@@ -333,7 +336,15 @@ def _run_bot(engine, token: str, stop_event: threading.Event) -> None:
             await app.stop()
             await app.shutdown()
 
-    asyncio.run(_main())
+    try:
+        asyncio.run(_main())
+        engine._telegram_error = ""
+    except Exception as exc:  # background services must report failure, not crash noisily
+        engine._telegram_error = str(exc)
+        try:
+            engine._log(f"Telegram stopped: {exc}", "error")
+        except Exception:
+            pass
 
 
 def _ensure_bot_started(engine) -> None:

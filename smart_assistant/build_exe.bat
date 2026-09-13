@@ -84,7 +84,7 @@ echo ====================================
 :: الحالتين — `_record_until_silence` بترجع (None, False) لو النموذج
 :: مش متثبت والنداء اللي فوقها بيرجع للمدة الثابتة، فمفيش أي كسر.
 :: ═══════════════════════════════════════════════════════════════
-py -m pip install customtkinter CTkToolTip pyinstaller "mcp>=1.10.0" pywin32 typer capstone yara-python Pillow imageio-ffmpeg pandas matplotlib edge-tts sherpa-onnx piper-tts sounddevice faster-whisper vosk scenedetect[opencv] python-telegram-bot discord.py keyring --quiet
+py -m pip install customtkinter CTkToolTip pyinstaller "mcp>=1.10.0" pywin32 typer capstone yara-python Pillow arabic-reshaper python-bidi imageio-ffmpeg pandas matplotlib edge-tts sherpa-onnx piper-tts sounddevice faster-whisper vosk scenedetect[opencv] python-telegram-bot discord.py keyring --quiet
 
 :: بناء الـ EXE
 py -m PyInstaller ^

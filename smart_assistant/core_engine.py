@@ -134,6 +134,8 @@ _SYSTEM_PROMPT = (
     "  Include enough surrounding lines that the search matches exactly once.\n"
     "- The TOOL line goes last, with one short line above it saying why.\n"
     "- Never claim you ran something. The user confirms first.\n"
+    "- Media arguments are strict: thumbnail_generate takes IMAGE, TITLE, JPG; "
+    "create_video takes IMAGE, MP4, then audio=VOICE.wav. Never pass audio as a thumbnail background.\n"
 )
 
 # بتتحقن مع الأسئلة اللي المؤشرات بتقول إنها محتاجة شغل مش استرجاع.
@@ -303,6 +305,7 @@ class AssistantEngine:
         self._request_local = threading.local()
         self._source = "desktop"
         self._pending_source = "desktop"
+        self._activity = "starting"
         self._plugin_commands: set[str] = set()
         self.plugin_health: dict[str, dict] = {}
         self._agent_scope = None
@@ -354,7 +357,7 @@ class AssistantEngine:
         self._stop_flag.clear()
         self._worker = threading.Thread(target=self._run_loop, daemon=True)
         self._worker.start()
-        self.on_status("running")
+        self._set_status("ready")
         hooks.fire(self, "startup")
 
     def stop(self):
@@ -419,6 +422,7 @@ class AssistantEngine:
             self._log("Cancelled pending work. A running command may still finish.", "info")
             return
         generation = self._generation
+        self._set_status("queued")
         def dispatch_current(ctx):
             if generation == self._generation:
                 self._dispatch(text)
@@ -595,6 +599,27 @@ class AssistantEngine:
         self.log_history.append((level, msg))
         self.on_log(msg, level)
 
+    def _set_status(self, status: str):
+        """Publish a small, stable activity vocabulary to every UI."""
+        self._activity = status
+        self.on_status(status)
+
+    @staticmethod
+    def _activity_for_command(name: str) -> str:
+        if name in {"listen", "listen_run", "transcribe", "generate_subtitles"}:
+            return "listening"
+        if name in {"speak", "clone_voice", "voice_preview", "voice_preview_ar", "voice_preview_en"}:
+            return "speaking"
+        if name in {"read_file", "list_files", "search", "probe", "inspect", "security_report", "git_diff", "git_status"}:
+            return "reading"
+        if name in {"edit_file", "create_file", "write_file", "apply_patch", "format", "code_fix"}:
+            return "updating"
+        if name in {"title_card", "thumbnail_generate", "create_video", "encode_video", "burn_subtitles", "transition", "color_grade", "upscale_video"}:
+            return "rendering"
+        if name in {"self_repair", "media_doctor", "plugin_doctor", "env_check"}:
+            return "repairing"
+        return "running_tool"
+
     def _run_loop(self):
         while not self._stop_flag.is_set():
             try:
@@ -605,6 +630,7 @@ class AssistantEngine:
                 self._queue.task_done()
                 break
             try:
+                self._set_status("working")
                 if fn is _HOOK_SENTINEL:
                     self._in_hook = True
                     try:
@@ -619,6 +645,8 @@ class AssistantEngine:
                 self._log(traceback.format_exc(), "error")
             finally:
                 self._queue.task_done()
+                if not self._stop_flag.is_set():
+                    self._set_status("ready")
         self.on_status("stopped")
 
     def _dispatch(self, text: str, source: str = "desktop"):
@@ -813,6 +841,7 @@ class AssistantEngine:
             self._log(f"❓ unknown command: {name} (try 'help')", "warn")
             return None
         ctx = CommandContext(raw=raw, args=args, engine=self)
+        self._set_status(self._activity_for_command(name))
         generation, session_id = self._generation, self.session_id
         start = time.time()
         if not self._in_hook:
@@ -972,6 +1001,7 @@ class AssistantEngine:
         import coding
         generation = self._generation
         self._request_local.generation = generation
+        self._set_status("thinking")
         b = brain.get_brain()
         if not b.ready():
             self._log(

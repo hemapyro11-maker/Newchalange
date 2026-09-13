@@ -167,6 +167,7 @@ class AssistantApp(ctk.CTk):
         self._plugin_count = 0
         self._thinking = None
         self._settings = None
+        self._activity = "starting"
 
         self.title(self.t.t("app_title"))
         self.geometry("1280x800")
@@ -260,6 +261,10 @@ class AssistantApp(ctk.CTk):
             corner_radius=8, font=self._font(10), padx=10, pady=5,
         )
         self.mode_badge.pack(side=badge_side, pady=17)
+        self.activity_label = ctk.CTkLabel(
+            header, text="", text_color=c["green"], font=self._font(11, True),
+        )
+        self.activity_label.pack(side=badge_side, padx=10, pady=17)
 
         self.stream = ctk.CTkTextbox(
             self.main, fg_color=c["bg"], corner_radius=0,
@@ -295,6 +300,13 @@ class AssistantApp(ctk.CTk):
             text_color="#ffffff", font=self._font(12, True),
         )
         self.send_button.pack(side=send_side, padx=7, pady=7)
+
+        self.talk_button = ctk.CTkButton(
+            box, text="🎤  " + self.t.t("tool_mic"), command=self._listen,
+            width=138, height=34, corner_radius=10, fg_color=c["panel_hi"],
+            hover_color=c["border"], text_color=c["text"], font=self._font(11, True),
+        )
+        self.talk_button.pack(side=send_side, padx=(0, 2), pady=7)
 
         self.entry = ctk.CTkEntry(
             box, fg_color="transparent", border_width=0, height=46,
@@ -347,7 +359,7 @@ class AssistantApp(ctk.CTk):
         for section, entries in (
             (self.t.t("tool_files"), (("📎", "attach", self._attach_file), ("🛡", "scan", self._scan_file))),
             (self.t.t("tool_voice"), (("🎤", "mic", self._listen), ("🔊", "voices", lambda: self._open_settings_page("voices")))),
-            (self.t.t("tool_workspace"), (("🔌", "connectors", lambda: self._open_settings_page("connectors")), ("🧩", "plugins", lambda: self._open_settings_page("plugins")), ("⚡", "skills", lambda: self._open_settings_page("skills")))),
+            (self.t.t("tool_workspace"), (("🩺", "repair", self._repair), ("🔌", "connectors", lambda: self._open_settings_page("connectors")), ("🧩", "plugins", lambda: self._open_settings_page("plugins")), ("⚡", "skills", lambda: self._open_settings_page("skills")))),
         ):
             ctk.CTkLabel(self.tools_panel, text=section, text_color=c["faint"],
                          font=self._font(10, True), anchor=self._anchor).pack(fill="x", padx=16, pady=(8, 4))
@@ -504,7 +516,7 @@ class AssistantApp(ctk.CTk):
             self.stream.mark_set("thinking_start", self._thinking_start)
             self.stream.mark_gravity("thinking_start", "left")
             self.stream.configure(state="disabled")
-            self._thinking = self._line("", "…", self.c["faint"], indent=1, size=12)
+            self._thinking = self._line("", self.t.t("activity_thinking"), self.c["faint"], indent=1, size=12)
 
     def _hide_thinking(self):
         if self._thinking is not None:
@@ -547,6 +559,9 @@ class AssistantApp(ctk.CTk):
         if self._plugin_count:
             parts.append(self.t.t("plugins_loaded", n=self._plugin_count))
         self.status_label.configure(text=f"{GLYPH_STATUS}  " + "  ·  ".join(parts))
+        if hasattr(self, "activity_label"):
+            key = f"activity_{self._activity}"
+            self.activity_label.configure(text="●  " + self.t.t(key))
         if hasattr(self, "mode_badge"):
             self.mode_badge.configure(
                 text=self.t.t("coding_plan") if self.engine.coding_mode == "plan"
@@ -645,6 +660,12 @@ class AssistantApp(ctk.CTk):
         self._show_thinking()
         self.engine.submit("listen_run")
 
+    def _repair(self):
+        self._add_user("🩺 " + self.t.t("tool_repair"))
+        self._last_command_name = "self_repair"
+        self._show_thinking()
+        self.engine.submit("self_repair")
+
     def _toggle_voice(self):
         self.voice_enabled = not self.voice_enabled
         self._refresh_status()
@@ -729,7 +750,7 @@ class AssistantApp(ctk.CTk):
         # تحميل الإضافات بيطبع عشرات الأسطر عند كل تشغيل — بيتعدّوا في
         # سطر الحالة بدل ما يغرقوا أول شاشة. النص الكامل في log_history.
         if level == "ok" and "plugin loaded:" in msg:
-            self._plugin_count += 1
+            self._plugin_count = len(self.engine._loaded_plugins)
             self._refresh_status()
             return
 
@@ -746,6 +767,7 @@ class AssistantApp(ctk.CTk):
         self._refresh_status()
 
     def _on_status(self, status: str):
+        self._activity = status
         self._safe_after(lambda: self._refresh_status())
 
     # ── الإعدادات ──────────────────────────────────────────────────────

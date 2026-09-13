@@ -453,6 +453,15 @@ class Brain:
             except Exception as e:  # noqa: BLE001 - أي فشل = جرّب اللي بعده
                 with _lock:
                     self._note_failure(prov.name, now, rate_limited=False)
+                    # Missing/retired models do not recover on the next request.
+                    # A short circuit here prevents the same known-bad endpoint
+                    # from adding latency to every user message.
+                    error_text = str(e).lower()
+                    state = self._states.setdefault(prov.name, _ProviderState())
+                    if "http 404" in error_text or "model" in error_text and "not found" in error_text:
+                        state.cold_until = max(state.cold_until, now + 3600)
+                    elif "http 503" in error_text or "unavailable" in error_text:
+                        state.cold_until = max(state.cold_until, now + 30)
                 errors.append(f"{prov.label}: {e}")
                 continue
             if not text.strip():

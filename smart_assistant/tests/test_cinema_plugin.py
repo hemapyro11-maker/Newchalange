@@ -279,6 +279,13 @@ def test_stabilize_produces_valid_output(make_ctx, clip1, tmp_path):
     assert _duration(out) > 0
 
 
+def test_arabic_title_is_shaped_when_layout_dependencies_exist():
+    if cp._HAS_ARABIC_LAYOUT:
+        shaped = cp._display_text("نيزوكو بتعمل فيديو")
+        assert shaped != "نيزوكو بتعمل فيديو"
+        assert any("\ufe70" <= char <= "\ufeff" for char in shaped)
+
+
 # ── auto_trim_silence ───────────────────────────────────────────────────
 
 def test_auto_trim_silence_no_args(make_ctx):

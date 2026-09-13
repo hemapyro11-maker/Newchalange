@@ -120,6 +120,17 @@ def test_generate_empty_title_rejected(make_ctx, tmp_path):
 
 
 @requires_pil
+def test_generate_rejects_audio_as_background_with_video_hint(make_ctx, tmp_path):
+    audio = tmp_path / "voice.wav"
+    audio.write_bytes(b"RIFF-not-an-image")
+    result = tp._cmd_thumbnail_generate(
+        make_ctx("thumbnail_generate", [str(audio), "Title", str(tmp_path / "out.jpg")])
+    )
+    assert "must be an image" in result
+    assert "audio=" in result
+
+
+@requires_pil
 def test_generate_produces_correct_target_size(make_ctx, tmp_path):
     bg = _make_image(tmp_path / "bg.png", size=(2000, 1000))
     out = tmp_path / "out.jpg"
@@ -172,6 +183,11 @@ def test_generate_long_title_still_fits(make_ctx, tmp_path):
     long_title = "عنوان طويل جدًا للاختبار عشان نتأكد إن الخط بيتصغر لحد ما يتظبط"
     result = tp._cmd_thumbnail_generate(make_ctx("thumbnail_generate", [str(bg), long_title, str(out)]))
     assert result.startswith("✅")
+
+
+def test_arabic_thumbnail_text_is_shaped_when_layout_is_available():
+    if tp.ARABIC_LAYOUT_AVAILABLE:
+        assert tp._display_text("حكاية جديدة") != "حكاية جديدة"
 
 
 def test_generate_without_pil(make_ctx):

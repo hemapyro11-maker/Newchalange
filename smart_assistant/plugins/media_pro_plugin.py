@@ -47,7 +47,7 @@ def _cmd_media_doctor(ctx):
         return "\n".join(lines)
     capabilities = mr.run(["ffmpeg", "-hide_banner", "-filters"], 30)
     filters = capabilities.stdout + capabilities.stderr
-    required_filters = ("loudnorm", "afftdn", "drawtext", "subtitles", "chromakey")
+    required_filters = ("loudnorm", "afftdn", "subtitles", "chromakey")
     missing_filters = [name for name in required_filters if name not in filters]
     lines.append(
         f"  {'✅' if not missing_filters else '⚠️'} Production filters"
@@ -239,6 +239,6 @@ def _cmd_prepare_voice_sample(ctx):
 def register(engine):
     engine.registry.register("media_doctor", _cmd_media_doctor, "media_doctor — run a real media readiness check")
     engine.registry.register("encode_video", _cmd_encode_video, "encode_video <in> <out.mp4> [profile] — reliable H.264/AAC delivery encode")
-    engine.registry.register("create_video", _cmd_create_video, "create_video <image> <out.mp4> [duration=5] [audio=path] — create a delivery-ready video")
+    engine.registry.register("create_video", _cmd_create_video, "create_video <IMAGE> <out.mp4> [duration=5] [audio=VOICE.wav] — image first, MP4 second, optional audio only via audio=")
     engine.registry.register("master_audio_pro", _cmd_master_audio_pro, "master_audio_pro <in> <out> [lufs] — measured two-pass loudness mastering")
     engine.registry.register("prepare_voice_sample", _cmd_prepare_voice_sample, "prepare_voice_sample <in> <out.wav> [start] [duration] — clean a sample for XTTS")

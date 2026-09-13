@@ -16,6 +16,13 @@ try:
 except ImportError:
     PIL_AVAILABLE = False
 
+try:
+    import arabic_reshaper
+    from bidi.algorithm import get_display as _bidi_display
+    ARABIC_LAYOUT_AVAILABLE = True
+except ImportError:
+    ARABIC_LAYOUT_AVAILABLE = False
+
 TARGET_SIZE = (1280, 720)          # مقاس يوتيوب الموصى بيه رسميًا
 TARGET_ASPECT = 16 / 9
 MAX_FILE_SIZE = 2 * 1024 * 1024    # حد يوتيوب الفعلي: 2MB
@@ -37,6 +44,12 @@ def _find_font(size: int):
             except OSError:
                 pass
     return ImageFont.load_default()
+
+
+def _display_text(text: str) -> str:
+    if ARABIC_LAYOUT_AVAILABLE and any("\u0600" <= char <= "\u06ff" for char in text):
+        return _bidi_display(arabic_reshaper.reshape(text))
+    return text
 
 
 def _require_pil() -> str | None:
@@ -183,11 +196,17 @@ def _cmd_thumbnail_generate(ctx) -> str:
         return f"❌ file not found: {bg_path}"
     if not title.strip():
         return "❌ the text is empty"
+    if any("\u0600" <= char <= "\u06ff" for char in title) and not ARABIC_LAYOUT_AVAILABLE:
+        return "❌ Arabic thumbnail text needs arabic-reshaper and python-bidi"
 
     try:
+        with Image.open(bg_path) as source:
+            source.verify()
         img = Image.open(bg_path).convert("RGB")
-    except Exception as e:
-        return f"❌ could not read the image: {e}"
+    except (OSError, ValueError):
+        audio_exts = {".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg"}
+        hint = " Audio belongs in create_video as audio=<file.wav>." if bg_path.suffix.lower() in audio_exts else ""
+        return f"❌ thumbnail background must be an image, but '{bg_path.name}' is not a readable image.{hint}"
 
     # cover-fit: نكبّر لحد ما أصغر بعد يغطي المساحة المطلوبة، وبعدين نقص
     # الزيادة من النص عشان الصورة تملى 1280x720 بالظبط من غير تشويه.
@@ -203,7 +222,8 @@ def _cmd_thumbnail_generate(ctx) -> str:
     max_text_width = int(tw * 0.9)
     banner_height = int(th * 0.32)
     max_text_height = int(banner_height * 0.8)
-    font, text_w, text_h = _fit_text_size(draw, title, max_text_width, max_text_height)
+    display_title = _display_text(title)
+    font, text_w, text_h = _fit_text_size(draw, display_title, max_text_width, max_text_height)
 
     text_x = (tw - text_w) // 2
     text_y = th - banner_height + (banner_height - text_h) // 2
@@ -219,7 +239,7 @@ def _cmd_thumbnail_generate(ctx) -> str:
         fill, stroke = "#000000", "#ffffff"
 
     stroke_width = max(2, font.size // 20 if hasattr(font, "size") else 3)
-    draw.text((text_x, text_y), title, fill=fill, font=font,
+    draw.text((text_x, text_y), display_title, fill=fill, font=font,
               stroke_width=stroke_width, stroke_fill=stroke)
 
     try:
@@ -268,6 +288,6 @@ def register(engine):
     engine.registry.register("thumbnail_analyze", _cmd_thumbnail_analyze,
                               "thumbnail_analyze <image_path> — analyse a thumbnail (brightness, contrast, resolution, size)")
     engine.registry.register("thumbnail_generate", _cmd_thumbnail_generate,
-                              "thumbnail_generate <bg_image> <title> <out.jpg> — build a 1280x720 thumbnail with auto-coloured text")
+                              "thumbnail_generate <IMAGE background> <quoted title> <out.jpg> — first argument must be an image; NEVER pass WAV/audio (use create_video ... audio=file.wav)")
     engine.registry.register("thumbnail_ab_compare", _cmd_thumbnail_ab_compare,
                               "thumbnail_ab_compare <image_a> <image_b> — compare two thumbnails on the same measures")
