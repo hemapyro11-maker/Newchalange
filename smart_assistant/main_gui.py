@@ -728,6 +728,10 @@ class AssistantApp(ctk.CTk):
         self.engine.submit(f"security_report {shlex.quote(path)}")
 
     def _listen(self):
+        # Pressing the conversation microphone implies a two-way voice session.
+        # Keep voice enabled so the assistant reads its answer back automatically.
+        self.voice_enabled = True
+        self._refresh_status()
         self._add_user("🎤 …")
         self._last_command_name = "listen_run"
         self._show_thinking()

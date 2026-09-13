@@ -617,6 +617,22 @@ def _synthesize_with_fallback(text: str, tmp_dir: pathlib.Path,
     return None
 
 
+def _play_windows_wav(path: pathlib.Path) -> bool:
+    """Play PCM WAV without spawning ffplay or depending on `winsound`."""
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+        winmm = ctypes.WinDLL("winmm")
+        play = winmm.PlaySoundW
+        play.argtypes = [ctypes.c_wchar_p, ctypes.c_void_p, ctypes.c_uint]
+        play.restype = ctypes.c_bool
+        # SND_SYNC | SND_NODEFAULT | SND_FILENAME
+        return bool(play(str(path), None, 0x0000 | 0x0002 | 0x00020000))
+    except (AttributeError, OSError):
+        return False
+
+
 def _cmd_speak(ctx) -> str:
     parts = ctx.raw.split(maxsplit=1)
     text = parts[1].strip() if len(parts) > 1 else ""
@@ -648,9 +664,7 @@ def _cmd_speak(ctx) -> str:
         audio_path, backend_label = result
 
         try:
-            if os.name == "nt" and audio_path.suffix.lower() == ".wav":
-                import winsound
-                winsound.PlaySound(str(audio_path), winsound.SND_FILENAME)
+            if os.name == "nt" and audio_path.suffix.lower() == ".wav" and _play_windows_wav(audio_path):
                 play_proc = type("Result", (), {"returncode": 0})()
             elif shutil.which("ffplay"):
                 play_proc = subprocess.run(
@@ -1509,7 +1523,11 @@ def register(engine):
     # large models at once wastes RAM, while this removes the first-reply delay.
     try:
         cfg = brain.load_config()
-        preferred = cfg.get("preferred_voice_language") or cfg.get("ui_lang", "ar")
-        (vtr.prewarm if preferred == "ar" else evr.prewarm)()
+        # Arabic conversation mode uses the low-latency network voice, so warming
+        # the 90-second diffusion model here only slows the whole application.
+        # Kokoro is compact and benefits greatly: measured 18.62s cold vs 0.62s warm.
+        evr.prewarm()
+        if cfg.get("local_only") and (cfg.get("preferred_voice_language") or "ar") == "ar":
+            vtr.prewarm()
     except Exception:
         pass

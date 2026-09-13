@@ -213,3 +213,7 @@ def test_hooks_use_the_dedicated_submit_path():
     hooks.fire(eng, "after_command", command="probe")
     assert eng.sent == ["echo x"]
     assert not hasattr(eng, "submit")  # مش بتستخدم submit العادية
+def test_speech_preview_is_safe_without_a_confirmation():
+    assert permissions.is_allowed("speak") is True
+    assert permissions.is_allowed("voice_status") is True
+

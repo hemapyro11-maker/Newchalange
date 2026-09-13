@@ -1,9 +1,10 @@
 """
 permissions.py — قايمة أوامر مسموح لها تتنفذ من غير ما تتسأل.
 
-**المبدأ الأساسي مش بيتغير:** الافتراضي إن **مفيش أي حاجة بتتنفذ
-تلقائي**. القايمة دي بتبدأ فاضية، وإنت اللي بتضيف فيها بنفسك — إما من
-الإعدادات أو لما تأكّد أمر وتقول "متسأليش تاني على ده".
+**المبدأ الأساسي مش بيتغير:** الافتراضي إن **مفيش أي إجراء بيغيّر
+ملفات أو نظام بيتنفذ تلقائي**. القايمة دي بتبدأ فاضية، وإنت اللي بتضيف
+فيها بنفسك. أوامر المعاينة الآمنة زي تشغيل الصوت وحالة المحرك بتعدي
+مباشرة عشان المحادثة الصوتية تفضل طبيعية.
 
 ليه الميزة دي موجودة أصلاً: لو بتشتغل على نفس النوع من المهام طول
 اليوم (تفحص ملفات، تحوّل فيديوهات)، السؤال في كل مرة بيبقى ضوضاء مش
@@ -47,6 +48,11 @@ _NEVER = frozenset({
     "encode_video", "create_video", "master_audio_pro", "prepare_voice_sample",
 })
 
+# These commands only read state or play/preview local audio. They do not write
+# files, contact another person, or execute user-controlled code, so asking the
+# user to type `y` makes normal voice conversation unusably slow.
+_ALWAYS_SAFE = frozenset({"speak", "voice_status", "stt_status", "listen"})
+
 
 def never_allowed() -> frozenset[str]:
     return _NEVER
@@ -59,7 +65,8 @@ def allowed() -> set[str]:
 
 def is_allowed(command: str) -> bool:
     """الأمر ده ينفع يعدي من غير تأكيد؟"""
-    return command.lower() in allowed()
+    name = command.lower()
+    return name in _ALWAYS_SAFE or name in allowed()
 
 
 def allow(command: str) -> tuple[bool, str]:

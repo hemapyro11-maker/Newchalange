@@ -68,8 +68,8 @@ _HOOK_SENTINEL = object()
 # إلا للكلام اللي فعلاً محتاج فهم. ولما المخ يفهم صيغة جديدة والمستخدم
 # يأكّدها، بنحفظها في القاموس المتعلّم — فنفس الصيغة تاني مرة بتبقى 🆓.
 #
-# مبدأ ثابت مش بيتكسر: **مفيش تنفيذ تلقائي لأي أمر اقترحه نموذج**.
-# لازم تأكيد صريح (y) قبل أي تنفيذ، زي باقي المشروع بالظبط.
+# الأدوات التي تغيّر ملفات أو النظام تحتاج تأكيدًا صريحًا. المعاينات
+# الآمنة مثل تشغيل الصوت وحالة المحرك تمر مباشرة كي لا تكسر المحادثة.
 FUZZY_CUTOFF = 0.6
 _CONFIRM_YES = {"y", "yes", "نعم", "أيوه", "ايوه", "اه", "آه", "تمام"}
 _CONFIRM_NO = {"n", "no", "لا", "لأ"}
@@ -133,7 +133,7 @@ _SYSTEM_PROMPT = (
     ">>>>>>> REPLACE\n"
     "  Include enough surrounding lines that the search matches exactly once.\n"
     "- The TOOL line goes last, with one short line above it saying why.\n"
-    "- Never claim you ran something. The user confirms first.\n"
+    "- Never claim you ran something before receiving its real result. The app enforces approval for mutating tools.\n"
     "- Media arguments are strict: thumbnail_generate takes IMAGE, TITLE, JPG; "
     "create_video takes IMAGE, MP4, then audio=VOICE.wav. Never pass audio as a thumbnail background.\n"
 )
@@ -1114,8 +1114,7 @@ class AssistantEngine:
         shown = tool_raw[:12000] if tool_name in {"edit_file", "create_file"} else f"{tool_name} {' '.join(tool_args)}".strip()
         step_note = f"  ({step + 1}/{_MAX_TOOL_STEPS})" if step else ""
 
-        # الأمر ده في قايمة المسموح؟ ينفذ على طول من غير سؤال.
-        # القايمة بتبدأ فاضية دايمًا — إنت اللي بتضيف فيها بنفسك.
+        # أمر آمن مدمج أو موجود في قايمة المسموح؟ ينفذ من غير سؤال.
         if permissions.is_allowed(tool_name):
             intents.remember(text, tool_name, tool_args)
             self._log(f"{body}\n\n↪ {shown}{step_note}\n— {badge}", "info")

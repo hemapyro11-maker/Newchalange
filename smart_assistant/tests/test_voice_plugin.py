@@ -221,6 +221,29 @@ def test_speak_reports_missing_ffplay_but_still_synthesized(make_ctx, monkeypatc
     assert "ffplay" in result
 
 
+def test_windows_wav_player_uses_winmm_without_winsound(tmp_path, monkeypatch):
+    import ctypes
+
+    called = {}
+
+    class Play:
+        argtypes = None
+        restype = None
+
+        def __call__(self, path, module, flags):
+            called.update(path=path, module=module, flags=flags)
+            return 1
+
+    play = Play()
+    monkeypatch.setattr(vp.os, "name", "nt")
+    monkeypatch.setattr(ctypes, "WinDLL", lambda name: type("WinMM", (), {"PlaySoundW": play})())
+    wav = tmp_path / "voice.wav"
+    wav.write_bytes(b"RIFF")
+    assert vp._play_windows_wav(wav) is True
+    assert called["path"] == str(wav)
+    assert called["flags"] & 0x00020000
+
+
 # ── real espeak-ng synthesis (no network, no mocking) ───────────────────
 
 @requires_espeak

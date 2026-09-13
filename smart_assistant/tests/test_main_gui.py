@@ -268,6 +268,14 @@ def test_voice_starts_off(app):
     assert app.voice_enabled is False
 
 
+def test_microphone_starts_a_two_way_voice_session(app, monkeypatch):
+    submitted = []
+    monkeypatch.setattr(app.engine, "submit", submitted.append)
+    app._listen()
+    assert app.voice_enabled is True
+    assert submitted == ["listen_run"]
+
+
 def test_speak_is_skipped_for_speak_itself(app, monkeypatch):
     """من غير الاستثناء ده، نتيجة speak كانت هتترجع لـ speak تاني
     وتدخل في حلقة نطق بلا نهاية."""
