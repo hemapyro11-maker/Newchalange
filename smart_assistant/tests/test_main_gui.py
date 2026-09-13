@@ -218,6 +218,15 @@ def test_status_line_shows_active_modes(app):
     assert "deep" in text and "local" in text
 
 
+def test_status_shows_automatic_execution_mode(app):
+    cfg = brain.load_config()
+    cfg["auto_approve"] = True
+    brain.save_config(cfg)
+    app._refresh_status()
+    assert "automatic" in app.status_label.cget("text")
+    assert "automatic" in app.mode_badge.cget("text")
+
+
 # ── أوامر الشرطة المائلة ─────────────────────────────────────────────
 
 def test_slash_clear_empties_the_stream(app):

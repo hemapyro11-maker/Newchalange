@@ -93,6 +93,9 @@ _COMPACT_KEEP = 60
 # لوحدها خمس خطوات. السقف موجود عشان حلقة غلط متولّعش الحصة، فرفعناه
 # لـ 16 وسبنا كل خطوة بتاخد تأكيد منفصل.
 _MAX_TOOL_STEPS = 16
+# Preview/interaction tools already complete the user's request. Sending their
+# result back to the model can make a deterministic model repeat them 16 times.
+_TERMINAL_TOOLS = frozenset({"speak", "voice_status", "stt_status", "listen"})
 # ميزانية خريطة المشروع بالحروف. ~6000 حرف ≈ 2000 توكن — تمن معقول
 # مقابل إن المخ يشوف المشروع كله بدل ما يخمّن أسماء.
 _REPOMAP_BUDGET = 6000
@@ -673,7 +676,7 @@ class AssistantEngine:
             except ValueError as exc:
                 self._log(f"Automation parse error: {exc}", "error")
                 return
-            if parts and permissions.is_allowed(parts[0]):
+            if parts and permissions.is_allowed(parts[0], include_automatic=False):
                 self._execute(parts[0], parts[1:], text)
             else:
                 self._log(f"Automation blocked; run explicitly or allow this command: {text}", "warn")
@@ -745,9 +748,13 @@ class AssistantEngine:
                 self._execute(parts[0], parts[1:], text)
                 return
             if match.source == "cache":
-                self._pending_intent = (match.command, match.args, text)
-                self._pending_tool_raw = match.command_line()
-                self._log(f"Use remembered command: {match.command_line()}? y / n", "info")
+                if permissions.automatic():
+                    self._log(f"↪ {match.command_line()}", "info")
+                    self._execute(match.command, match.args, match.command_line())
+                else:
+                    self._pending_intent = (match.command, match.args, text)
+                    self._pending_tool_raw = match.command_line()
+                    self._log(f"Use remembered command: {match.command_line()}? y / n", "info")
                 return
             if match.is_complete():
                 self._log(f"↪ {match.command_line()}", "info")
@@ -766,6 +773,11 @@ class AssistantEngine:
         if close:
             rest = text.split(maxsplit=1)
             args = command_text.split(rest[1]) if len(rest) > 1 else []
+            if permissions.automatic():
+                line = intents.IntentMatch(close[0], args).command_line()
+                self._log(f"↪ {line}", "info")
+                self._execute(close[0], args, line)
+                return
             self._pending_intent = (close[0], args, text)
             self._log(
                 f"❓ أمر مش معروف: {first}\n"
@@ -1147,9 +1159,9 @@ class AssistantEngine:
         ينفع "شغّل الاختبارات → اقرا الخطأ → صلّحه" — وده بالظبط الشكل
         اللي بيخلي مساعد يعرف يصلّح كود فعلاً.
 
-        كل خطوة جديدة بتعدي على نفس التأكيد — مفيش تنفيذ تلقائي.
+        كل خطوة تتبع وضع الموافقة الحالي، مع سقف يمنع الحلقات.
         """
-        if result is None or step + 1 >= _MAX_TOOL_STEPS:
+        if result is None or tool_name in _TERMINAL_TOOLS or step + 1 >= _MAX_TOOL_STEPS:
             if result is not None and step + 1 >= _MAX_TOOL_STEPS:
                 self._log(
                     f"⏹️ وقفت بعد {_MAX_TOOL_STEPS} خطوات — قول لي أكمّل لو "

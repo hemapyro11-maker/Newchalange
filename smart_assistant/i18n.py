@@ -13,6 +13,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "en": {
         "coding_plan": "plan · read only",
         "coding_ask": "code · approval required",
+        "coding_auto": "code · automatic execution",
         # الهوية
         "app_title": "nezuko",
         "app_subtitle": "your local AI assistant",
@@ -62,6 +63,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "mode_deep": "deep",
         "mode_local": "local only",
         "mode_voice": "voice",
+        "mode_auto": "automatic",
         # الإدخال
         "input_placeholder": "Type anything...",
         "input_hint": "Just type naturally — no commands to memorise",
@@ -174,6 +176,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "wiped_sessions": "deleted {n} conversations",
         # الصلاحيات
         "auto_allowed": "Commands that run without asking",
+        "automatic_actions": "Run my requested actions directly",
+        "automatic_actions_note": "Tools for your current request run without asking for y. Scheduled background work stays restricted.",
         "nothing_allowed": "none — everything asks",
         "safe_default_note": "The safe default. Answer 'a' instead of 'y' at a prompt to add one here.",
         "revoke_hint": "Enter removes the permission",
@@ -196,6 +200,7 @@ STRINGS: dict[str, dict[str, str]] = {
     "ar": {
         "coding_plan": "تخطيط · قراءة فقط",
         "coding_ask": "برمجة · بتأكيدك",
+        "coding_auto": "برمجة · تنفيذ تلقائي",
         "app_title": "نيزوكو",
         "app_subtitle": "مساعدتك الذكية المحلية",
         "workspace_title": "مساحة عمل نيزوكو",
@@ -243,6 +248,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "mode_deep": "عميق",
         "mode_local": "محلي بس",
         "mode_voice": "صوت",
+        "mode_auto": "تلقائي",
         "input_placeholder": "اكتب أي حاجة...",
         "input_hint": "اكتب بالعامية عادي — مش لازم تحفظ أوامر",
         "greet_ready": "اكتب أي حاجة بالعامية — مفيش أوامر تتحفظ.",
@@ -343,6 +349,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "wipe_sessions": "امسح كل المحادثات",
         "wiped_sessions": "اتمسحت {n} محادثة",
         "auto_allowed": "أوامر بتعدي من غير سؤال",
+        "automatic_actions": "نفّذ طلباتي مباشرة",
+        "automatic_actions_note": "أدوات طلبك الحالي تتنفذ من غير سؤال y، والمهام الخلفية المجدولة تفضل مقيدة.",
         "nothing_allowed": "مفيش — كل حاجة بتتسأل",
         "safe_default_note": "الافتراضي الآمن. لما تأكّد أمر اكتب a بدل y عشان يتضاف هنا.",
         "revoke_hint": "Enter يشيل السماح",

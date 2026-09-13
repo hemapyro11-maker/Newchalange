@@ -22,6 +22,14 @@ def test_nothing_is_allowed_by_default():
     assert permissions.is_allowed("probe") is False
 
 
+def test_automatic_mode_runs_foreground_requests_but_not_background_hooks():
+    cfg = brain.load_config()
+    cfg["auto_approve"] = True
+    brain.save_config(cfg)
+    assert permissions.is_allowed("run") is True
+    assert permissions.is_allowed("run", include_automatic=False) is False
+
+
 def test_allow_then_is_allowed():
     ok, _ = permissions.allow("probe")
     assert ok is True
@@ -216,4 +224,3 @@ def test_hooks_use_the_dedicated_submit_path():
 def test_speech_preview_is_safe_without_a_confirmation():
     assert permissions.is_allowed("speak") is True
     assert permissions.is_allowed("voice_status") is True
-

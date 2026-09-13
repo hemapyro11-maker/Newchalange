@@ -1007,6 +1007,18 @@ def test_unlisted_command_still_asks(bare_engine, monkeypatch):
     assert bare_engine._pending_intent is not None
 
 
+def test_automatic_mode_runs_model_tool_without_y(bare_engine, monkeypatch):
+    cfg = brain.load_config()
+    cfg["auto_approve"] = True
+    brain.save_config(cfg)
+    _fake_brain(monkeypatch, "هتكلم دلوقتي.\nTOOL: speak أهلاً بيك")
+    spoken = []
+    bare_engine.registry.register("speak", lambda ctx: spoken.append(ctx.raw) or "done")
+    bare_engine._converse("اتكلمي معايا")
+    assert bare_engine._pending_intent is None
+    assert spoken == ["speak أهلاً بيك"]
+
+
 def test_reply_a_grants_permission_and_runs(bare_engine, monkeypatch):
     import permissions
     _fake_brain(monkeypatch, "تمام.\nTOOL: echo done")

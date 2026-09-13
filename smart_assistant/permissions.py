@@ -63,10 +63,15 @@ def allowed() -> set[str]:
     return {str(x) for x in raw if isinstance(x, str)} - _NEVER
 
 
-def is_allowed(command: str) -> bool:
+def automatic() -> bool:
+    """Whether foreground requests should run without confirmation prompts."""
+    return bool(brain.load_config().get("auto_approve", False))
+
+
+def is_allowed(command: str, *, include_automatic: bool = True) -> bool:
     """الأمر ده ينفع يعدي من غير تأكيد؟"""
     name = command.lower()
-    return name in _ALWAYS_SAFE or name in allowed()
+    return (include_automatic and automatic()) or name in _ALWAYS_SAFE or name in allowed()
 
 
 def allow(command: str) -> tuple[bool, str]:

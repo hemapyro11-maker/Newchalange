@@ -281,7 +281,8 @@ class AssistantApp(ctk.CTk):
         ).pack(side=self._side, padx=20, pady=18)
         badge_side = "left" if self._rtl else "right"
         self.mode_badge = ctk.CTkLabel(
-            header, text=self.t.t("coding_ask"), fg_color=c["panel"], text_color=c["dim"],
+            header, text=self.t.t("coding_auto") if permissions.automatic() else self.t.t("coding_ask"),
+            fg_color=c["panel"], text_color=c["dim"],
             corner_radius=8, font=self._font(10), padx=10, pady=5,
         )
         self.mode_badge.pack(side=badge_side, padx=(4, 16), pady=17)
@@ -613,7 +614,10 @@ class AssistantApp(ctk.CTk):
         ready = [r for r in rows if r["has_key"] and r["enabled"]]
         parts = []
         parts.append(self.engine.project_dir.name)
-        parts.append(self.t.t("coding_plan") if self.engine.coding_mode == "plan" else self.t.t("coding_ask"))
+        if self.engine.coding_mode == "plan":
+            parts.append(self.t.t("coding_plan"))
+        else:
+            parts.append(self.t.t("coding_auto") if permissions.automatic() else self.t.t("coding_ask"))
         if ready:
             left = sum(max(0, r["rpd"] - r["used_today"]) for r in ready)
             parts.append(f"{ready[0]['label'].lower()}")
@@ -629,6 +633,8 @@ class AssistantApp(ctk.CTk):
             parts.append(self.t.t("mode_local"))
         if self.voice_enabled:
             parts.append(self.t.t("mode_voice"))
+        if permissions.automatic():
+            parts.append(self.t.t("mode_auto"))
         if self._plugin_count:
             parts.append(self.t.t("plugins_loaded", n=self._plugin_count))
         self.status_label.configure(text=f"{GLYPH_STATUS}  " + "  ·  ".join(parts))
@@ -638,7 +644,8 @@ class AssistantApp(ctk.CTk):
         if hasattr(self, "mode_badge"):
             self.mode_badge.configure(
                 text=self.t.t("coding_plan") if self.engine.coding_mode == "plan"
-                else self.t.t("coding_ask")
+                else (self.t.t("coding_auto") if permissions.automatic()
+                      else self.t.t("coding_ask"))
             )
 
     # ── الأفعال ────────────────────────────────────────────────────────
@@ -1084,6 +1091,10 @@ class SettingsPanel(ctk.CTkToplevel):
     def _page_permissions(self) -> list[dict]:
         allowed = sorted(permissions.allowed())
         items = [
+            {"kind": "toggle", "label": self._tr("automatic_actions"),
+             "cfg": "auto_approve",
+             "value": self._tr("on") if permissions.automatic() else self._tr("off"),
+             "note": self._tr("automatic_actions_note")},
             {"kind": "head", "label": self._tr("auto_allowed")},
         ]
         if not allowed:
