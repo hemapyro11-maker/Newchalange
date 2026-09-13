@@ -293,7 +293,7 @@ def test_download_cleans_up_partial_file_on_failure(monkeypatch, tmp_path):
 def test_voice_status_reports_all_missing(make_ctx, monkeypatch):
     _deny_all_backends(monkeypatch)
     result = vp._cmd_voice_status(make_ctx("voice_status", []))
-    assert result.count("❌") == 6
+    assert result.count("❌") == 7
     assert "No speech engine installed" in result
 
 
@@ -446,9 +446,18 @@ def test_sherpa_is_tried_before_the_archived_piper_binary():
     assert order.index("_synthesize_sherpa") < order.index("_synthesize_piper")
 
 
-def test_human_voice_is_first_and_chatterbox_is_its_fallback():
+def test_native_english_then_human_arabic_are_the_quality_first_backends():
     order = [name for _label, name, _ext, _key in vp._BACKENDS]
-    assert order[:2] == ["_synthesize_human", "_synthesize_natural"]
+    assert order[:3] == ["_synthesize_english_native", "_synthesize_human", "_synthesize_natural"]
+
+
+def test_native_english_engine_only_accepts_english(tmp_path, monkeypatch):
+    monkeypatch.setattr(vp.evr, "available", lambda: True)
+    seen = {}
+    monkeypatch.setattr(vp.evr, "render", lambda text, output: seen.update(text=text) or (True, "ok"))
+    assert vp._synthesize_english_native("hello", tmp_path / "en.wav", "en") is True
+    assert seen["text"] == "hello"
+    assert vp._synthesize_english_native("أهلاً", tmp_path / "ar.wav", "ar") is False
 
 
 def test_human_voice_falls_back_when_runtime_missing(tmp_path, monkeypatch):

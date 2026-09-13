@@ -1,20 +1,21 @@
 """
-voice_plugin.py — نطق عربي/إنجليزي عبر سلسلة محركات تبدأ بصوت VoiceTut
-المصري المدرّب على كلام بشري، ثم Chatterbox والمحركات الأخف المتاحة.
+voice_plugin.py — نطق عربي/إنجليزي عبر محركين أساسيين مستقلين: Kokoro
+للإنجليزية الأصلية وVoiceTut للصوت المصري، ثم محركات احتياطية.
 
-1. VoiceTut-TTS — نموذج مصري محلي يدعم العربية والإنجليزية والمزج
+1. Kokoro 82M — صوت إنجليزي أمريكي/بريطاني محلي طبيعي.
+2. VoiceTut-TTS — نموذج مصري محلي يدعم العربية والإنجليزية والمزج
    بينهما، بأصوات استوديو أنثوية واستنساخ اختياري من مرجع مصرح به.
-2. Chatterbox Multilingual V3 — محرك عصبي محلي متعدد اللغات واستنساخ.
-3. Microsoft Edge TTS (عبر مكتبة `edge-tts` مفتوحة المصدر) — مجاني
+3. Chatterbox Multilingual V3 — محرك عصبي محلي متعدد اللغات واستنساخ.
+4. Microsoft Edge TTS (عبر مكتبة `edge-tts` مفتوحة المصدر) — مجاني
    بالكامل من غير API key أو اشتراك، وفيه صوت مصري أنثوي حقيقي
    (ar-EG-SalmaNeural). العيب الوحيد: التوليد نفسه بيحصل على سيرفرات
    مايكروسوفت، يعني محتاج إنترنت وقت الاستخدام — مش نموذج محلي بالكامل.
-4. Piper (محرك TTS عصبي محلي، مفتوح المصدر GPL) — صوت عربي واحد بس
+5. Piper (محرك TTS عصبي محلي، مفتوح المصدر GPL) — صوت عربي واحد بس
    متاح رسميًا (`ar_JO-kareem`، أردني، رجالي) بيتحمّل مرة واحدة
    (~60MB) ويشتغل offline تمامًا بعد كده. مفيش صوت عربي أنثوي في
    مكتبة أصوات Piper الرسمية للأسف — قيد حقيقي في الأدوات المتاحة،
    مش قرار تصميم.
-5. espeak-ng (مضمّن محليًا دايمًا، بدون إنترنت خالص) — صوت عربي
+6. espeak-ng (مضمّن محليًا دايمًا، بدون إنترنت خالص) — صوت عربي
    روبوتي (formant synthesis قديم)، لكنه الضمانة الأخيرة اللي هتشتغل
    في كل الحالات.
 
@@ -111,6 +112,7 @@ import wave
 import media_runtime as mr
 import natural_voice_runtime as nvr
 import voicetut_runtime as vtr
+import english_voice_runtime as evr
 
 try:
     import sounddevice as sd
@@ -554,14 +556,23 @@ def _synthesize_human(text: str, out_path: pathlib.Path, lang: str = "ar") -> bo
     return ok
 
 
-# الترتيب بيمثّل أولوية الجودة الحقيقية: صوت أنثوي مصري طبيعي أولاً،
-# وبعدين احتياطي محلي أفضل من إسبيك، وأخيرًا الضمانة اللي بتشتغل دايمًا.
+def _synthesize_english_native(text: str, out_path: pathlib.Path, lang: str = "en") -> bool:
+    """Use Kokoro only for English so Arabic keeps its Egyptian identity."""
+    if lang != "en" or not evr.available():
+        return False
+    ok, _detail = evr.render(text, out_path)
+    return ok
+
+
+# الترتيب بيمثّل أولوية الجودة الحقيقية: الإنجليزي الأصلي أولاً لما
+# اللغة إنجليزي، ثم الصوت المصري للعربي، ثم المحركات الاحتياطية.
 # بنخزّن **أسماء** الدوال مش الدوال نفسها، وبنجيبها وقت النداء.
 # لو خزّنّا المرجع نفسه هنا، القايمة بتتجمّد على النسخة الموجودة وقت
 # الاستيراد — فمينفعش تستبدل محرك (لا في اختبار ولا في تخصيص).
 # العنصر الرابع هو مفتاح اسم الصوت في `_VOICES` — بيخلي إضافة محرك
 # جديد تعديل في مكان واحد بدل اتنين.
 _BACKENDS = [
+    ("Kokoro native English", "_synthesize_english_native", ".wav", "edge"),
     ("VoiceTut Egyptian", "_synthesize_human", ".wav", "edge"),
     ("Chatterbox Multilingual V3", "_synthesize_natural", ".wav", "edge"),
     ("edge-tts", "_synthesize_edge", ".mp3", "edge"),
@@ -583,7 +594,12 @@ def _synthesize_with_fallback(text: str, tmp_dir: pathlib.Path,
         synth_fn = globals()[fn_name]
         out_path = tmp_dir / f"speech{ext}"
         if synth_fn(text, out_path, lang):
-            voice_name = vtr._settings()[2] if fn_name == "_synthesize_human" else voice.get(voice_key, lang)
+            if fn_name == "_synthesize_human":
+                voice_name = vtr._settings()[2]
+            elif fn_name == "_synthesize_english_native":
+                voice_name = evr._settings()[1]
+            else:
+                voice_name = voice.get(voice_key, lang)
             return out_path, f"{label} ({voice_name})"
     return None
 
@@ -613,8 +629,8 @@ def _cmd_speak(ctx) -> str:
         result = _synthesize_with_fallback(text, pathlib.Path(tmp), lang)
         if result is None:
             return (
-                "❌ every speech engine failed — no internet for edge-tts, sherpa/Piper missing or unable "
-                "to fetch a voice, and espeak-ng not installed. Install at least espeak-ng (see voice_status)."
+                "❌ every speech engine failed — check Kokoro/VoiceTut setup, internet for edge-tts, "
+                "and sherpa/Piper/espeak-ng local fallbacks with voice_status."
             )
         audio_path, backend_label = result
 
@@ -672,6 +688,14 @@ def _cmd_voice_reference(ctx) -> str:
 def _cmd_voice_status(ctx) -> str:
     profile_name, _profile_cfg = _profile()
     lines = [f"🔊 Speech engines, in the order they are tried (profile: {profile_name}):"]
+
+    english_ok = evr.available()
+    _english_runtime, english_voice, english_speed = evr._settings()
+    lines.append(
+        f"  {'✅' if english_ok else '❌'} Kokoro native English (local, US/UK female voices)"
+        + (f" — voice: {english_voice}, speed: {english_speed:.2f}" if english_ok else
+           " — run english_voice_setup <python.exe>")
+    )
 
     human_ok = vtr.available()
     _runtime, _model, human_speaker, human_steps = vtr._settings()
@@ -734,7 +758,7 @@ def _cmd_voice_status(ctx) -> str:
         f"  {'✅' if ffplay_ok else '❌'} ffplay to play the audio (part of FFmpeg)"
     )
 
-    if not (human_ok or natural_ok or edge_ok or sherpa_ok or piper_ok or espeak_ok):
+    if not (english_ok or human_ok or natural_ok or edge_ok or sherpa_ok or piper_ok or espeak_ok):
         lines.append("\n⚠️ No speech engine installed — `speak` will not work at all.")
     elif piper_ok:
         lines.append(

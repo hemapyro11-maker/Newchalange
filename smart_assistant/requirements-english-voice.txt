@@ -1,0 +1,3 @@
+# Optional isolated native English speech engine.
+kokoro==0.9.4
+soundfile>=0.12,<1

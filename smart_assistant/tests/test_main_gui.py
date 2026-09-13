@@ -360,6 +360,29 @@ def test_every_page_renders_without_error(app, page):
     panel.close()
 
 
+def test_voice_library_lists_arabic_and_native_english_voices(app):
+    app._open_settings()
+    panel = app._settings
+    panel.page = "voices"
+    panel._build()
+    choices = {item.get("choice") for item in panel.data if item["kind"] == "voice_choice"}
+    assert {"Omnia", "Asmaa", "af_heart", "bf_emma"} <= choices
+    panel.close()
+
+
+def test_selecting_a_voice_persists_it(app):
+    app._open_settings()
+    panel = app._settings
+    panel.page = "voices"
+    panel._build()
+    target = next(i for i, idx in enumerate(panel._selectable())
+                  if panel.data[idx].get("choice") == "bf_emma")
+    panel.cursor = target
+    panel._activate()
+    assert brain.load_config()["english_voice_voice"] == "bf_emma"
+    panel.close()
+
+
 def test_info_rows_are_not_selectable(app):
     app._open_settings()
     app.update()

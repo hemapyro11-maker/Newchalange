@@ -109,6 +109,7 @@ py -m PyInstaller ^
     --hidden-import benchmark ^
     --hidden-import natural_voice_runtime ^
     --hidden-import voicetut_runtime ^
+    --hidden-import english_voice_runtime ^
     --collect-all CTkToolTip ^
     --collect-all mcp ^
     --hidden-import pywintypes ^
@@ -149,6 +150,8 @@ py -m PyInstaller ^
     --add-data "natural_voice_worker.py;." ^
     --add-data "voicetut_runtime.py;." ^
     --add-data "voicetut_voice_worker.py;." ^
+    --add-data "english_voice_runtime.py;." ^
+    --add-data "english_voice_worker.py;." ^
     --add-data "version.py;." ^
     --add-data "version.json;." ^
     --add-data "connectors.example.json;." ^

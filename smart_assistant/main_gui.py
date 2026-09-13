@@ -1,23 +1,4 @@
-"""
-main_gui.py — واجهة نيزوكو على طراز الطرفية (terminal-style)
-
-الشكل مستوحى من واجهات الوكلاء في الطرفية: عمود واحد بيمشي من فوق
-لتحت، خط مونوسبيس في كل حتة، خلفية داكنة، وحدود رفيعة. مفيش سايدبار
-ولا كروت مدوّرة — المحادثة نفسها هي الواجهة.
-
-اصطلاحات العرض:
-    ›  سطر كتبته إنت
-    ⏺  رد نيزوكو
-    ⎿  نتيجة أداة اتنفذت (مزاحة تحت الأمر بتاعها)
-    ⏵  سطر الحالة تحت (المخ النشط + الحصة المتبقية)
-
-الإعدادات قايمة بتتنقل فيها بالكيبورد (↑ ↓ Enter Esc) زي قوايم
-الطرفية، مش نافذة كروت.
-
-RTL: العربي بيقلب اتجاه الأسطر — العلامة (› ⏺ ⎿) بتيجي على اليمين
-والنص بيتظبط يمين. التبديل للإنجليزي بيعيد بناء الواجهة بالاتجاه
-المعكوس بدل ما يحاول يعكس كل ودجت لوحده.
-"""
+"""Nezuko's bilingual chat workspace: conversations, composer and tools."""
 import os
 import shlex
 import sys
@@ -177,6 +158,7 @@ class AssistantApp(ctk.CTk):
         self.mode = cfg.get("ui_theme", "dark")
         self.c = theme.palette(self.mode)
         self.mono = theme.pick_mono(self)
+        self.ui_font = theme.pick_ui(self)
 
         self.engine = AssistantEngine(on_log=self._on_log, on_status=self._on_status)
         self.engine.on_need_file = self._on_need_file
@@ -187,8 +169,8 @@ class AssistantApp(ctk.CTk):
         self._settings = None
 
         self.title(self.t.t("app_title"))
-        self.geometry("1000x700")
-        self.minsize(720, 480)
+        self.geometry("1280x800")
+        self.minsize(980, 620)
 
         self._build()
         self.engine.start()
@@ -214,51 +196,109 @@ class AssistantApp(ctk.CTk):
         return "right" if self._rtl else "left"
 
     def _font(self, size: int = 13, bold: bool = False) -> ctk.CTkFont:
-        return ctk.CTkFont(family=self.mono, size=size,
+        return ctk.CTkFont(family=self.ui_font, size=size,
                            weight="bold" if bold else "normal")
 
     # ── البناء ─────────────────────────────────────────────────────────
     def _build(self):
         c = self.c
         self.configure(fg_color=c["bg"])
+        self._rows = []  # lightweight rendering history; also useful to GUI diagnostics
 
         self.root = ctk.CTkFrame(self, fg_color=c["bg"], corner_radius=0)
         self.root.pack(fill="both", expand=True)
+        self.root.grid_rowconfigure(0, weight=1)
+        self.root.grid_columnconfigure(1, weight=1)
 
-        # CTkTextbox بدل CTkScrollableFrame+CTkLabel القديمة: التحديد
-        # بالسحب، Ctrl+A، Ctrl+C، وكليك يمين كلهم شغالين بشكل حقيقي هنا
-        # (CTkLabel أصلاً مش قابل للتحديد خالص، ده كان السبب الحقيقي
-        # وراء "النسخ مش شغال في الشات").
+        # Left navigation mirrors a modern coding assistant: identity, new chat,
+        # recent conversations and settings stay visible instead of hiding in commands.
+        self.sidebar = ctk.CTkFrame(
+            self.root, width=230, fg_color="#0b0b0b" if self.mode == "dark" else "#f2f2ef",
+            corner_radius=0, border_width=0,
+        )
+        self.sidebar.grid(row=0, column=0, sticky="nsew")
+        self.sidebar.grid_propagate(False)
+        ctk.CTkLabel(
+            self.sidebar, text="◉  " + self.t.t("app_title"), text_color=c["text"],
+            font=self._font(18, True), anchor=self._anchor,
+        ).pack(fill="x", padx=18, pady=(20, 14))
+        ctk.CTkButton(
+            self.sidebar, text="＋  " + self.t.t("new_chat"), command=self._new_chat,
+            height=42, corner_radius=10, fg_color=c["panel"], hover_color=c["panel_hi"],
+            border_width=1, border_color=c["border"], text_color=c["text"],
+            font=self._font(13, True), anchor=self._anchor,
+        ).pack(fill="x", padx=12)
+        ctk.CTkLabel(
+            self.sidebar, text=self.t.t("recent_chats"), text_color=c["faint"],
+            font=self._font(11, True), anchor=self._anchor,
+        ).pack(fill="x", padx=18, pady=(24, 8))
+        self.session_list = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        self.session_list.pack(fill="both", expand=True, padx=8)
+        self._refresh_session_list()
+        ctk.CTkButton(
+            self.sidebar, text="⚙  " + self.t.t("settings"), command=self._open_settings,
+            height=38, corner_radius=8, fg_color="transparent", hover_color=c["panel_hi"],
+            text_color=c["dim"], font=self._font(12), anchor=self._anchor,
+        ).pack(fill="x", padx=10, pady=(4, 14))
+
+        self.main = ctk.CTkFrame(self.root, fg_color=c["bg"], corner_radius=0)
+        self.main.grid(row=0, column=1, sticky="nsew")
+        self.main.grid_rowconfigure(1, weight=1)
+        self.main.grid_columnconfigure(0, weight=1)
+
+        header = ctk.CTkFrame(self.main, height=64, fg_color=c["bg"], corner_radius=0,
+                              border_width=0)
+        header.grid(row=0, column=0, sticky="ew", padx=24)
+        header.grid_propagate(False)
+        ctk.CTkLabel(
+            header, text=self.t.t("workspace_title"), text_color=c["text"],
+            font=self._font(16, True), anchor=self._anchor,
+        ).pack(side=self._side, pady=18)
+        badge_side = "left" if self._rtl else "right"
+        self.mode_badge = ctk.CTkLabel(
+            header, text=self.t.t("coding_ask"), fg_color=c["panel"], text_color=c["dim"],
+            corner_radius=8, font=self._font(10), padx=10, pady=5,
+        )
+        self.mode_badge.pack(side=badge_side, pady=17)
+
         self.stream = ctk.CTkTextbox(
-            self.root, fg_color=c["bg"], corner_radius=0,
+            self.main, fg_color=c["bg"], corner_radius=0,
             wrap="word", activate_scrollbars=True,
             scrollbar_button_color=c["border"],
             scrollbar_button_hover_color=c["dim"],
-            font=self._font(13),
+            font=self._font(14),
         )
-        self.stream.pack(fill="both", expand=True, padx=26, pady=(18, 6))
+        self.stream.grid(row=1, column=0, sticky="nsew", padx=30, pady=(6, 4))
         self.stream.configure(state="disabled")  # للقراءة بس — المستخدم بيكتب في self.entry
         _attach_readonly_textbox_shortcuts(self.stream)
         self._tag_cache: set = set()
 
-        bottom = ctk.CTkFrame(self.root, fg_color=c["bg"], corner_radius=0)
-        bottom.pack(fill="x", padx=26, pady=(0, 14))
+        bottom = ctk.CTkFrame(self.main, fg_color=c["bg"], corner_radius=0)
+        bottom.grid(row=2, column=0, sticky="ew", padx=30, pady=(4, 18))
 
         # صندوق الإدخال — حد رفيع وزوايا شبه مربعة، زي إطار الطرفية
         box = ctk.CTkFrame(
-            bottom, fg_color=c["panel"], corner_radius=6,
+            bottom, fg_color=c["panel"], corner_radius=14,
             border_width=1, border_color=c["border"],
         )
         box.pack(fill="x")
 
         self.prompt_mark = ctk.CTkLabel(
-            box, text=GLYPH_USER, width=16, text_color=c["accent"], font=self._font(14, True),
+            box, text="✦", width=22, text_color=c["accent"], font=self._font(15, True),
         )
         self.prompt_mark.pack(side=self._side, padx=(12, 2), pady=8)
 
+        send_side = "left" if self._rtl else "right"
+        self.send_button = ctk.CTkButton(
+            box, text=self.t.t("tool_send"), command=self._send, width=72, height=34,
+            corner_radius=10, fg_color=c["accent"], hover_color=c["green"],
+            text_color="#ffffff", font=self._font(12, True),
+        )
+        self.send_button.pack(side=send_side, padx=7, pady=7)
+
         self.entry = ctk.CTkEntry(
-            box, fg_color="transparent", border_width=0, height=34,
-            font=self._font(13), text_color=c["text"],
+            box, fg_color="transparent", border_width=0, height=46,
+            font=self._font(14), text_color=c["text"], placeholder_text=self.t.t("input_placeholder"),
             placeholder_text_color=c["faint"], justify=self._justify,
         )
         self.entry.pack(side=self._side, fill="x", expand=True, padx=(2, 10), pady=4)
@@ -266,7 +306,6 @@ class AssistantApp(ctk.CTk):
         _attach_entry_shortcuts(self.entry)
         self.entry.focus_set()
 
-        # شريط أدوات نصي مختصر — أفعال بحرف واحد، مفيش أزرار ضخمة
         tools = ctk.CTkFrame(bottom, fg_color="transparent")
         tools.pack(fill="x", pady=(6, 0))
 
@@ -279,10 +318,7 @@ class AssistantApp(ctk.CTk):
         opposite = "left" if self._rtl else "right"
         self.tool_btns = []
         for glyph, cb, key in (
-            ("⚙", self._open_settings, "settings"),
-            ("🎤", self._listen, "mic"),
-            ("🛡", self._scan_file, "scan"),
-            ("📎", self._attach_file, "attach"),
+            ("🎤", self._listen, "mic"), ("📎", self._attach_file, "attach"),
         ):
             b = ctk.CTkButton(
                 tools, text=glyph, width=26, height=22, corner_radius=4,
@@ -293,7 +329,67 @@ class AssistantApp(ctk.CTk):
             b._key = key
             self.tool_btns.append(b)
 
+        # The tools rail makes capabilities discoverable, with words and categories.
+        self.tools_panel = ctk.CTkFrame(
+            self.root, width=250, fg_color=c["panel"], corner_radius=0,
+            border_width=1, border_color=c["border"],
+        )
+        self.tools_panel.grid(row=0, column=2, sticky="nsew")
+        self.tools_panel.grid_propagate(False)
+        ctk.CTkLabel(
+            self.tools_panel, text=self.t.t("tools"), text_color=c["text"],
+            font=self._font(16, True), anchor=self._anchor,
+        ).pack(fill="x", padx=16, pady=(20, 4))
+        ctk.CTkLabel(
+            self.tools_panel, text=self.t.t("tools_subtitle"), text_color=c["faint"],
+            font=self._font(10), anchor=self._anchor, wraplength=210,
+        ).pack(fill="x", padx=16, pady=(0, 14))
+        for section, entries in (
+            (self.t.t("tool_files"), (("📎", "attach", self._attach_file), ("🛡", "scan", self._scan_file))),
+            (self.t.t("tool_voice"), (("🎤", "mic", self._listen), ("🔊", "voices", lambda: self._open_settings_page("voices")))),
+            (self.t.t("tool_workspace"), (("🔌", "connectors", lambda: self._open_settings_page("connectors")), ("🧩", "plugins", lambda: self._open_settings_page("plugins")), ("⚡", "skills", lambda: self._open_settings_page("skills")))),
+        ):
+            ctk.CTkLabel(self.tools_panel, text=section, text_color=c["faint"],
+                         font=self._font(10, True), anchor=self._anchor).pack(fill="x", padx=16, pady=(8, 4))
+            for icon, key, callback in entries:
+                ctk.CTkButton(
+                    self.tools_panel, text=f"{icon}  {self.t.t('tool_' + key)}", command=callback,
+                    height=38, corner_radius=8, fg_color="transparent", hover_color=c["panel_hi"],
+                    text_color=c["dim"], font=self._font(12), anchor=self._anchor,
+                ).pack(fill="x", padx=8, pady=1)
+
         self._refresh_status()
+
+    def _refresh_session_list(self):
+        if not hasattr(self, "session_list"):
+            return
+        for child in self.session_list.winfo_children():
+            child.destroy()
+        rows = sessions.list_all()[:9]
+        if not rows:
+            ctk.CTkLabel(self.session_list, text=self.t.t("no_sessions"), text_color=self.c["faint"],
+                         font=self._font(10), anchor=self._anchor).pack(fill="x", padx=10)
+            return
+        for item in rows:
+            title = item.get("title") or self.t.t("untitled")
+            ctk.CTkButton(
+                self.session_list, text="◌  " + title[:28],
+                command=lambda sid=item["id"]: self._open_saved_session(sid),
+                height=34, corner_radius=7, fg_color="transparent", hover_color=self.c["panel_hi"],
+                text_color=self.c["dim"], font=self._font(11), anchor=self._anchor,
+            ).pack(fill="x", pady=1)
+
+    def _open_saved_session(self, session_id: str):
+        messages = sessions.load(session_id)
+        if messages is not None:
+            self._resume_session(session_id, messages)
+
+    def _open_settings_page(self, page: str):
+        self._open_settings()
+        if self._settings is not None:
+            self._settings.page = page
+            self._settings.cursor = 0
+            self._settings._build()
 
     # ── أسطر المحادثة ──────────────────────────────────────────────────
     def _stream_tag(self, color: str, size: int, bold: bool) -> str:
@@ -330,6 +426,9 @@ class AssistantApp(ctk.CTk):
         start = self.stream.index("end-1c")
         self.stream.insert("end", rendered + "\n", name)
         self.stream.configure(state="disabled")
+        self._rows.append((glyph, body, color))
+        if len(self._rows) > MAX_ROWS:
+            del self._rows[:len(self._rows) - MAX_ROWS]
         self._trim_stream()
         self.after(20, self._scroll_bottom)
         return start  # مرجع نصي (index) للسطر ده — يستخدم مع _show_thinking/_hide_thinking
@@ -353,6 +452,7 @@ class AssistantApp(ctk.CTk):
         self.stream.configure(state="normal")
         self.stream.delete("1.0", "end")
         self.stream.configure(state="disabled")
+        self._rows.clear()
 
     def _add_user(self, text: str):
         self._blank()
@@ -447,6 +547,11 @@ class AssistantApp(ctk.CTk):
         if self._plugin_count:
             parts.append(self.t.t("plugins_loaded", n=self._plugin_count))
         self.status_label.configure(text=f"{GLYPH_STATUS}  " + "  ·  ".join(parts))
+        if hasattr(self, "mode_badge"):
+            self.mode_badge.configure(
+                text=self.t.t("coding_plan") if self.engine.coding_mode == "plan"
+                else self.t.t("coding_ask")
+            )
 
     # ── الأفعال ────────────────────────────────────────────────────────
     def _send(self):
@@ -514,6 +619,7 @@ class AssistantApp(ctk.CTk):
         self._thinking = None
         self.engine.new_session()
         self._banner()
+        self._refresh_session_list()
 
     def _attach_file(self):
         path = filedialog.askopenfilename(title=self.t.t("attach_title"))
@@ -667,7 +773,7 @@ class SettingsPanel(ctk.CTkToplevel):
     # مفاتيح بس — الأسماء المعروضة بتتسحب من i18n وقت الرسم
     PAGES = (
         "home", "brain", "connectors", "plugins", "skills",
-        "macros", "sessions", "permissions", "hooks", "interface",
+        "macros", "sessions", "permissions", "hooks", "interface", "voices",
     )
 
     def __init__(self, app: AssistantApp):
@@ -732,6 +838,8 @@ class SettingsPanel(ctk.CTkToplevel):
              "value": str(sum(len(v) for v in hooks.load().values()))},
             {"kind": "goto", "label": self._tr("page_interface"), "page": "interface",
              "value": self.app.mode},
+            {"kind": "goto", "label": self._tr("page_voices"), "page": "voices",
+             "value": f"{cfg.get('human_voice_speaker', 'Omnia')} · {cfg.get('english_voice_voice', 'af_heart')}"},
             {"kind": "head", "label": self._tr("sec_modes")},
             {"kind": "toggle", "label": self._tr("deep_mode"), "cfg": "deep_mode",
              "value": self._tr("on") if cfg.get("deep_mode") else self._tr("off"),
@@ -919,10 +1027,44 @@ class SettingsPanel(ctk.CTkToplevel):
              "value": "العربية" if self.app._rtl else "English"},
             {"kind": "voice", "label": self._tr("voice"),
              "value": self._tr("on") if self.app.voice_enabled else self._tr("off")},
+            {"kind": "goto", "label": self._tr("page_voices"), "page": "voices", "value": "›"},
             {"kind": "head", "label": self._tr("sec_ui_commands")},
             {"kind": "info", "label": "/settings /clear /theme /voice /lang /quit",
              "value": ""},
         ]
+
+    def _page_voices(self) -> list[dict]:
+        cfg = brain.load_config()
+        arabic = cfg.get("human_voice_speaker", "Omnia")
+        english = cfg.get("english_voice_voice", "af_heart")
+        items = [
+            {"kind": "head", "label": self._tr("arabic_voices")},
+            {"kind": "info", "label": self._tr("voice_ar_note"), "value": ""},
+        ]
+        for name in ("Omnia", "Asmaa", "Hanan", "Yasmin", "Esraa", "Sarah"):
+            items.append({"kind": "voice_choice", "label": name,
+                          "cfg": "human_voice_speaker", "choice": name,
+                          "value": "✓" if name == arabic else ""})
+        items.append({"kind": "voice_preview", "label": self._tr("voice_preview_ar"),
+                      "lang": "ar", "value": "▶"})
+        items.extend([
+            {"kind": "head", "label": self._tr("english_voices")},
+            {"kind": "info", "label": self._tr("voice_en_note"), "value": ""},
+        ])
+        english_names = (
+            ("af_heart", "Heart · US"), ("af_bella", "Bella · US"),
+            ("af_nova", "Nova · US"), ("af_sarah", "Sarah · US"),
+            ("af_sky", "Sky · US"), ("af_nicole", "Nicole · US"),
+            ("bf_emma", "Emma · UK"), ("bf_isabella", "Isabella · UK"),
+            ("bf_alice", "Alice · UK"), ("bf_lily", "Lily · UK"),
+        )
+        for value, label in english_names:
+            items.append({"kind": "voice_choice", "label": label,
+                          "cfg": "english_voice_voice", "choice": value,
+                          "value": "✓" if value == english else ""})
+        items.append({"kind": "voice_preview", "label": self._tr("voice_preview_en"),
+                      "lang": "en", "value": "▶"})
+        return items
 
     # ── الرسم ──────────────────────────────────────────────────────────
     def _selectable(self) -> list[int]:
@@ -1080,6 +1222,17 @@ class SettingsPanel(ctk.CTkToplevel):
             self.configure(fg_color=self.c["bg"])
         elif kind == "voice":
             self.app._toggle_voice()
+        elif kind == "voice_choice":
+            cfg = brain.load_config()
+            cfg[item["cfg"]] = item["choice"]
+            brain.save_config(cfg)
+        elif kind == "voice_preview":
+            sample = ("أهلاً، أنا نيزوكو. هساعدك بهدوء وبصوت مصري طبيعي."
+                      if item["lang"] == "ar" else
+                      "Hi, I'm Nezuko. I'll help you calmly, naturally, and one step at a time.")
+            self.app.engine.submit(f"speak {sample} lang={item['lang']}")
+            self.close()
+            return
         elif kind == "lang":
             self.app._toggle_lang()
             self.c = self.app.c

@@ -1,27 +1,19 @@
-"""
-theme.py — لوحة ألوان وخطوط نيزوكو على طراز الطرفية (terminal).
-
-الفلسفة: شاشة طرفية، مش تطبيق كروت. يعني خط مونوسبيس في كل حتة،
-خلفية داكنة، حدود رفيعة جدًا، ولون تمييز واحد بس بيتصرف بحساب.
-كل حاجة تانية رمادي بدرجات.
-
-الوضع الداكن هو الافتراضي؛ الفاتح موجود لمن يحتاجه.
-"""
+"""Modern, calm colours and fonts for Nezuko's chat workspace."""
 from __future__ import annotations
 
 DARK = {
-    "bg":       "#1a1917",   # خلفية الشاشة
-    "panel":    "#232220",   # صندوق الإدخال والقوايم
-    "panel_hi": "#2d2b28",   # السطر المختار في القوايم
-    "text":     "#e8e5df",
-    "dim":      "#8a857c",   # نص ثانوي
-    "faint":    "#5c5850",   # نص باهت جدًا (تلميحات)
-    "border":   "#3a3833",
-    "accent":   "#d97757",   # اللون الوحيد المميز
-    "green":    "#6cae6c",
-    "red":      "#e0776a",
-    "yellow":   "#d4a35a",
-    "blue":     "#7aa2c2",
+    "bg":       "#111111",
+    "panel":    "#1b1b1b",
+    "panel_hi": "#252525",
+    "text":     "#f4f4f4",
+    "dim":      "#b4b4b4",
+    "faint":    "#777777",
+    "border":   "#303030",
+    "accent":   "#10a37f",
+    "green":    "#52c79a",
+    "red":      "#ef6b73",
+    "yellow":   "#e5b567",
+    "blue":     "#7ab7ff",
 }
 
 LIGHT = {
@@ -32,7 +24,7 @@ LIGHT = {
     "dim":      "#6b665c",
     "faint":    "#9a9488",
     "border":   "#ddd8ca",
-    "accent":   "#c1633f",
+    "accent":   "#0d8f70",
     "green":    "#4b8b6b",
     "red":      "#c1483d",
     "yellow":   "#b8863a",
@@ -44,6 +36,11 @@ LIGHT = {
 MONO_CANDIDATES = (
     "Cascadia Mono", "Cascadia Code", "Consolas", "JetBrains Mono",
     "DejaVu Sans Mono", "Menlo", "Monaco", "Courier New", "monospace",
+)
+
+UI_CANDIDATES = (
+    "Segoe UI Variable", "Segoe UI", "Inter", "Noto Sans Arabic",
+    "Tahoma", "Arial", "sans-serif",
 )
 
 
@@ -62,6 +59,19 @@ def pick_mono(root) -> str:
         if name.lower() in available:
             return name
     return "Courier New"
+
+
+def pick_ui(root) -> str:
+    """Pick a readable interface font with strong Arabic shaping on Windows."""
+    try:
+        from tkinter import font as tkfont
+        available = {f.lower() for f in tkfont.families(root)}
+    except Exception:  # noqa: BLE001
+        return "Segoe UI"
+    for name in UI_CANDIDATES:
+        if name.lower() in available:
+            return name
+    return "Arial"
 
 
 def palette(mode: str) -> dict:
