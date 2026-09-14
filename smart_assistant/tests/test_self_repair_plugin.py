@@ -19,6 +19,31 @@ def test_choose_openrouter_model_stays_on_free_models():
     assert selected == "qwen/qwen3:free"
 
 
+def test_functional_probe_requires_a_real_chat_completion(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        sr.brain, "_call_provider",
+        lambda provider, model, messages, temperature, max_tokens:
+            captured.update(model=model, messages=messages, max_tokens=max_tokens) or "OK",
+    )
+    out = sr._functional_probe(sr.brain.PROVIDERS["ollama"], "llama3.2:1b")
+    assert out == "OK"
+    assert captured["model"] == "llama3.2:1b"
+    assert captured["max_tokens"] == 8
+
+
+def test_repair_does_not_claim_healthy_when_real_chat_probe_failed(make_ctx, monkeypatch):
+    monkeypatch.setattr(sr, "_repair_external_providers", lambda: (
+        [], ["Groq: API key rejected (403); replace the key",
+             "AI engines answering real prompts: 0/1"],
+    ))
+    monkeypatch.setattr(sr, "_real_media_smoke", lambda: (True, "portable H.264 render passed"))
+    monkeypatch.setattr(sr, "_tested_ai_plugin_repair", lambda *a, **k: None)
+    result = sr._cmd_self_repair(make_ctx("self_repair", []))
+    assert "❌ Groq: API key rejected" in result
+    assert "No repairable fault remains" not in result
+
+
 def test_parse_patch_rejects_non_json():
     assert sr._parse_patch("I would change it") is None
     assert sr._parse_patch('{"search":"old","replace":"new","reason":"fix"}')["replace"] == "new"

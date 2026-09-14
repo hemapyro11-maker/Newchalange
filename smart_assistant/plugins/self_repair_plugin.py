@@ -57,6 +57,13 @@ def _start_ollama() -> bool:
     return brain.start_ollama_server()
 
 
+def _functional_probe(provider, model: str) -> str:
+    """Require an actual completion; listing models only proves HTTP access."""
+    return brain._call_provider(  # one tiny real request with the configured model
+        provider, model, [{"role": "user", "content": "Reply with OK only."}], 0.0, 8
+    )
+
+
 def _repair_external_providers() -> tuple[list[str], list[str]]:
     fixed, reports = [], []
     cfg = brain.load_config()
@@ -68,7 +75,7 @@ def _repair_external_providers() -> tuple[list[str], list[str]]:
         else:
             reports.append("Ollama is offline and no installed service could be started")
 
-    changed, reachable = False, 0
+    changed, usable = False, 0
     providers = [p for p in brain.PROVIDERS.values()
                  if p.name in enabled and (not p.needs_key or brain.get_key(p.name))]
     outcomes = {}
@@ -81,6 +88,7 @@ def _repair_external_providers() -> tuple[list[str], list[str]]:
             except Exception as exc:
                 outcomes[provider.name] = (None, exc)
 
+    probe_targets = []
     for provider in providers:
         configured = cfg.get("models", {}).get(provider.name, provider.model)
         models, error = outcomes[provider.name]
@@ -96,18 +104,40 @@ def _repair_external_providers() -> tuple[list[str], list[str]]:
         if error is not None:
             reports.append(f"{provider.label}: unreachable; fallback active")
             continue
-        reachable += 1
-        bases = {m.split(":", 1)[0] for m in models}
-        if configured not in models and configured.split(":", 1)[0] not in bases:
-            replacement = _choose_model(provider, models)
+        if configured not in models:
+            same_family = next(
+                (model for model in models
+                 if model.split(":", 1)[0] == configured.split(":", 1)[0]), None
+            )
+            replacement = same_family or _choose_model(provider, models)
             if replacement:
                 cfg.setdefault("models", {})[provider.name] = replacement
                 fixed.append(f"{provider.label}: replaced unavailable '{configured}' with '{replacement}'")
                 changed = True
+                configured = replacement
+        probe_targets.append((provider, configured))
+
+    # Real inference checks are independent and should not stack cloud timeouts.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(probe_targets))) as pool:
+        probes = {
+            pool.submit(_functional_probe, provider, model): provider
+            for provider, model in probe_targets
+        }
+        for future, provider in ((future, probes[future]) for future in probes):
+            try:
+                answer = future.result()
+                if not answer.strip():
+                    raise RuntimeError("empty completion")
+            except Exception as exc:  # model listing can work while inference fails
+                reports.append(
+                    f"{provider.label}: models reachable but chat failed: {str(exc)[:180]}"
+                )
+                continue
+            usable += 1
     if changed:
         brain.save_config(cfg)
         brain.reset_brain()
-    reports.append(f"external brains reachable: {reachable}")
+    reports.append(f"AI engines answering real prompts: {usable}/{len(providers)}")
     return fixed, reports
 
 
@@ -301,9 +331,19 @@ def _cmd_self_repair(ctx) -> str:
         (fixed if ai_result.startswith("AI repaired") else found).append(ai_result)
     lines = ["🩺 Nezuko hybrid self-repair completed."]
     lines += [f"✅ {item}" for item in fixed]
-    lines += [("❌ " if item.startswith("media problem") else "✅ ") + item for item in checks]
+    failure_markers = ("media problem", "rejected", "chat failed", "offline",
+                       "unreachable", "0/")
+    lines += [
+        ("❌ " if any(marker in item.lower() for marker in failure_markers) else "✅ ") + item
+        for item in checks
+    ]
     lines += [f"• {item}" for item in dict.fromkeys(found)]
-    if not fixed and media_ok and not broken:
+    provider_problem = any(
+        marker in item.lower()
+        for item in external_reports
+        for marker in failure_markers[1:]
+    )
+    if not fixed and media_ok and not broken and not provider_problem:
         lines.append("✅ No repairable fault remains in the checked systems.")
     if broken:
         lines.append("❌ Broken plugins: " + ", ".join(broken))

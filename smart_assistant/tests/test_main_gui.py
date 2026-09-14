@@ -107,6 +107,20 @@ def test_entry_justifies_left_in_english(app):
     assert app.entry.cget("justify") == "left"
 
 
+def test_mixed_arabic_chat_is_converted_for_tk_without_damaging_english():
+    source = "الأداة Tools تعمل الآن"
+    rendered = main_gui._tk_visual_text(source)
+    assert "Tools" in rendered
+    assert rendered != source
+    assert main_gui._tk_visual_text("Tools work now") == "Tools work now"
+
+
+def test_physical_windows_shortcuts_are_independent_of_keyboard_language():
+    assert main_gui._EDIT_KEYCODE_ACTIONS[65] == "select_all"
+    assert main_gui._EDIT_KEYCODE_ACTIONS[67] == "copy"
+    assert main_gui._EDIT_KEYCODE_ACTIONS[86] == "paste"
+
+
 def test_language_choice_persists(app):
     app._toggle_lang()
     assert brain.load_config()["ui_lang"] == "ar"

@@ -311,7 +311,9 @@ RULES: tuple[IntentRule, ...] = (
     IntentRule(
         "channel_view_growth_lab",
         ("اعلي المشاهدات .*قناه", "فيديوهات القناه .*مشاهدات",
-         "حلل فيديوهات .*قناه", "تعلم من .*قناه",
+         "حلل فيديوهات .*قناه", "حلل .*فيديو .*قناه",
+         "اتفرج .*فيديو .*قناه", "اعمل .*فيديو .*قناه",
+         "تعلم من .*قناه",
          "highest views .*channel", "best videos .*channel", "learn from .*channel"),
         (ArgSpec(HANDLE, "pick_channel"),),
         priority=11,

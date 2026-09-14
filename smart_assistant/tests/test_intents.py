@@ -53,6 +53,13 @@ def test_arabic_phrase_maps_to_command():
     assert m.source == "dict"
 
 
+def test_natural_latest_channel_video_request_stays_on_fast_local_tools():
+    match = intents.resolve("حلل اخر فيديو موجود علي القناه واعمل زيو", ALL)
+    assert match is not None
+    assert match.command == "channel_view_growth_lab"
+    assert match.missing[0].kind == intents.HANDLE
+
+
 def test_phrase_with_different_alef_spelling_still_matches():
     assert intents.resolve("إفحص الملف ده أمنياً", ALL).command == "security_report"
 

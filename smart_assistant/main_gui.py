@@ -4,6 +4,7 @@ import pathlib
 import shlex
 import sys
 import tkinter as tk
+import unicodedata
 from tkinter import filedialog, messagebox
 
 try:
@@ -21,6 +22,7 @@ try:
     import theme
     from core_engine import AssistantEngine
     from i18n import Translator
+    from version import __version__
 except ImportError:
     sys.path.insert(0, os.path.dirname(sys.executable))
     import brain
@@ -30,12 +32,47 @@ except ImportError:
     import theme
     from core_engine import AssistantEngine
     from i18n import Translator
+    from version import __version__
 
 ctk.set_appearance_mode("dark")
 
 MAX_ROWS = 300
 MAX_CHARS = 6000
 MAX_STREAM_LINES = 4000  # سقف أسطر خام في صندوق المحادثة، بديل MAX_ROWS بعد التحويل لـ CTkTextbox
+_EDIT_KEYCODE_ACTIONS = {65: "select_all", 67: "copy", 86: "paste",
+                         88: "cut", 89: "redo", 90: "undo"}
+
+try:
+    import arabic_reshaper
+    from bidi.algorithm import get_display as _bidi_display
+except ImportError:  # packaged builds include both; source installs degrade safely
+    arabic_reshaper = None
+    _bidi_display = None
+
+
+def _has_arabic(value: str) -> bool:
+    """True for Arabic letters, excluding neutral punctuation and digits."""
+    return any("ARABIC" in unicodedata.name(char, "") and char.isalpha() for char in value)
+
+
+def _tk_visual_text(value: str) -> str:
+    """Lay out display-only Arabic for Tk, whose Windows text widget has no bidi.
+
+    The editable composer deliberately keeps logical Unicode order so copy/paste,
+    cursor movement and submitted prompts remain correct. Chat rows are read-only,
+    so they can be converted to visual order safely.
+    """
+    if arabic_reshaper is None or _bidi_display is None:
+        return value
+    rendered = []
+    for line in value.split("\n"):
+        if _has_arabic(line):
+            try:
+                line = _bidi_display(arabic_reshaper.reshape(line), base_dir="R")
+            except (TypeError, ValueError):
+                pass
+        rendered.append(line)
+    return "\n".join(rendered)
 
 
 # ── اختصارات تحرير قياسية (نسخ/لصق/تحديد الكل/كليك يمين) ────────────
@@ -209,6 +246,43 @@ def _attach_editable_textbox_shortcuts(widget, *, rtl: bool = False) -> None:
     }
     for sequence, callback in bindings.items():
         text.bind(sequence, callback)
+
+    # With an Arabic keyboard layout Tk reports the printed Arabic keysym, not
+    # the physical Latin shortcut letter. Windows applications still expect
+    # Ctrl+A/C/V/X/Z/Y to follow the physical virtual-key code, so handle that
+    # path too. This is why the earlier named bindings worked on English only.
+    by_name = {"select_all": select_all, "copy": copy, "paste": paste,
+               "cut": cut, "redo": redo, "undo": undo}
+
+    def physical_shortcut(event):
+        action = _EDIT_KEYCODE_ACTIONS.get(getattr(event, "keycode", -1))
+        callback = by_name.get(action)
+        return callback(event) if callback else None
+
+    text.bind("<Control-KeyPress>", physical_shortcut, add="+")
+
+    # Keep editable Unicode in logical order, while aligning each paragraph to
+    # its actual language. Extra line spacing avoids clipped Arabic marks.
+    text.tag_configure("composer_rtl", justify="right", rmargin=8,
+                       spacing1=3, spacing2=2, spacing3=3)
+    text.tag_configure("composer_ltr", justify="left", lmargin1=2, lmargin2=2,
+                       spacing1=3, spacing2=2, spacing3=3)
+
+    def sync_direction(_event=None):
+        try:
+            content = text.get("1.0", "end-1c")
+            lines = content.split("\n") or [""]
+            text.tag_remove("composer_rtl", "1.0", "end")
+            text.tag_remove("composer_ltr", "1.0", "end")
+            for number, line in enumerate(lines, 1):
+                tag = "composer_rtl" if _has_arabic(line) else "composer_ltr"
+                text.tag_add(tag, f"{number}.0", f"{number}.end")
+            text.edit_modified(False)
+        except tk.TclError:
+            pass
+
+    text.bind("<<Modified>>", sync_direction, add="+")
+    sync_direction()
 
     labels = ("قص", "نسخ", "لصق", "تراجع", "إعادة", "تحديد الكل") if rtl else \
              ("Cut", "Copy", "Paste", "Undo", "Redo", "Select all")
@@ -682,7 +756,7 @@ class AssistantApp(ctk.CTk):
 
     def _show_about(self):
         messagebox.showinfo(
-            "Nezuko", "Nezuko 0.3.4\nBilingual AI workspace with voice and media tools.", parent=self
+            "Nezuko", f"Nezuko {__version__}\nBilingual AI workspace with voice and media tools.", parent=self
         )
 
     def _save_chat(self):
@@ -777,7 +851,8 @@ class AssistantApp(ctk.CTk):
             self._tag_cache.add(name)
 
         body = text if len(text) <= MAX_CHARS else text[:MAX_CHARS] + "\n…"
-        rendered = f"{glyph}  {body}" if glyph else body
+        body_for_display = _tk_visual_text(body)
+        rendered = f"{glyph}  {body_for_display}" if glyph else body_for_display
 
         self.stream.configure(state="normal")
         start = self.stream.index("end-1c")

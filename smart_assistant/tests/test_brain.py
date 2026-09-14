@@ -461,6 +461,26 @@ def test_deep_chat_survives_one_proposer_failing(monkeypatch):
     assert reply.text == "مدموج"
 
 
+def test_deep_chat_uses_local_first_normal_fallback_when_all_drafts_fail(monkeypatch):
+    _key("gemini")
+    _key("groq")
+    monkeypatch.setattr(brain, "_call_provider", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")))
+    local = brain.BrainReply(text="local answer", provider="ollama", label="Ollama", is_local=True)
+    seen = {}
+
+    def fallback(_messages, **kwargs):
+        seen.update(kwargs)
+        return local
+
+    instance = brain.get_brain()
+    monkeypatch.setattr(instance, "chat", fallback)
+    reply = instance.deep_chat([{"role": "user", "content": "hi"}])
+    assert reply.text == "local answer"
+    assert reply.provider == "ollama"
+    assert reply.is_local is True
+    assert seen["prefer_local"] is True
+
+
 # ── المحوّلات ────────────────────────────────────────────────────────
 
 def test_openai_adapter_builds_expected_payload(monkeypatch):

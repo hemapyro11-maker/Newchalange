@@ -40,6 +40,7 @@ plugin_forge_plugin.py) — أي تغيير في المخ كان بيتطلب ت
 from __future__ import annotations
 
 import json
+import concurrent.futures
 import os
 import pathlib
 import random
@@ -528,12 +529,11 @@ class Brain:
         if len(candidates) < 2:
             return self.chat(messages)
 
-        drafts: list[tuple[str, str]] = []
-        for prov in candidates[:proposers]:
+        def ask_proposer(prov: Provider) -> tuple[str, str] | None:
             now = time.time()
             with _lock:
                 if not self._available(prov, cfg, now):
-                    continue
+                    return None
                 self._inflight[prov.name] = self._inflight.get(prov.name, 0) + 1
             model = cfg.get("models", {}).get(prov.name, prov.model)
             try:
@@ -543,17 +543,36 @@ class Brain:
             except Exception:  # noqa: BLE001
                 with _lock:
                     self._note_failure(prov.name, time.time(), rate_limited=False)
-                continue
+                return None
             if text.strip():
                 with _lock:
                     self._note_success(prov.name, now)
-                drafts.append((prov.label, text.strip()))
+                return prov.label, text.strip()
             else:
                 with _lock:
                     self._note_failure(prov.name, now, rate_limited=False)
+            return None
+
+        # Independent drafts must run together. Sequential cloud timeouts made a
+        # single user message wait for the sum of every provider's timeout.
+        chosen = candidates[:proposers]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(chosen)) as pool:
+            draft_results = list(pool.map(ask_proposer, chosen))
+        drafts = [draft for draft in draft_results if draft is not None]
 
         if not drafts:
-            return BrainReply(text="", error="كل المزوّدين فشلوا في الوضع العميق")
+            # Deep mode is an optional quality layer. It must never make a
+            # request less available than ordinary chat. A provider can fail a
+            # parallel/long draft transiently and still answer a short normal
+            # request (especially a local model recovering after startup).
+            fallback = self.chat(messages, prefer_local=True)
+            if fallback:
+                return BrainReply(
+                    text=fallback.text, provider=fallback.provider,
+                    label=f"{fallback.label} (fast fallback)",
+                    is_local=fallback.is_local,
+                )
+            return fallback
         if len(drafts) == 1:
             label, text = drafts[0]
             return BrainReply(text=text, provider="deep", label=f"{label} (منفرد)")
