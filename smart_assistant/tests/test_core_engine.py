@@ -501,6 +501,36 @@ def test_free_text_goes_to_brain_and_replies_conversationally(bare_engine, monke
     assert any("أهلاً" in msg for _, msg in logs)
 
 
+@pytest.mark.parametrize("text", ["عامله اي", "عاملة إيه؟", "إزيك يا نيزكو"])
+def test_short_arabic_greeting_is_instant_and_does_not_call_brain(
+        bare_engine, monkeypatch, text):
+    monkeypatch.setattr(
+        brain.Brain, "chat",
+        lambda *args, **kwargs: pytest.fail("a greeting must not call the model"),
+    )
+    logs = []
+    bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
+
+    bare_engine._converse(text)
+
+    assert any("أنا كويسة الحمد لله" in msg for _, msg in logs)
+    assert bare_engine.chat_history[-2]["content"] == text
+    assert bare_engine.chat_history[-1]["content"].startswith("أنا كويسة")
+
+
+def test_short_english_greeting_is_instant_and_clean(bare_engine, monkeypatch):
+    monkeypatch.setattr(
+        brain.Brain, "chat",
+        lambda *args, **kwargs: pytest.fail("a greeting must not call the model"),
+    )
+    logs = []
+    bare_engine.on_log = lambda msg, level="info": logs.append((level, msg))
+
+    bare_engine._converse("How are you?")
+
+    assert any("I'm doing great" in msg for _, msg in logs)
+
+
 def test_brain_reply_carries_provider_badge(bare_engine, monkeypatch):
     _fake_brain(monkeypatch, "رد", label="Groq")
     logs = []
@@ -714,7 +744,7 @@ def test_think_step_by_step_is_injected_only_when_hard(bare_engine, monkeypatch)
             brain.BrainReply(text="رد", provider="f", label="F"),
         ][1],
     )
-    bare_engine._converse("إزيك")
+    bare_engine._converse("قول لي نكتة")
     assert "step by step" not in seen["system"]
 
     bare_engine._converse("ليه ده بيحصل؟")
@@ -764,7 +794,7 @@ def test_auto_deep_escalates_hard_questions_when_enabled(bare_engine, monkeypatc
     cfg["auto_deep"] = True
     brain.save_config(cfg)
 
-    bare_engine._converse("إزيك")       # عادي → مايتصعّدش
+    bare_engine._converse("قول لي نكتة")  # عادي → مايتصعّدش
     assert used == {"normal": True}
     bare_engine._converse("ليه ده بيحصل؟")  # صعب → يتصعّد
     assert used.get("deep") is True

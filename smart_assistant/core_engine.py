@@ -997,6 +997,41 @@ class AssistantEngine:
         """الرسايل الحقيقية من غير رسالة الملخص."""
         return self.chat_history[1:] if self._summary_text() else self.chat_history
 
+    @staticmethod
+    def _quick_social_reply(text: str) -> str | None:
+        """Answer tiny social turns locally, instantly, and in clean language.
+
+        One-billion-parameter fallback models are useful for keeping tools
+        reachable offline, but they can turn a two-word Arabic greeting into a
+        long, mixed-language answer.  Greetings do not need a model or any
+        conversation context, so handling them here is both faster and more
+        reliable, especially for microphone turns.
+        """
+        normalized = intents.normalize(text).strip(" .,!؟?؛:ـ")
+        arabic = {
+            "عامله اي", "عامله ايه", "اخبارك اي", "اخبارك ايه",
+            "ازيك", "ازيك يا نيزكو", "انتي عامله اي", "انتي عامله ايه",
+            "صباح الخير", "مساء الخير",
+        }
+        english = {
+            "hi", "hello", "hey", "hi nezuko", "hello nezuko",
+            "how are you", "how are you doing", "what's up", "whats up",
+            "good morning", "good evening",
+        }
+        if normalized in arabic:
+            if normalized == "صباح الخير":
+                return "صباح النور! أنا كويسة وجاهزة أساعدك. عامل إيه؟"
+            if normalized == "مساء الخير":
+                return "مساء النور! أنا كويسة وجاهزة أساعدك. عامل إيه؟"
+            return "أنا كويسة الحمد لله، وإنت عامل إيه؟"
+        if normalized in english:
+            if normalized == "good morning":
+                return "Good morning! I'm doing well and ready to help. How are you?"
+            if normalized == "good evening":
+                return "Good evening! I'm doing well and ready to help. How are you?"
+            return "I'm doing great, thanks! How are you?"
+        return None
+
     def _compact_history(self, b) -> None:
         """بيلخّص أقدم جزء من المحادثة بدل ما يرميه.
 
@@ -1061,6 +1096,16 @@ class AssistantEngine:
         voice_turn = self._voice_turn_text == text
         if voice_turn:
             self._voice_turn_text = None
+        quick_reply = self._quick_social_reply(text)
+        if quick_reply is not None:
+            with self._state_lock:
+                if generation != self._generation:
+                    return
+                self.chat_history.append({"role": "user", "content": text})
+                self.chat_history.append({"role": "assistant", "content": quick_reply})
+                sessions.save(self.session_id, self.chat_history, project=str(self.project_dir))
+            self._log(f"{quick_reply}\n\n— ⚡ Nezuko", "info")
+            return
         if not b.ready():
             self._log(
                 f"❓ مش فاهمة: {text}\n"

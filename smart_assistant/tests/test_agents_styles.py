@@ -238,7 +238,7 @@ def test_style_is_injected_into_the_engine_prompt(bare_engine, monkeypatch):
         lambda self, messages, **kw: captured.setdefault("m", messages)
         and None or brain.BrainReply(text="ok", label="X"),
     )
-    bare_engine._converse("hello")
+    bare_engine._converse("tell me about planets")
     assert "Teach as you answer" in captured["m"][0]["content"]
 
 

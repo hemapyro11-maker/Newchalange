@@ -1438,7 +1438,9 @@ def _cmd_listen(ctx) -> str:
     text, err = _listen_smart(ctx)
     if err:
         return err
-    return f"🎤 heard: {text}"
+    if _detect_lang(text or "") == "ar":
+        return f"🎤 سمعتك: {text}"
+    return f"🎤 I heard: {text}"
 
 
 def _cmd_listen_run(ctx) -> str:
@@ -1449,7 +1451,9 @@ def _cmd_listen_run(ctx) -> str:
     # low-latency model first and the GUI speaks the final reply automatically.
     ctx.engine._voice_turn_text = text
     ctx.engine.submit(text)
-    return f"🎤 heard: {text}\n▶️ sent it off to run"
+    if _detect_lang(text or "") == "ar":
+        return f"🎤 سمعتك: {text}\n⏳ بفكر في الرد…"
+    return f"🎤 I heard: {text}\n⏳ Thinking about my reply…"
 
 
 def _cmd_stt_status(ctx) -> str:

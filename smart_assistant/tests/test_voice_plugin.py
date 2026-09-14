@@ -909,10 +909,24 @@ def test_listen_run_submits_transcribed_text(monkeypatch, make_ctx, bare_engine)
     _fixed_recording(monkeypatch, {})
     monkeypatch.setattr(vp, "_transcribe", lambda wav: ("echo hi", None))
     result = vp._cmd_listen_run(make_ctx("listen_run", [], engine=bare_engine))
-    assert "▶️" in result
+    assert "⏳" in result
+    assert "سمعتك" not in result
+    assert "I heard" in result
     text, _fn = bare_engine._queue.get_nowait()
     assert text == "echo hi"
     assert bare_engine._voice_turn_text == "echo hi"
+
+
+def test_listen_run_uses_natural_arabic_status(monkeypatch, make_ctx, bare_engine):
+    _fixed_recording(monkeypatch, {})
+    monkeypatch.setattr(vp, "_transcribe", lambda wav: ("عامله ايه", None))
+
+    result = vp._cmd_listen_run(make_ctx("listen_run", [], engine=bare_engine))
+
+    assert "سمعتك: عامله ايه" in result
+    assert "بفكر في الرد" in result
+    assert "heard:" not in result
+    assert "sent it off" not in result
 
 
 def test_listen_run_does_not_submit_on_error(monkeypatch, make_ctx, bare_engine):
