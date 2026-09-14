@@ -272,6 +272,43 @@ def test_plain_text_is_sent_to_the_engine(app, monkeypatch):
     assert sent == ["إزيك"]
 
 
+def test_multiline_composer_keeps_entry_compatible_api(app):
+    app.entry.delete(0, "end")
+    app.entry.insert(0, "first\nsecond")
+    assert app.entry.get() == "first\nsecond"
+
+
+def test_control_enter_handler_sends_and_stops_newline(app, monkeypatch):
+    sent = []
+    monkeypatch.setattr(app.engine, "submit", sent.append)
+    app.entry.insert(0, "send this")
+    assert app._send_key() == "break"
+    assert sent == ["send this"]
+
+
+def test_export_chat_writes_utf8_markdown(app, tmp_path):
+    app.engine.chat_history = [
+        {"role": "user", "content": "أهلاً"},
+        {"role": "assistant", "content": "أهلاً بيك"},
+    ]
+    target = tmp_path / "chat.md"
+    app._export_chat(str(target))
+    exported = target.read_text(encoding="utf-8")
+    assert "أهلاً" in exported
+    assert "أهلاً بيك" in exported
+
+
+def test_sidebar_and_tools_panel_can_be_toggled(app):
+    app._toggle_sidebar()
+    assert not app.sidebar.winfo_manager()
+    app._toggle_sidebar()
+    assert app.sidebar.winfo_manager()
+    app._toggle_tools_panel()
+    assert not app.tools_panel.winfo_manager()
+    app._toggle_tools_panel()
+    assert app.tools_panel.winfo_manager()
+
+
 # ── الصوت ────────────────────────────────────────────────────────────
 
 def test_voice_starts_off(app):

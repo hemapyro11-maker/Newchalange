@@ -1,8 +1,10 @@
 """Nezuko's bilingual chat workspace: conversations, composer and tools."""
 import os
+import pathlib
 import shlex
 import sys
-from tkinter import filedialog
+import tkinter as tk
+from tkinter import filedialog, messagebox
 
 try:
     import customtkinter as ctk
@@ -143,6 +145,111 @@ def _attach_readonly_textbox_shortcuts(widget) -> None:
 
     text.bind("<Button-3>", show_menu)
 
+
+def _attach_editable_textbox_shortcuts(widget, *, rtl: bool = False) -> None:
+    """Windows editing behaviour for the multiline conversation composer."""
+    text = widget._textbox if hasattr(widget, "_textbox") else widget
+    text.configure(undo=True, autoseparators=True, maxundo=-1)
+
+    def select_all(_event=None):
+        text.tag_add("sel", "1.0", "end-1c")
+        text.mark_set("insert", "end-1c")
+        return "break"
+
+    def copy(_event=None):
+        try:
+            value = text.get("sel.first", "sel.last")
+        except tk.TclError:
+            return "break"
+        text.clipboard_clear()
+        text.clipboard_append(value)
+        return "break"
+
+    def cut(_event=None):
+        copy()
+        try:
+            text.delete("sel.first", "sel.last")
+        except tk.TclError:
+            pass
+        return "break"
+
+    def paste(_event=None):
+        try:
+            value = text.clipboard_get()
+        except tk.TclError:
+            return "break"
+        try:
+            text.delete("sel.first", "sel.last")
+        except tk.TclError:
+            pass
+        text.insert("insert", value)
+        return "break"
+
+    def undo(_event=None):
+        try:
+            text.edit_undo()
+        except tk.TclError:
+            pass
+        return "break"
+
+    def redo(_event=None):
+        try:
+            text.edit_redo()
+        except tk.TclError:
+            pass
+        return "break"
+
+    bindings = {
+        "<Control-a>": select_all, "<Control-A>": select_all,
+        "<Control-c>": copy, "<Control-C>": copy,
+        "<Control-x>": cut, "<Control-X>": cut,
+        "<Control-v>": paste, "<Control-V>": paste,
+        "<Control-z>": undo, "<Control-Z>": undo,
+        "<Control-y>": redo, "<Control-Y>": redo,
+    }
+    for sequence, callback in bindings.items():
+        text.bind(sequence, callback)
+
+    labels = ("قص", "نسخ", "لصق", "تراجع", "إعادة", "تحديد الكل") if rtl else \
+             ("Cut", "Copy", "Paste", "Undo", "Redo", "Select all")
+
+    def show_menu(event):
+        menu = tk.Menu(text, tearoff=0)
+        for label, callback in zip(labels[:3], (cut, copy, paste)):
+            menu.add_command(label=label, command=callback)
+        menu.add_separator()
+        menu.add_command(label=labels[3], command=undo)
+        menu.add_command(label=labels[4], command=redo)
+        menu.add_separator()
+        menu.add_command(label=labels[5], command=select_all)
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    text.bind("<Button-3>", show_menu)
+
+
+class ChatComposer(ctk.CTkTextbox):
+    """Multiline composer with the small Entry-compatible API used by Nezuko."""
+
+    @staticmethod
+    def _map_index(index):
+        return "1.0" if index in (0, "0") else index
+
+    def get(self, index1=None, index2=None):
+        if index1 is None:
+            return super().get("1.0", "end-1c")
+        return super().get(self._map_index(index1), index2)
+
+    def insert(self, index, text, *tags):
+        return super().insert(self._map_index(index), text, *tags)
+
+    def delete(self, index1, index2=None):
+        first = self._map_index(index1)
+        second = "end" if index2 == "end" else index2
+        return super().delete(first, second)
+
 GLYPH_USER = "›"
 GLYPH_REPLY = "⏺"
 GLYPH_RESULT = "⎿"
@@ -178,6 +285,14 @@ class AssistantApp(ctk.CTk):
         brain.prewarm_local_async()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.bind("<Escape>", lambda e: self._close_settings())
+        self.bind("<Control-n>", lambda e: self._new_chat())
+        self.bind("<Control-s>", lambda e: self._save_chat())
+        self.bind("<Control-Shift-S>", lambda e: self._export_chat())
+        self.bind("<Control-comma>", lambda e: self._open_settings())
+        self.bind("<Control-l>", lambda e: self.entry.focus_set())
+        self.bind("<Control-b>", lambda e: self._toggle_sidebar())
+        self.bind("<Control-Shift-O>", lambda e: self._toggle_tools_panel())
+        self.bind("<F1>", lambda e: self._seed_prompt("help"))
         self.after(350, self._banner)
 
     # ── مساعدات ────────────────────────────────────────────────────────
@@ -201,24 +316,74 @@ class AssistantApp(ctk.CTk):
         return ctk.CTkFont(family=self.ui_font, size=size,
                            weight="bold" if bold else "normal")
 
+    def _build_native_menu(self):
+        """Real application menus with conventional Windows shortcuts."""
+        ar = self._rtl
+        labels = {
+            "file": "ملف" if ar else "File", "edit": "تحرير" if ar else "Edit",
+            "view": "عرض" if ar else "View", "help": "مساعدة" if ar else "Help",
+            "new": "محادثة جديدة" if ar else "New chat",
+            "save": "حفظ المحادثة" if ar else "Save conversation",
+            "export": "تصدير المحادثة…" if ar else "Export conversation…",
+            "project": "فتح مشروع…" if ar else "Open project…",
+            "exit": "خروج" if ar else "Exit", "undo": "تراجع" if ar else "Undo",
+            "redo": "إعادة" if ar else "Redo", "cut": "قص" if ar else "Cut",
+            "copy": "نسخ" if ar else "Copy", "paste": "لصق" if ar else "Paste",
+            "select": "تحديد الكل" if ar else "Select all",
+            "copy_chat": "نسخ المحادثة" if ar else "Copy conversation",
+            "theme": "تبديل المظهر" if ar else "Toggle theme",
+            "sidebar": "إظهار/إخفاء الشريط الجانبي" if ar else "Toggle sidebar",
+            "outputs": "إظهار/إخفاء الأدوات" if ar else "Toggle tools panel",
+            "settings": "الإعدادات" if ar else "Settings",
+            "shortcuts": "اختصارات لوحة المفاتيح" if ar else "Keyboard shortcuts",
+            "about": "عن نيزوكو" if ar else "About Nezuko",
+        }
+        bar = tk.Menu(self)
+        file_menu = tk.Menu(bar, tearoff=0)
+        file_menu.add_command(label=labels["new"], accelerator="Ctrl+N", command=self._new_chat)
+        file_menu.add_command(label=labels["save"], accelerator="Ctrl+S", command=self._save_chat)
+        file_menu.add_command(label=labels["export"], accelerator="Ctrl+Shift+S", command=self._export_chat)
+        file_menu.add_separator()
+        file_menu.add_command(label=labels["project"], command=self._choose_project)
+        file_menu.add_separator()
+        file_menu.add_command(label=labels["exit"], accelerator="Alt+F4", command=self._on_close)
+        bar.add_cascade(label=labels["file"], menu=file_menu)
+
+        edit = tk.Menu(bar, tearoff=0)
+        for key, accelerator, sequence in (
+            ("undo", "Ctrl+Z", "<<Undo>>"), ("redo", "Ctrl+Y", "<<Redo>>"),
+            ("cut", "Ctrl+X", "<<Cut>>"), ("copy", "Ctrl+C", "<<Copy>>"),
+            ("paste", "Ctrl+V", "<<Paste>>"), ("select", "Ctrl+A", "<<SelectAll>>"),
+        ):
+            if key in ("cut",):
+                edit.add_separator()
+            edit.add_command(label=labels[key], accelerator=accelerator,
+                             command=lambda seq=sequence: self._focused_event(seq))
+        edit.add_separator()
+        edit.add_command(label=labels["copy_chat"], command=self._copy_chat)
+        bar.add_cascade(label=labels["edit"], menu=edit)
+
+        view = tk.Menu(bar, tearoff=0)
+        view.add_command(label=labels["theme"], command=self._toggle_theme)
+        view.add_command(label=labels["sidebar"], accelerator="Ctrl+B", command=self._toggle_sidebar)
+        view.add_command(label=labels["outputs"], accelerator="Ctrl+Shift+O", command=self._toggle_tools_panel)
+        view.add_separator()
+        view.add_command(label=labels["settings"], accelerator="Ctrl+,", command=self._open_settings)
+        bar.add_cascade(label=labels["view"], menu=view)
+
+        help_menu = tk.Menu(bar, tearoff=0)
+        help_menu.add_command(label=labels["shortcuts"], accelerator="F1", command=self._show_shortcuts)
+        help_menu.add_command(label=labels["about"], command=self._show_about)
+        bar.add_cascade(label=labels["help"], menu=help_menu)
+        self.configure(menu=bar)
+        self.native_menu = bar
+
     # ── البناء ─────────────────────────────────────────────────────────
     def _build(self):
         c = self.c
         self.configure(fg_color=c["bg"])
         self._rows = []  # lightweight rendering history; also useful to GUI diagnostics
-
-        self.app_menu = ctk.CTkFrame(self, height=32, fg_color=c["panel"], corner_radius=0)
-        self.app_menu.pack(fill="x")
-        self.app_menu.pack_propagate(False)
-        for label, callback in (
-            ("File", self._new_chat), ("Edit", self._copy_chat),
-            ("View", self._toggle_theme), ("Help", lambda: self._seed_prompt("help")),
-        ):
-            ctk.CTkButton(
-                self.app_menu, text=label, command=callback, width=48, height=28,
-                fg_color="transparent", hover_color=c["panel_hi"], corner_radius=4,
-                text_color=c["dim"], font=self._font(11),
-            ).pack(side="left", padx=(6, 0), pady=2)
+        self._build_native_menu()
 
         self.root = ctk.CTkFrame(self, fg_color=c["bg"], corner_radius=0)
         self.root.pack(fill="both", expand=True)
@@ -339,18 +504,27 @@ class AssistantApp(ctk.CTk):
         )
         self.talk_button.pack(side=send_side, padx=(0, 2), pady=7)
 
-        self.entry = ctk.CTkEntry(
-            box, fg_color="transparent", border_width=0, height=46,
-            font=self._font(14), text_color=c["text"], placeholder_text=self.t.t("input_placeholder"),
-            placeholder_text_color=c["faint"], justify=self._justify,
+        self.entry = ChatComposer(
+            box, fg_color="transparent", border_width=0, height=86,
+            corner_radius=0, wrap="word", activate_scrollbars=False,
+            font=self._font(15), text_color=c["text"],
         )
-        self.entry.pack(side=self._side, fill="x", expand=True, padx=(2, 10), pady=4)
-        self.entry.bind("<Return>", lambda e: self._send())
-        _attach_entry_shortcuts(self.entry)
+        self.entry.pack(side=self._side, fill="both", expand=True, padx=(6, 10), pady=8)
+        self.entry.bind("<Return>", self._send_key)
+        self.entry.bind("<Control-Return>", self._send_key)
+        self.entry.bind("<Shift-Return>", lambda _e: None)
+        _attach_editable_textbox_shortcuts(self.entry, rtl=self._rtl)
         self.entry.focus_set()
 
         tools = ctk.CTkFrame(bottom, fg_color="transparent")
         tools.pack(fill="x", pady=(6, 0))
+
+        ctk.CTkLabel(
+            tools,
+            text=("Enter إرسال  ·  Shift+Enter سطر جديد  ·  Ctrl+Enter إرسال" if self._rtl
+                  else "Enter send  ·  Shift+Enter new line  ·  Ctrl+Enter send"),
+            text_color=c["faint"], font=self._font(10), anchor=self._anchor,
+        ).pack(side=self._side, padx=(4, 12))
 
         self.status_label = ctk.CTkLabel(
             tools, text="", text_color=c["faint"], font=self._font(11),
@@ -462,6 +636,94 @@ class AssistantApp(ctk.CTk):
             self._show_thinking()
             self.engine.submit(f"project {shlex.quote(path)}")
 
+    def _focused_event(self, sequence: str):
+        widget = self.focus_get()
+        if widget is None:
+            return
+        if sequence == "<<SelectAll>>":
+            try:
+                if isinstance(widget, tk.Text):
+                    widget.tag_add("sel", "1.0", "end-1c")
+                else:
+                    widget.selection_range(0, "end")
+            except (tk.TclError, AttributeError):
+                pass
+            return
+        try:
+            widget.event_generate(sequence)
+        except tk.TclError:
+            pass
+
+    def _toggle_sidebar(self):
+        if self.sidebar.winfo_manager():
+            self.sidebar.grid_remove()
+        else:
+            self.sidebar.grid()
+
+    def _toggle_tools_panel(self):
+        if self.tools_panel.winfo_manager():
+            self.tools_panel.grid_remove()
+        else:
+            self.tools_panel.grid()
+
+    def _show_shortcuts(self):
+        text = (
+            "Ctrl+Enter / Enter — إرسال\nShift+Enter — سطر جديد\nCtrl+A — تحديد الكل\n"
+            "Ctrl+C / X / V — نسخ / قص / لصق\nCtrl+Z / Y — تراجع / إعادة\n"
+            "Ctrl+S — حفظ\nCtrl+Shift+S — تصدير\nCtrl+N — محادثة جديدة\n"
+            "Ctrl+B — الشريط الجانبي\nCtrl+Shift+O — لوحة الأدوات\nCtrl+, — الإعدادات"
+            if self._rtl else
+            "Ctrl+Enter / Enter — Send\nShift+Enter — New line\nCtrl+A — Select all\n"
+            "Ctrl+C / X / V — Copy / cut / paste\nCtrl+Z / Y — Undo / redo\n"
+            "Ctrl+S — Save\nCtrl+Shift+S — Export\nCtrl+N — New chat\n"
+            "Ctrl+B — Sidebar\nCtrl+Shift+O — Tools panel\nCtrl+, — Settings"
+        )
+        messagebox.showinfo("اختصارات نيزوكو" if self._rtl else "Nezuko shortcuts", text, parent=self)
+
+    def _show_about(self):
+        messagebox.showinfo(
+            "Nezuko", "Nezuko 0.3.4\nBilingual AI workspace with voice and media tools.", parent=self
+        )
+
+    def _save_chat(self):
+        messages = list(self.engine.chat_history)
+        if not messages:
+            self._add_assistant("مفيش محادثة تتحفظ لسه." if self._rtl else "There is no conversation to save yet.", "warn")
+            return
+        sessions.save(self.engine.session_id, messages, project=str(self.engine.project_dir))
+        self._refresh_session_list()
+        self._add_assistant("✓ اتحفظت المحادثة" if self._rtl else "✓ Conversation saved", "ok")
+
+    def _conversation_markdown(self) -> str:
+        lines = ["# Nezuko conversation", ""]
+        role_names = {
+            "user": "أنت" if self._rtl else "You",
+            "assistant": "نيزوكو" if self._rtl else "Nezuko",
+            "system": "System",
+        }
+        for message in self.engine.chat_history:
+            role = role_names.get(message.get("role"), str(message.get("role", "Message")))
+            lines.extend((f"## {role}", "", str(message.get("content", "")).strip(), ""))
+        if len(lines) == 2:
+            content = self.stream.get("1.0", "end-1c").strip()
+            if content:
+                lines.extend((content, ""))
+        return "\n".join(lines).rstrip() + "\n"
+
+    def _export_chat(self, path: str | None = None):
+        if path is None:
+            path = filedialog.asksaveasfilename(
+                title="تصدير المحادثة" if self._rtl else "Export conversation",
+                defaultextension=".md",
+                filetypes=(("Markdown", "*.md"), ("Text", "*.txt"), ("All files", "*.*")),
+            )
+        if not path:
+            return
+        pathlib.Path(path).write_text(self._conversation_markdown(), encoding="utf-8")
+        self._add_assistant(
+            f"✓ اتصدرت المحادثة: {path}" if self._rtl else f"✓ Conversation exported: {path}", "ok"
+        )
+
     def _copy_chat(self):
         try:
             content = self.stream.get("1.0", "end-1c").strip()
@@ -493,16 +755,24 @@ class AssistantApp(ctk.CTk):
         return name
 
     def _line(self, glyph: str, text: str, color: str, *,
-              indent: int = 0, size: int = 13, bold: bool = False):
+              indent: int = 0, size: int = 13, bold: bool = False,
+              background: str | None = None, roomy: bool = False):
         """سطر واحد في شريط المحادثة: علامة + نص، متحدد وقابل للنسخ."""
         pad = 4 + indent * 16
-        name = f"c_{color.lstrip('#')}_{size}_{int(bold)}_i{indent}"
+        bg_key = (background or "none").lstrip("#")
+        name = f"c_{color.lstrip('#')}_{size}_{int(bold)}_i{indent}_{bg_key}_{int(roomy)}"
         if name not in self._tag_cache:
             text_widget = self.stream._textbox
             text_widget.tag_configure(
                 name, foreground=color, font=self._font(size, bold),
                 justify="right" if self._rtl else "left",
-                lmargin1=pad, lmargin2=pad, spacing1=2, spacing3=2,
+                background=background or self.c["bg"],
+                lmargin1=pad + (16 if roomy else 0),
+                lmargin2=pad + (16 if roomy else 0),
+                rmargin=20 if roomy else 4,
+                spacing1=9 if roomy else 2,
+                spacing2=4 if roomy else 1,
+                spacing3=9 if roomy else 2,
             )
             self._tag_cache.add(name)
 
@@ -542,8 +812,10 @@ class AssistantApp(ctk.CTk):
         self._rows.clear()
 
     def _add_user(self, text: str):
-        self._blank()
-        self._line(GLYPH_USER, text, self.c["accent"])
+        self._blank(10)
+        self._line("", text, "#ffffff", size=14, bold=True,
+                   background="#245ea9" if self.mode == "dark" else "#2f6fbd",
+                   roomy=True)
 
     def _add_assistant(self, text: str, level: str = "info", badge: str = ""):
         c = self.c
@@ -551,8 +823,9 @@ class AssistantApp(ctk.CTk):
             "info": c["text"], "ok": c["green"],
             "warn": c["yellow"], "error": c["red"],
         }.get(level, c["text"])
-        self._blank()
-        self._line(GLYPH_REPLY, text, color)
+        self._blank(12)
+        self._line("✦", "نيزوكو" if self._rtl else "Nezuko", c["accent"], size=11, bold=True)
+        self._line("", text, color, size=15, roomy=True)
         if badge:
             self._line("", badge, c["faint"], indent=1, size=10)
 
@@ -650,6 +923,10 @@ class AssistantApp(ctk.CTk):
             )
 
     # ── الأفعال ────────────────────────────────────────────────────────
+    def _send_key(self, _event=None):
+        self._send()
+        return "break"
+
     def _send(self):
         text = self.entry.get().strip()
         if not text:
