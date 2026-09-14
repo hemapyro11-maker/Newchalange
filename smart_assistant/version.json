@@ -1,5 +1,5 @@
 {
-  "version": "0.3.5",
-  "notes": "YouTube channel and video research now works without an API key, raw page scripts are filtered, and channel-to-video workflows continue with structured research.",
+  "version": "0.3.6",
+  "notes": "Video Intelligence Lab watches available YouTube or local videos, measures speech, scenes, pacing, visuals and audio, ranks channel view outliers, and learns evidence-based production briefs.",
   "url": "https://github.com/hemapyro11-maker/Newchalange/tree/claude/project-guidelines-architecture-dcn5vq/smart_assistant"
 }

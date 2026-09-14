@@ -61,3 +61,30 @@ def test_public_errors_are_concise(monkeypatch):
         assert "Traceback" not in str(exc)
     else:
         raise AssertionError("expected PublicYouTubeError")
+
+
+def test_inspect_url_includes_performance_and_discovery_fields(monkeypatch):
+    fake = FakeYDL({
+        "id": "v1", "title": "Story", "channel": "Tuty", "view_count": 20,
+        "like_count": 3, "comment_count": 2, "upload_date": "20260901",
+        "categories": ["Education"], "tags": ["kids", "story"],
+        "webpage_url": "https://youtu.be/v1",
+    })
+
+    class FakeYoutubeDL:
+        def __init__(self, options):
+            self.fake = fake
+
+        def __enter__(self):
+            return self.fake
+
+        def __exit__(self, *args):
+            return False
+
+    import yt_dlp
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYoutubeDL)
+    info = yp.inspect_url("https://youtu.be/v1")
+    assert info["likes"] == 3
+    assert info["comments"] == 2
+    assert info["upload_date"] == "20260901"
+    assert info["tags"] == ["kids", "story"]

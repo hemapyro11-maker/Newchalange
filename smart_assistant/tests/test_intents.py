@@ -134,6 +134,18 @@ def test_url_is_extracted_as_handle():
     assert any(a.startswith("http") for a in m.args)
 
 
+def test_youtube_video_url_routes_to_full_content_analysis():
+    m = intents.resolve("حلل الفيديو https://youtu.be/abc123 واتعلم منه", ALL)
+    assert m.command == "youtube_video_analyze"
+    assert m.args == ["https://youtu.be/abc123"]
+
+
+def test_channel_view_goal_routes_to_growth_lab():
+    m = intents.resolve("عايز أعلى المشاهدات في القناة https://youtube.com/@x", ALL)
+    assert m.command == "channel_view_growth_lab"
+    assert m.args == ["https://youtube.com/@x"]
+
+
 def test_rest_of_sentence_becomes_free_text_arg():
     m = intents.resolve("قولي صباح الخير يا نيزوكو", ALL)
     assert m.command == "speak"

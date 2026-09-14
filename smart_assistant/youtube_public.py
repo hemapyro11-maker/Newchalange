@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+import pathlib
 import re
 from typing import Any
 
@@ -130,5 +131,62 @@ def inspect_url(url: str) -> dict:
         "channel_url": clean(info.get("channel_url"), 500),
         "description": clean(info.get("description"), 1200),
         "views": info.get("view_count"), "duration": info.get("duration"),
+        "likes": info.get("like_count"), "comments": info.get("comment_count"),
+        "upload_date": clean(info.get("upload_date"), 16),
+        "categories": [clean(x, 80) for x in (info.get("categories") or [])[:8]],
+        "tags": [clean(x, 80) for x in (info.get("tags") or [])[:20]],
         "url": clean(info.get("webpage_url") or url, 500),
     }
+
+
+def download_video(url: str, output_dir: str | pathlib.Path, *, height: int = 480) -> tuple[pathlib.Path, dict]:
+    """Download one public video at analysis quality into a caller-owned temp folder."""
+    folder = pathlib.Path(output_dir)
+    folder.mkdir(parents=True, exist_ok=True)
+    try:
+        from yt_dlp import YoutubeDL
+    except ImportError as exc:
+        raise PublicYouTubeError("YouTube reader is not installed in this build") from exc
+    options = {
+        "quiet": True, "no_warnings": True, "noprogress": True, "noplaylist": True,
+        "socket_timeout": 25, "retries": 2,
+        "format": (
+            f"bestvideo[height<={height}]+bestaudio/"
+            f"bestvideo[height<={height}]/bestvideo+bestaudio/best"
+        ),
+        "merge_output_format": "mp4",
+        "outtmpl": str(folder / "%(id)s.%(ext)s"),
+        "max_filesize": 500 * 1024 * 1024,
+    }
+    try:
+        import imageio_ffmpeg
+        options["ffmpeg_location"] = imageio_ffmpeg.get_ffmpeg_exe()
+    except (ImportError, OSError, RuntimeError):
+        pass
+    try:
+        with YoutubeDL(options) as ydl:
+            info = ydl.extract_info(url, download=True)
+    except Exception as exc:
+        raise PublicYouTubeError(clean(exc, 300)) from exc
+    video_id = clean((info or {}).get("id"), 80)
+    candidates = [
+        p for p in folder.glob(f"{video_id}.*")
+        if p.suffix.lower() not in {".vtt", ".srt", ".part", ".json"}
+    ]
+    if not candidates:
+        raise PublicYouTubeError("the video download completed but no media file was found")
+    # Captions are useful but optional. Fetch them separately so a caption
+    # rate limit never turns a successful media download into a failed watch.
+    subtitle_options = {
+        "quiet": True, "no_warnings": True, "noprogress": True,
+        "noplaylist": True, "skip_download": True, "ignoreerrors": True,
+        "outtmpl": str(folder / "%(id)s.%(ext)s"),
+        "writesubtitles": True, "writeautomaticsub": True,
+        "subtitleslangs": ["ar", "en"], "subtitlesformat": "vtt",
+    }
+    try:
+        with YoutubeDL(subtitle_options) as ydl:
+            ydl.extract_info(url, download=True)
+    except Exception:
+        pass
+    return max(candidates, key=lambda p: p.stat().st_size), (info or {})

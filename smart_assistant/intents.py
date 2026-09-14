@@ -301,6 +301,22 @@ RULES: tuple[IntentRule, ...] = (
 
     # ── يوتيوب ────────────────────────────────────────────────────
     IntentRule(
+        "youtube_video_analyze",
+        ("حلل .*https?://.*youtu", "شوف .*https?://.*youtu",
+         "اتفرج .*https?://.*youtu", "تعلم .*https?://.*youtu",
+         "analy[sz]e .*https?://.*youtu", "watch .*https?://.*youtu"),
+        (ArgSpec(HANDLE, "pick_video_id"),),
+        priority=12,
+    ),
+    IntentRule(
+        "channel_view_growth_lab",
+        ("اعلي المشاهدات .*قناه", "فيديوهات القناه .*مشاهدات",
+         "حلل فيديوهات .*قناه", "تعلم من .*قناه",
+         "highest views .*channel", "best videos .*channel", "learn from .*channel"),
+        (ArgSpec(HANDLE, "pick_channel"),),
+        priority=11,
+    ),
+    IntentRule(
         "channel_stats",
         ("احصائيات قناه", "بيانات قناه", "معلومات قناه",
          "channel stat", "channel info", "subscriber count"),
