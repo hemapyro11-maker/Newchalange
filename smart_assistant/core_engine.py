@@ -897,9 +897,40 @@ class AssistantEngine:
 
     # ── محادثة مع المخ (المرحلة الوحيدة اللي بتستهلك حصة) ─────────────
     def _tool_catalog(self) -> str:
-        return "\n".join(
-            f"{c.name} — {c.description}" for c in self.registry.list_commands()
-            if self._agent_scope is None or c.name in self._agent_scope
+        """Give every model one integrated, grouped view of all capabilities."""
+        owner = {}
+        for plugin, state in self.plugin_health.items():
+            for name in state.get("commands", []):
+                owner[name] = plugin
+
+        def category(name: str) -> str:
+            plugin = owner.get(name, "core")
+            if any(x in plugin for x in ("video", "media", "cinema", "voice", "screenplay", "thumbnail", "youtube", "design", "comfy")):
+                return "MEDIA, VOICE & GROWTH"
+            if any(x in plugin for x in ("github", "connector", "telegram", "discord", "external")):
+                return "CONNECTORS"
+            if any(x in plugin for x in ("security", "inspect", "re_plugin")):
+                return "SECURITY & INSPECTION"
+            if any(x in plugin for x in ("data", "database")):
+                return "DATA"
+            if any(x in plugin for x in ("android", "scaffold", "edit")) or name in {"read_file", "edit_file", "create_file", "search", "test", "git_diff", "git_status"}:
+                return "CODE & PROJECTS"
+            if any(x in plugin for x in ("schedule", "todo", "macro", "agent")):
+                return "AUTOMATION & AGENTS"
+            return "NEZUKO CORE & REPAIR"
+
+        groups: dict[str, list[str]] = {}
+        for command in self.registry.list_commands():
+            if self._agent_scope is not None and command.name not in self._agent_scope:
+                continue
+            groups.setdefault(category(command.name), []).append(
+                f"{command.name} — {command.description}"
+            )
+        order = ("MEDIA, VOICE & GROWTH", "CODE & PROJECTS", "CONNECTORS",
+                 "DATA", "SECURITY & INSPECTION", "AUTOMATION & AGENTS",
+                 "NEZUKO CORE & REPAIR")
+        return "\n\n".join(
+            f"[{label}]\n" + "\n".join(groups[label]) for label in order if groups.get(label)
         )
 
     def _converse_async(self, text: str, step: int = 0):

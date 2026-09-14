@@ -1,5 +1,5 @@
 {
-  "version": "0.3.6",
-  "notes": "Video Intelligence Lab watches available YouTube or local videos, measures speech, scenes, pacing, visuals and audio, ranks channel view outliers, and learns evidence-based production briefs.",
+  "version": "0.3.7",
+  "notes": "All Nezuko tools are presented through one grouped capability system with audited cross-plugin workflows and validated self-evolution, alongside the Video Intelligence Lab.",
   "url": "https://github.com/hemapyro11-maker/Newchalange/tree/claude/project-guidelines-architecture-dcn5vq/smart_assistant"
 }
