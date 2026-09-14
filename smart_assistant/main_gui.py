@@ -175,6 +175,7 @@ class AssistantApp(ctk.CTk):
 
         self._build()
         self.engine.start()
+        brain.prewarm_local_async()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.bind("<Escape>", lambda e: self._close_settings())
         self.after(350, self._banner)
@@ -832,6 +833,17 @@ class AssistantApp(ctk.CTk):
         if level == "info" and self.voice_enabled and is_final_model_reply and \
                 self._last_command_name not in ("speak", "voice_status"):
             self._safe_after(self._speak, msg)
+        elif level == "error" and self.voice_enabled and \
+                self._last_command_name not in ("speak", "voice_status") and \
+                ("محركات الذكاء مش متاحة" in msg or "AI engines are unavailable" in msg):
+            # A microphone turn must always end with audible feedback. Speak a
+            # concise status rather than reading provider JSON and stack traces.
+            audible = (
+                "محركات الذكاء مش متاحة دلوقتي. حاول تاني بعد لحظة."
+                if self.t.lang == "ar" else
+                "The AI engines are unavailable right now. Please try again in a moment."
+            )
+            self._safe_after(self._speak, audible)
 
     def _render_log(self, msg: str, level: str):
         # تحميل الإضافات بيطبع عشرات الأسطر عند كل تشغيل — بيتعدّوا في

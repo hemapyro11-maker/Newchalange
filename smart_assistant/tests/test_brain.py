@@ -478,6 +478,42 @@ def test_openrouter_adapter_adds_required_identity_headers(monkeypatch):
     assert captured["headers"]["X-Title"] == "Nezuko"
 
 
+def test_ollama_retries_cuda_allocation_failure_on_cpu(monkeypatch):
+    payloads = []
+
+    def fake_post(url, payload, headers, timeout):
+        payloads.append(payload)
+        if len(payloads) == 1:
+            raise RuntimeError("HTTP 500: cudaMalloc failed to allocate buffer")
+        return {"message": {"content": "CPU reply"}}
+
+    monkeypatch.setattr(brain, "_post_json", fake_post)
+    out = brain._call_ollama(
+        brain.PROVIDERS["ollama"], "llama3.1",
+        [{"role": "user", "content": "hello"}], 0.4, 100,
+    )
+    assert out == "CPU reply"
+    assert "num_gpu" not in payloads[0]["options"]
+    assert payloads[1]["options"]["num_gpu"] == 0
+    assert payloads[1]["options"]["num_ctx"] == 2048
+
+
+def test_ollama_does_not_retry_unrelated_failure(monkeypatch):
+    calls = []
+
+    def fake_post(*args):
+        calls.append(args)
+        raise RuntimeError("HTTP 404: model not found")
+
+    monkeypatch.setattr(brain, "_post_json", fake_post)
+    with pytest.raises(RuntimeError, match="404"):
+        brain._call_ollama(
+            brain.PROVIDERS["ollama"], "missing",
+            [{"role": "user", "content": "hello"}], 0.4, 100,
+        )
+    assert len(calls) == 1
+
+
 def test_gemini_adapter_maps_roles_and_system_instruction(monkeypatch):
     captured = {}
 

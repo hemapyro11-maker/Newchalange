@@ -912,6 +912,7 @@ def test_listen_run_submits_transcribed_text(monkeypatch, make_ctx, bare_engine)
     assert "▶️" in result
     text, _fn = bare_engine._queue.get_nowait()
     assert text == "echo hi"
+    assert bare_engine._voice_turn_text == "echo hi"
 
 
 def test_listen_run_does_not_submit_on_error(monkeypatch, make_ctx, bare_engine):

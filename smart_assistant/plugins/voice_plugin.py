@@ -1445,6 +1445,9 @@ def _cmd_listen_run(ctx) -> str:
     text, err = _listen_smart(ctx)
     if err:
         return err
+    # The queued conversation is a two-way voice turn. The core selects its
+    # low-latency model first and the GUI speaks the final reply automatically.
+    ctx.engine._voice_turn_text = text
     ctx.engine.submit(text)
     return f"🎤 heard: {text}\n▶️ sent it off to run"
 

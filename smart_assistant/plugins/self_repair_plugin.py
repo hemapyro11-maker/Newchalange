@@ -54,24 +54,7 @@ def _choose_model(provider, models: list[str]) -> str | None:
 
 
 def _start_ollama() -> bool:
-    exe = shutil.which("ollama")
-    if not exe:
-        return False
-    try:
-        subprocess.Popen([exe, "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    except OSError:
-        return False
-    root = brain.PROVIDERS["ollama"].base_url.rsplit("/v1", 1)[0]
-    for _ in range(8):
-        time.sleep(0.35)
-        try:
-            _json_get(f"{root}/api/tags", timeout=0.5)
-            brain._probe_cache.clear()
-            return True
-        except Exception:
-            pass
-    return False
+    return brain.start_ollama_server()
 
 
 def _repair_external_providers() -> tuple[list[str], list[str]]:

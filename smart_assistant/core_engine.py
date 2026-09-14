@@ -283,6 +283,9 @@ class AssistantEngine:
         self._stop_flag = threading.Event()
         self._worker: threading.Thread | None = None
         self._pending_intent: tuple[str, list[str], str] | None = None
+        # Set by listen_run for exactly one queued conversation. Voice turns
+        # prefer the small local model instead of waiting on exhausted quotas.
+        self._voice_turn_text: str | None = None
         # وسائط ناقصة لأمر اتعرف محليًا (زي مسار ملف) — بتتملي من رسالة
         # المستخدم الجاية، وكل ده **بصفر حصة** (مفيش نموذج بيتنادى)
         self._pending_args: tuple[str, list[str], list, str] | None = None
@@ -391,6 +394,7 @@ class AssistantEngine:
             self._pending_tool_raw = None
             self._chain_step = None
             self._awaiting_answer = False
+            self._voice_turn_text = None
             self._agent_scope = None
             self._agent_instructions = ""
 
@@ -1020,6 +1024,9 @@ class AssistantEngine:
         self._request_local.generation = generation
         self._set_status("thinking")
         b = brain.get_brain()
+        voice_turn = self._voice_turn_text == text
+        if voice_turn:
+            self._voice_turn_text = None
         if not b.ready():
             self._log(
                 f"❓ مش فاهمة: {text}\n"
@@ -1067,7 +1074,9 @@ class AssistantEngine:
             bool(cfg.get("auto_deep")) and hard
         )
         verify = (not go_deep) and bool(cfg.get("verify_mode")) and hard
-        if go_deep:
+        if voice_turn:
+            reply = b.chat(messages, max_tokens=250, prefer_local=True)
+        elif go_deep:
             reply = b.deep_chat(messages)
         elif verify:
             reply = b.verified_chat(messages)
@@ -1077,7 +1086,17 @@ class AssistantEngine:
         if generation != self._generation:
             return
         if not reply:
-            self._log(f"❌ المخ مردش: {reply.error}", "error")
+            # Keep the provider dump for self-repair/diagnostics, but do not
+            # flood the conversation with API JSON from six failed services.
+            self.log_history.append(("diagnostic", f"brain providers: {reply.error}"))
+            if reply_language == "ar":
+                public = "محركات الذكاء مش متاحة دلوقتي. حاولت المزودين السحابيين والمحرك المحلي تلقائيًا؛ جرّب تاني بعد لحظة."
+            else:
+                public = "The AI engines are unavailable right now. I tried the cloud providers and the local engine automatically; please try again in a moment."
+            # Short errors remain useful in tests and for simple local faults.
+            if reply.error and "\n" not in reply.error and len(reply.error) <= 80:
+                public += f" ({reply.error})"
+            self._log(f"❌ {public}", "error")
             return
 
         body, tool, question = self._split_directives(reply.text)

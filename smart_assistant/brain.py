@@ -43,6 +43,8 @@ import json
 import os
 import pathlib
 import random
+import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -392,7 +394,7 @@ class Brain:
             st.cold_until = now + min(600, 30 * (2 ** (st.fails - 2)))
 
     # ── سلسلة البدائل ────────────────────────────────────────────
-    def chain(self, cfg: dict | None = None) -> list[Provider]:
+    def chain(self, cfg: dict | None = None, *, prefer_local: bool = False) -> list[Provider]:
         """المزوّدين المتاحين مرتبين حسب الجودة."""
         cfg = cfg if cfg is not None else load_config()
         enabled = set(cfg.get("enabled", list(PROVIDERS)))
@@ -406,7 +408,8 @@ class Brain:
             if prov.needs_key and not get_key(prov.name):
                 continue
             out.append(prov)
-        out.sort(key=lambda p: -p.quality)
+        out.sort(key=lambda p: (p.name not in LOCAL_PROVIDERS, -p.quality)
+                 if prefer_local else (False, -p.quality))
         return out
 
     def ready(self) -> bool:
@@ -414,14 +417,15 @@ class Brain:
 
     # ── النداء الأساسي ───────────────────────────────────────────
     def chat(self, messages: list[dict], *, temperature: float = 0.7,
-             max_tokens: int = 1200) -> BrainReply:
+             max_tokens: int = 1200, prefer_local: bool = False) -> BrainReply:
         """بينادي أول مزوّد متاح، وينتقل للي بعده لو فشل.
 
         بيرجع BrainReply دايمًا (مبيرميش استثناء) — الكود اللي بينادي
         بيفحص `.error` أو صدق/كذب الكائن.
         """
         cfg = load_config()
-        candidates = self.chain(cfg)
+        candidates = (self.chain(cfg, prefer_local=True)
+                      if prefer_local else self.chain(cfg))
         if not candidates:
             return BrainReply(
                 text="", error=(
@@ -702,6 +706,69 @@ def is_local_alive(prov: Provider, *, timeout: float = 1.0) -> bool:
     return alive
 
 
+def start_ollama_server() -> bool:
+    """Start an installed Ollama service, including standard Windows installs."""
+    exe = shutil.which("ollama")
+    if not exe and os.name == "nt":
+        local = pathlib.Path(os.environ.get("LOCALAPPDATA", ""))
+        candidates = (
+            local / "Programs" / "Ollama" / "ollama.exe",
+            pathlib.Path(os.environ.get("ProgramFiles", "")) / "Ollama" / "ollama.exe",
+        )
+        exe = next((str(path) for path in candidates if path.is_file()), None)
+    if not exe:
+        return False
+    flags = 0
+    if os.name == "nt":
+        flags = (getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                 | getattr(subprocess, "DETACHED_PROCESS", 0)
+                 | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+    try:
+        subprocess.Popen(
+            [exe, "serve"], stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=flags,
+        )
+    except OSError:
+        return False
+    root = PROVIDERS["ollama"].base_url.rsplit("/v1", 1)[0]
+    _probe_cache.clear()
+    for _ in range(12):
+        time.sleep(0.35)
+        try:
+            with urllib.request.urlopen(f"{root}/api/tags", timeout=0.5):
+                _probe_cache.clear()
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def prewarm_local_async() -> None:
+    """Load the configured Ollama model on CPU without blocking the UI."""
+    prov = PROVIDERS["ollama"]
+    model = load_config().get("models", {}).get("ollama", prov.model)
+
+    def warm() -> None:
+        if not is_local_alive(prov) and not start_ollama_server():
+            return
+        root = prov.base_url.rsplit("/v1", 1)[0]
+        try:
+            _post_json(
+                f"{root}/api/generate",
+                {
+                    "model": model, "prompt": "", "stream": False,
+                    "keep_alive": "10m",
+                    "options": {"num_gpu": 0, "num_ctx": 2048},
+                },
+                {"Content-Type": "application/json"}, prov.timeout,
+            )
+        except Exception:
+            pass
+
+    threading.Thread(target=warm, name="nezuko-ollama-warmup", daemon=True).start()
+
+
 # ── المحوّلات (adapters) ─────────────────────────────────────────────
 
 def _post_json(url: str, payload: dict, headers: dict, timeout: int) -> dict:
@@ -737,6 +804,8 @@ def _call_provider(prov: Provider, model: str, messages: list[dict],
                    temperature: float, max_tokens: int) -> str:
     if prov.kind == "gemini":
         return _call_gemini(prov, model, messages, temperature, max_tokens)
+    if prov.kind == "ollama":
+        return _call_ollama(prov, model, messages, temperature, max_tokens)
     return _call_openai_compatible(prov, model, messages, temperature, max_tokens)
 
 
@@ -766,6 +835,50 @@ def _call_openai_compatible(prov: Provider, model: str, messages: list[dict],
     if not choices:
         raise RuntimeError(data.get("error", {}).get("message", "رد من غير choices"))
     return choices[0].get("message", {}).get("content", "") or ""
+
+
+_OLLAMA_MEMORY_ERRORS = (
+    "cuda", "cudamalloc", "failed to allocate", "unable to allocate",
+    "out of memory", "memory allocation", "allocate buffer",
+)
+
+
+def _call_ollama(prov: Provider, model: str, messages: list[dict],
+                 temperature: float, max_tokens: int) -> str:
+    """Call Ollama's native API and recover from GPU-memory failures.
+
+    Ollama can be healthy while a model still fails during CUDA allocation.  A
+    second request with ``num_gpu=0`` keeps the conversation working on the
+    CPU instead of making every cloud fallback fail visibly to the user.
+    """
+    root = prov.base_url.rsplit("/v1", 1)[0]
+    payload = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "options": {
+            "temperature": temperature,
+            "num_predict": max_tokens,
+        },
+        "keep_alive": "10m",
+    }
+    try:
+        data = _post_json(f"{root}/api/chat", payload, {"Content-Type": "application/json"}, prov.timeout)
+    except RuntimeError as exc:
+        detail = str(exc).lower()
+        if not any(marker in detail for marker in _OLLAMA_MEMORY_ERRORS):
+            raise
+        cpu_payload = dict(payload)
+        cpu_payload["options"] = dict(payload["options"], num_gpu=0, num_ctx=2048)
+        data = _post_json(
+            f"{root}/api/chat", cpu_payload,
+            {"Content-Type": "application/json"}, prov.timeout,
+        )
+    message = data.get("message") or {}
+    text = message.get("content", "")
+    if not text:
+        raise RuntimeError(data.get("error") or "رد Ollama فارغ")
+    return text
 
 
 def _call_gemini(prov: Provider, model: str, messages: list[dict],

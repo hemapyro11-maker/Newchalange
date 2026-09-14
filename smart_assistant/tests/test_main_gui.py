@@ -36,6 +36,7 @@ def app(monkeypatch):
     tmp = pathlib.Path(tempfile.mkdtemp())
     monkeypatch.setattr(brain, "_base_dir", lambda: tmp)
     monkeypatch.setattr(brain, "is_local_alive", lambda prov, **kw: False)
+    monkeypatch.setattr(brain, "prewarm_local_async", lambda: None)
     monkeypatch.setattr(sessions, "_base_dir", lambda: tmp)
     monkeypatch.setattr(hooks, "_base_dir", lambda: tmp)
     brain.reset_brain()
@@ -295,6 +296,16 @@ def test_speak_is_skipped_for_speak_itself(app, monkeypatch):
     app._on_log("اتقالت", "info")
     app.update()
     assert spoken == []
+
+
+def test_voice_turn_speaks_a_short_message_when_all_brains_fail(app, monkeypatch):
+    spoken = []
+    monkeypatch.setattr(app, "_speak", spoken.append)
+    app.voice_enabled = True
+    app._last_command_name = "listen_run"
+    app._on_log("❌ محركات الذكاء مش متاحة دلوقتي. تفاصيل طويلة", "error")
+    app.update()
+    assert spoken == ["محركات الذكاء مش متاحة دلوقتي. حاول تاني بعد لحظة."]
 
 
 # ── اختيار الملف ─────────────────────────────────────────────────────
