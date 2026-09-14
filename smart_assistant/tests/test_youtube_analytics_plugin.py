@@ -94,10 +94,15 @@ def test_video_stats_no_args(make_ctx):
     assert result.startswith("usage")
 
 
-def test_video_stats_no_key(make_ctx):
+def test_video_stats_no_key_uses_public_reader(make_ctx, monkeypatch):
+    monkeypatch.setattr(yap.youtube_public, "inspect_url", lambda url: {
+        "title": "Public video", "channel": "Public channel", "duration": 90,
+        "views": 1234, "url": url,
+    })
     result = yap._cmd_video_stats(make_ctx("video_stats", ["abc123"]))
-    assert result.startswith("❌")
-    assert "youtube_set_key" in result
+    assert "Public video" in result
+    assert "1,234" in result
+    assert "public reader" in result
 
 
 def test_video_stats_real_data(make_ctx, isolated_config, monkeypatch):
@@ -133,9 +138,19 @@ def test_growth_report_no_args(make_ctx):
     assert result.startswith("usage")
 
 
-def test_growth_report_no_key(make_ctx):
+def test_growth_report_no_key_uses_public_reader(make_ctx, monkeypatch):
+    monkeypatch.setattr(yap.youtube_public, "channel_info", lambda identifier, limit: {
+        "id": "UCtest", "title": "Public channel", "description": "",
+        "subscribers": 4, "video_count": 2, "url": "https://youtube.com/@public",
+        "videos": [
+            {"id": "new", "title": "New", "views": 20, "timestamp": None},
+            {"id": "old", "title": "Old", "views": 10, "timestamp": None},
+        ],
+    })
     result = yap._cmd_channel_growth_report(make_ctx("channel_growth_report", ["@x"]))
-    assert result.startswith("❌")
+    assert "Public channel" in result
+    assert "New" in result
+    assert "Old" in result
 
 
 def test_growth_report_channel_not_found(make_ctx, isolated_config, monkeypatch):

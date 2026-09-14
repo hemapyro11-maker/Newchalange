@@ -25,6 +25,8 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
+import youtube_public
+
 try:
     import keyring
     from keyring.errors import KeyringError
@@ -102,6 +104,22 @@ def _yt_get(endpoint: str, params: dict) -> dict:
 
 
 def _fetch_channel(identifier: str) -> dict | None:
+    if not _api_key():
+        try:
+            public = youtube_public.channel_info(identifier, 20)
+        except youtube_public.PublicYouTubeError as exc:
+            raise YouTubeAPIError(str(exc)) from exc
+        return {
+            "id": public.get("id"),
+            "snippet": {"title": public.get("title"), "description": public.get("description", "")},
+            "statistics": {
+                "subscriberCount": public.get("subscribers"),
+                "videoCount": public.get("video_count") or len(public.get("videos", [])),
+            },
+            "__public__": True,
+            "__videos__": public.get("videos", []),
+            "__url__": public.get("url"),
+        }
     params = {"part": "snippet,statistics,contentDetails"}
     if _CHANNEL_ID_RE.match(identifier):
         params["id"] = identifier
@@ -136,6 +154,20 @@ def _cmd_video_stats(ctx) -> str:
     if not ctx.args:
         return "usage: video_stats <video_id>"
     video_id = ctx.args[0]
+    if not _api_key():
+        url = video_id if video_id.startswith(("http://", "https://")) else f"https://youtu.be/{video_id}"
+        try:
+            public = youtube_public.inspect_url(url)
+        except youtube_public.PublicYouTubeError as e:
+            return f"❌ {e}"
+        duration = int(public.get("duration") or 0)
+        return "\n".join([
+            f"🎬 {public.get('title') or video_id}",
+            f"   📺 {public.get('channel') or '?'}",
+            f"   ⏱ duration: {duration // 60}:{duration % 60:02d}",
+            f"   👁 views: {_fmt_int(public.get('views'))}",
+            f"   🔗 {public.get('url')} — public reader, no API key needed",
+        ])
     try:
         data = _yt_get("videos", {"part": "snippet,statistics,contentDetails", "id": video_id})
     except YouTubeAPIError as e:
@@ -165,6 +197,19 @@ def _cmd_video_stats(ctx) -> str:
 # ── channel_growth_report ─────────────────────────────────────────────────
 
 def _fetch_recent_video_stats(channel: dict, max_results: int = 15) -> list[dict]:
+    if channel.get("__public__"):
+        return [
+            {
+                "id": video.get("id"),
+                "snippet": {
+                    "title": video.get("title"),
+                    "publishedAt": (datetime.fromtimestamp(video["timestamp"], timezone.utc).isoformat()
+                                    if video.get("timestamp") else ""),
+                },
+                "statistics": {"viewCount": video.get("views") or 0},
+            }
+            for video in channel.get("__videos__", [])[:max_results]
+        ]
     uploads_playlist = channel.get("contentDetails", {}).get("relatedPlaylists", {}).get("uploads")
     if not uploads_playlist:
         return []
@@ -205,7 +250,13 @@ def _cmd_channel_growth_report(ctx) -> str:
     # أول" ونعكسه، بنرتب فعليًا حسب snippet.publishedAt الحقيقي (اللي
     # الاستجابة نفسها بترجعه، وطلبناه أصلاً في part=snippet). كده "أول
     # نص" مضمون يبقى فعليًا الأقدم مهما كان ترتيب استجابة الـ API.
-    videos_chrono = sorted(videos, key=lambda v: v.get("snippet", {}).get("publishedAt", ""))
+    if channel.get("__public__") and not any(
+        v.get("snippet", {}).get("publishedAt") for v in videos
+    ):
+        # yt-dlp channel playlists are newest-first even when YouTube omits dates.
+        videos_chrono = list(reversed(videos))
+    else:
+        videos_chrono = sorted(videos, key=lambda v: v.get("snippet", {}).get("publishedAt", ""))
     views_list = [views_of(v) for v in videos_chrono]
     avg_views = statistics.mean(views_list)
     best = max(videos_chrono, key=views_of)

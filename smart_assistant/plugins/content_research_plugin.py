@@ -4,8 +4,8 @@ content_research_plugin.py — باحث المحتوى وكاتب السينار
 توليد أفكار كلمات مفتاحية بدون إنترنت، هيكلة سيناريو بتوقيتات فعلية مبنية
 على مدة الفيديو، وتحليل قوة الهوك الافتتاحي.
 
-الأوامر: youtube_search, trending_videos, keyword_ideas, script_outline,
-hook_analyzer
+الأوامر: youtube_search, youtube_channel_research, trending_videos,
+keyword_ideas, script_outline, hook_analyzer
 """
 from __future__ import annotations
 
@@ -16,6 +16,8 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+
+import youtube_public
 
 try:
     import keyring
@@ -121,6 +123,23 @@ def _cmd_youtube_search(ctx) -> str:
     if not (1 <= max_results <= 25):
         return "❌ max must be between 1 and 25"
 
+    if not _api_key():
+        try:
+            public_items = youtube_public.search_videos(query, max_results)
+        except youtube_public.PublicYouTubeError as e:
+            return f"❌ YouTube search failed: {e}"
+        if not public_items:
+            return f"🔍 no results for: {query}"
+        lines = [f"🔍 YouTube results for: {query} ({len(public_items)}) — public search, no API key needed"]
+        for item in public_items:
+            views = item.get("views")
+            views_str = f" — 👁 {_fmt_int(views)}" if views is not None else ""
+            duration = item.get("duration")
+            duration_str = f" — ⏱ {int(duration) // 60}:{int(duration) % 60:02d}" if duration else ""
+            lines.append(f"  🎬 {item.get('title') or '?'}")
+            lines.append(f"     {item.get('channel') or '?'}{views_str}{duration_str} — {item.get('url')}")
+        return "\n".join(lines)
+
     try:
         search_data = _yt_get("search", {
             "part": "snippet", "q": query, "type": "video",
@@ -146,6 +165,62 @@ def _cmd_youtube_search(ctx) -> str:
         views_str = f" — 👁 {_fmt_int(views)}" if views is not None else ""
         lines.append(f"  🎬 {snippet.get('title', '?')}")
         lines.append(f"     {snippet.get('channelTitle', '?')}{views_str} — https://youtu.be/{vid}")
+    return "\n".join(lines)
+
+
+def _cmd_youtube_channel_research(ctx) -> str:
+    """Inspect a channel for content matching without requiring an API key."""
+    if not ctx.args:
+        return "usage: youtube_channel_research <channel_name_or_url> [max=10]"
+    max_results = 10
+    identifier_parts = []
+    for arg in ctx.args:
+        if arg.startswith("max="):
+            try:
+                max_results = int(arg[4:])
+            except ValueError:
+                return "❌ max must be a number"
+        else:
+            identifier_parts.append(arg)
+    identifier = " ".join(identifier_parts).strip()
+    if not identifier:
+        return "usage: youtube_channel_research <channel_name_or_url> [max=10]"
+    if not (1 <= max_results <= 25):
+        return "❌ max must be between 1 and 25"
+    try:
+        info = youtube_public.channel_info(identifier, max_results)
+    except youtube_public.PublicYouTubeError as exc:
+        return f"❌ YouTube channel research failed: {exc}"
+
+    videos = info.get("videos") or []
+    lines = [
+        f"📺 Channel research: {info.get('title') or identifier}",
+        f"Channel URL: {info.get('url') or '?'}",
+        f"Subscribers: {_fmt_int(info.get('subscribers'))} | Videos: {_fmt_int(info.get('video_count'))}",
+    ]
+    if info.get("description"):
+        lines.append(f"Description: {info['description']}")
+    if videos:
+        lines.append("\nRecent public videos:")
+        for i, video in enumerate(videos, 1):
+            duration = video.get("duration")
+            duration_text = f" | {int(duration) // 60}:{int(duration) % 60:02d}" if duration else ""
+            lines.append(
+                f"{i}. {video.get('title') or '?'} | {_fmt_int(video.get('views'))} views{duration_text}\n"
+                f"   {video.get('url') or ''}"
+            )
+        titles = [v.get("title", "") for v in videos if v.get("title")]
+        avg_duration = [float(v["duration"]) for v in videos if v.get("duration")]
+        if avg_duration:
+            seconds = round(sum(avg_duration) / len(avg_duration))
+            lines.append(f"\nObserved format: average sampled duration {seconds // 60}:{seconds % 60:02d}.")
+        if titles:
+            lines.append("Observed title examples are listed above; use their topic, pacing, and audience as references without copying wording.")
+    else:
+        lines.append("\nNo public uploads were returned for this channel.")
+    lines.append(
+        "\nNEXT: Continue the user's task now. Use script_outline and the video tools to create an original video brief, script, voice, and render based on this research."
+    )
     return "\n".join(lines)
 
 
@@ -355,7 +430,9 @@ def _cmd_hook_analyzer(ctx) -> str:
 
 def register(engine):
     engine.registry.register("youtube_search", _cmd_youtube_search,
-                              "youtube_search <query> [max=10] — a real YouTube search with view counts")
+                              "youtube_search <query> [max=10] — real YouTube search with view counts; works without an API key")
+    engine.registry.register("youtube_channel_research", _cmd_youtube_channel_research,
+                              "youtube_channel_research <channel_name_or_url> [max=10] — inspect a YouTube channel without an API key; use first when asked to study a channel or make similar original content, then continue to script and video tools")
     engine.registry.register("trending_videos", _cmd_trending_videos,
                               "trending_videos [region=EG] [category=N] [max=15] — what is actually trending now")
     engine.registry.register("keyword_ideas", _cmd_keyword_ideas,

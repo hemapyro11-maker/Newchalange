@@ -148,10 +148,16 @@ def test_channel_stats_no_args(make_ctx):
     assert ysp._cmd_channel_stats(make_ctx("channel_stats", [])).startswith("usage")
 
 
-def test_channel_stats_no_key_configured(make_ctx):
+def test_channel_stats_no_key_uses_public_reader(make_ctx, monkeypatch):
+    monkeypatch.setattr(ysp.youtube_public, "channel_info", lambda identifier, limit: {
+        "id": "UCtest", "title": "Public channel", "description": "",
+        "subscribers": 12, "video_count": 2, "url": "https://youtube.com/@public",
+        "videos": [{"views": 100}, {"views": 200}],
+    })
     result = ysp._cmd_channel_stats(make_ctx("channel_stats", ["@somechannel"]))
-    assert result.startswith("❌")
-    assert "youtube_set_key" in result
+    assert "Public channel" in result
+    assert "public reader" in result
+    assert "300" in result
 
 
 def test_channel_stats_real_data(make_ctx, monkeypatch):

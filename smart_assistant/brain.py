@@ -337,11 +337,22 @@ class Brain:
                 st.day_stamp = today
             else:
                 st.day_stamp = today
+            # Keep short-lived failure knowledge across app restarts. This stops
+            # a known exhausted/retired provider from delaying every first reply.
+            saved_cold = float(info.get("cold_until", 0) or 0)
+            if saved_cold > time.time():
+                st.cold_until = min(saved_cold, time.time() + 86_400)
+                st.fails = max(0, int(info.get("fails", 0) or 0))
             self._states[name] = st
 
     def _save_state(self) -> None:
         data = {
-            name: {"day_count": st.day_count, "day_stamp": st.day_stamp}
+            name: {
+                "day_count": st.day_count,
+                "day_stamp": st.day_stamp,
+                "fails": st.fails,
+                "cold_until": st.cold_until,
+            }
             for name, st in self._states.items()
         }
         try:
@@ -392,6 +403,7 @@ class Brain:
             st.cold_until = now + 60
         elif st.fails >= 2:
             st.cold_until = now + min(600, 30 * (2 ** (st.fails - 2)))
+        self._save_state()
 
     # ── سلسلة البدائل ────────────────────────────────────────────
     def chain(self, cfg: dict | None = None, *, prefer_local: bool = False) -> list[Provider]:
@@ -453,9 +465,16 @@ class Brain:
             except _RateLimited as e:
                 with _lock:
                     self._note_failure(prov.name, now, rate_limited=True)
+                    # Daily quota errors will not recover after one minute.
+                    # Remember them long enough to reach the local fallback fast.
+                    error_text = str(e).lower()
+                    if "quota" in error_text or "exceeded" in error_text:
+                        state = self._states.setdefault(prov.name, _ProviderState())
+                        state.cold_until = max(state.cold_until, now + 3600)
                     if e.retry_after is not None:
                         state = self._states.setdefault(prov.name, _ProviderState())
                         state.cold_until = max(state.cold_until, now + min(e.retry_after, 3600))
+                    self._save_state()
                 errors.append(f"{prov.label}: rate limited ({e})")
                 continue
             except Exception as e:  # noqa: BLE001 - أي فشل = جرّب اللي بعده
@@ -470,6 +489,9 @@ class Brain:
                         state.cold_until = max(state.cold_until, now + 3600)
                     elif "http 503" in error_text or "unavailable" in error_text:
                         state.cold_until = max(state.cold_until, now + 30)
+                    elif "http 401" in error_text or "http 403" in error_text:
+                        state.cold_until = max(state.cold_until, now + 3600)
+                    self._save_state()
                 errors.append(f"{prov.label}: {e}")
                 continue
             if not text.strip():

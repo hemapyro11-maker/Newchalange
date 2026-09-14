@@ -217,6 +217,25 @@ def test_rate_limited_failure_cools_provider_for_a_minute():
     assert b._states["groq"].cold_until >= now + 59
 
 
+def test_circuit_cooldown_survives_restart():
+    b = brain.Brain()
+    now = time.time()
+    b._note_failure("groq", now, rate_limited=True)
+    reloaded = brain.Brain()
+    assert reloaded._states["groq"].cold_until >= now + 59
+    assert reloaded._states["groq"].fails == 1
+
+
+def test_expired_circuit_cooldown_is_not_restored():
+    brain._state_path().write_text(json.dumps({
+        "groq": {"day_stamp": time.strftime("%Y-%m-%d"), "day_count": 2,
+                 "fails": 4, "cold_until": time.time() - 1},
+    }), encoding="utf-8")
+    reloaded = brain.Brain()
+    assert reloaded._states["groq"].cold_until == 0
+    assert reloaded._states["groq"].fails == 0
+
+
 def test_success_resets_failure_count():
     _key("groq")
     b = brain.get_brain()

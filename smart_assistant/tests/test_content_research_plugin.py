@@ -56,10 +56,30 @@ def test_youtube_search_no_args(make_ctx):
     assert crp._cmd_youtube_search(make_ctx("youtube_search", [])).startswith("usage")
 
 
-def test_youtube_search_no_key(make_ctx):
+def test_youtube_search_no_key_uses_public_reader(make_ctx, monkeypatch):
+    monkeypatch.setattr(crp.youtube_public, "search_videos", lambda query, limit: [{
+        "title": "Cat video", "channel": "CatChan", "views": 5000,
+        "duration": 65, "url": "https://youtu.be/abc123",
+    }])
     result = crp._cmd_youtube_search(make_ctx("youtube_search", ["cats"]))
-    assert result.startswith("❌")
-    assert "youtube_set_key" in result
+    assert "public search" in result
+    assert "Cat video" in result
+    assert "5,000" in result
+
+
+def test_youtube_channel_research_without_key(make_ctx, monkeypatch):
+    monkeypatch.setattr(crp.youtube_public, "channel_info", lambda identifier, limit: {
+        "title": "Tuty Storytime", "url": "https://youtube.com/channel/test",
+        "subscribers": 4, "video_count": 2, "description": "Kids stories",
+        "videos": [{"title": "Lolo Finds a Giant Carrot", "views": 11,
+                    "duration": 58, "url": "https://youtu.be/test"}],
+    })
+    result = crp._cmd_youtube_channel_research(
+        make_ctx("youtube_channel_research", ["Tuty", "Storytime", "max=5"])
+    )
+    assert "Tuty Storytime" in result
+    assert "Lolo Finds a Giant Carrot" in result
+    assert "Continue the user's task now" in result
 
 
 def test_youtube_search_invalid_max(make_ctx, isolated_config):
@@ -279,5 +299,5 @@ def test_register_adds_all_commands():
         registry = FakeRegistry()
 
     crp.register(FakeEngine)
-    for cmd in ("youtube_search", "trending_videos", "keyword_ideas", "script_outline", "hook_analyzer"):
+    for cmd in ("youtube_search", "youtube_channel_research", "trending_videos", "keyword_ideas", "script_outline", "hook_analyzer"):
         assert cmd in FakeEngine.registry.names

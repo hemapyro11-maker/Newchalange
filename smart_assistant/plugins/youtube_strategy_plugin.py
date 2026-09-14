@@ -24,6 +24,8 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
+import youtube_public
+
 try:
     import keyring
     from keyring.errors import KeyringError
@@ -131,6 +133,25 @@ def _yt_get(endpoint: str, params: dict) -> dict:
 
 
 def _fetch_channel(identifier: str) -> dict | None:
+    if not _api_key():
+        try:
+            public = youtube_public.channel_info(identifier, 20)
+        except youtube_public.PublicYouTubeError as exc:
+            raise YouTubeAPIError(str(exc)) from exc
+        videos = public.get("videos", [])
+        sampled_views = sum(int(v.get("views") or 0) for v in videos)
+        return {
+            "id": public.get("id"),
+            "snippet": {"title": public.get("title"), "description": public.get("description", "")},
+            "statistics": {
+                "subscriberCount": public.get("subscribers"),
+                "viewCount": sampled_views,
+                "videoCount": public.get("video_count") or len(videos),
+            },
+            "__public__": True,
+            "__url__": public.get("url"),
+            "__videos__": videos,
+        }
     params = {"part": "snippet,statistics,contentDetails"}
     if _CHANNEL_ID_RE.match(identifier):
         params["id"] = identifier
@@ -144,6 +165,18 @@ def _fetch_channel(identifier: str) -> dict | None:
 
 
 def _recent_uploads(channel: dict, max_results: int = 15) -> list[dict]:
+    if channel.get("__public__"):
+        return [
+            {
+                "contentDetails": {
+                    "videoId": video.get("id"),
+                    "videoPublishedAt": datetime.fromtimestamp(video["timestamp"], timezone.utc).isoformat(),
+                },
+                "snippet": {"title": video.get("title")},
+            }
+            for video in channel.get("__videos__", [])[:max_results]
+            if video.get("timestamp")
+        ]
     uploads_playlist = channel.get("contentDetails", {}).get("relatedPlaylists", {}).get("uploads")
     if not uploads_playlist:
         return []
@@ -224,11 +257,13 @@ def _cmd_channel_stats(ctx) -> str:
     lines = [
         f"📺 {snippet.get('title', identifier)}",
         f"   👥 subscribers: {_fmt_int(subs) if not stats.get('hiddenSubscriberCount') else 'hidden'}",
-        f"   👁 total views: {_fmt_int(views)}",
+        f"   👁 {'views in latest sample' if channel.get('__public__') else 'total views'}: {_fmt_int(views)}",
         f"   🎬 videos: {_fmt_int(videos)}",
         f"   📊 average views per video: {_fmt_int(avg_views)}",
         f"   📅 created: {snippet.get('publishedAt', '?')[:10]}",
     ]
+    if channel.get("__public__"):
+        lines.append(f"   🔗 {channel.get('__url__')} — public reader, no API key needed")
     return "\n".join(lines)
 
 

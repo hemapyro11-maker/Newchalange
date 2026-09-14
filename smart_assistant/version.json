@@ -1,5 +1,5 @@
 {
-  "version": "0.3.4",
-  "notes": "Modern multiline chat composer, real File/Edit/View/Help menus, standard editing shortcuts, conversation save/export, and improved message typography.",
+  "version": "0.3.5",
+  "notes": "YouTube channel and video research now works without an API key, raw page scripts are filtered, and channel-to-video workflows continue with structured research.",
   "url": "https://github.com/hemapyro11-maker/Newchalange/tree/claude/project-guidelines-architecture-dcn5vq/smart_assistant"
 }
