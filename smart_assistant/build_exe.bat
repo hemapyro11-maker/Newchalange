@@ -110,6 +110,7 @@ py -m PyInstaller ^
     --hidden-import natural_voice_runtime ^
     --hidden-import voicetut_runtime ^
     --hidden-import english_voice_runtime ^
+    --runtime-hook qt_runtime_hook.py ^
     --hidden-import desktop_gui ^
     --hidden-import PySide6.QtWidgets ^
     --collect-all CTkToolTip ^

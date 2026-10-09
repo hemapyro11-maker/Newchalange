@@ -61,11 +61,14 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[r'C:\Users\Hemap\Documents\Codex\2026-09-07\new-chat\work\tcl_runtime_hook.py'],
+    runtime_hooks=['qt_runtime_hook.py', r'C:\Users\Hemap\Documents\Codex\2026-09-07\new-chat\work\tcl_runtime_hook.py'],
     excludes=[],
     noarchive=False,
     optimize=0,
 )
+# Qt uses Windows' own unversioned ICU API. Poppler's ICU DLL with this
+# basename has version-suffixed exports and must not shadow the system DLL.
+a.binaries = [entry for entry in a.binaries if entry[0].lower() != 'icuuc.dll']
 pyz = PYZ(a.pure)
 
 exe = EXE(
