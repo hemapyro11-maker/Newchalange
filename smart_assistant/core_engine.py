@@ -291,6 +291,8 @@ class AssistantEngine:
         # Set by listen_run for exactly one queued conversation. Voice turns
         # prefer the small local model instead of waiting on exhausted quotas.
         self._voice_turn_text: str | None = None
+        self._companion_turn_language = ""
+        self._companion_turn_voice = False
         # وسائط ناقصة لأمر اتعرف محليًا (زي مسار ملف) — بتتملي من رسالة
         # المستخدم الجاية، وكل ده **بصفر حصة** (مفيش نموذج بيتنادى)
         self._pending_args: tuple[str, list[str], list, str] | None = None
@@ -400,6 +402,8 @@ class AssistantEngine:
             self._chain_step = None
             self._awaiting_answer = False
             self._voice_turn_text = None
+            self._companion_turn_language = ""
+            self._companion_turn_voice = False
             self._agent_scope = None
             self._agent_instructions = ""
 
@@ -453,6 +457,19 @@ class AssistantEngine:
             if generation == self._generation:
                 self._execute("speak", [], "speak " + text)
         self._queue.put(("speak", speak_current))
+
+    def listen(self):
+        """Record a user reply without treating the mic button as their answer.
+
+        A clarification may be waiting in _dispatch; only the recognized speech,
+        not the internal 'listen_run' command, should answer that question.
+        """
+        generation = self._generation
+        self._set_status("queued")
+        def listen_current(ctx):
+            if generation == self._generation:
+                self._execute("listen_run", [], "listen_run")
+        self._queue.put(("listen_run", listen_current))
 
     def run_task(self, name: str, fn: Callable[[CommandContext], None]):
         """يضيف مهمة أتمتة (callable) لنفس طابور التنفيذ."""
@@ -1173,8 +1190,13 @@ class AssistantEngine:
         ]
         if companion.enabled(cfg):
             selected_tools = companion.tool_context(text, self.registry.list_commands())
+            if step == 0:
+                self._companion_turn_language = companion.language_for(text, reply_language)
+                self._companion_turn_voice = voice_turn
+            else:
+                voice_turn = self._companion_turn_voice
             system = companion.prompt(
-                language_instruction,
+                self._companion_turn_language or companion.language_for(text, reply_language),
                 selected_tools,
                 self.memory.context(), voice=voice_turn,
             )
@@ -1199,7 +1221,12 @@ class AssistantEngine:
         )
         verify = (not go_deep) and bool(cfg.get("verify_mode")) and hard
         if companion.enabled(cfg):
-            reply = b.chat(messages, max_tokens=240 if voice_turn else 900, temperature=0.6)
+            preview = getattr(self, "on_preview", None)
+            def show_preview(text):
+                if preview and generation == self._generation:
+                    preview(text, generation)
+            with brain.stream_listener(show_preview if preview else None):
+                reply = b.chat(messages, max_tokens=240 if voice_turn else 900, temperature=0.6)
         elif voice_turn:
             reply = b.chat(messages, max_tokens=250, prefer_local=True)
         elif go_deep:

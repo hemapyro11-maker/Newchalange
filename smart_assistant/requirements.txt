@@ -1,4 +1,6 @@
 customtkinter>=5.2.0
+# Native Unicode shaping, bidi editing and Markdown chat on desktop.
+PySide6-Essentials>=6.8,<7
 CTkToolTip>=0.8
 pyinstaller>=6.0.0
 mcp>=1.10.0

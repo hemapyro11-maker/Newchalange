@@ -144,3 +144,26 @@ def test_companion_greeting_uses_actual_model_once(bare_engine, monkeypatch):
     assert len(calls) == 1 and calls[0][-1]["content"] == "عاملة إيه؟"
     assert "Available tools:" in calls[0][0]["content"]
     assert len(calls[0][0]["content"]) < 3000
+
+
+def test_latest_request_language_overrides_previous_conversation():
+    assert "only in English" in companion.language_for("Explain this Arabic phrase: مرحبًا")
+    assert "Egyptian Arabic" in companion.language_for("🎤 عاملة إيه يا Nezuko؟")
+    assert "only in English" in companion.language_for("ردي عليا", "en")
+    assert "Egyptian Arabic" in companion.language_for("Hello", "ar")
+
+
+def test_tool_output_does_not_change_original_reply_language(bare_engine, monkeypatch):
+    monkeypatch.setattr(brain, "load_config", lambda: companion.activate({}))
+    seen = []
+    class Model:
+        def ready(self): return True
+        def chat(self, messages, **kwargs):
+            seen.append(messages[0]["content"])
+            return brain.BrainReply(text="تمام", provider="ollama", label="Local", is_local=True)
+    monkeypatch.setattr(brain, "get_brain", lambda: Model())
+    bare_engine._converse("افتكري اسم قناتي")
+    bare_engine._converse("Output of memory_save: Saved successfully", step=1)
+    assert all("Mandatory language for THIS reply: Reply only in natural Egyptian Arabic" in prompt for prompt in seen)
+    bare_engine._converse("Tell me about my channel")
+    assert "Mandatory language for THIS reply: Reply only in English" in seen[-1]

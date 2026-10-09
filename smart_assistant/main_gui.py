@@ -1968,6 +1968,16 @@ class SettingsPanel(ctk.CTkToplevel):
 
 
 if __name__ == "__main__":
+    # Qt's native Unicode text engine fixes Arabic editing and mixed-script
+    # wrapping. Keep the existing UI available for source installs without Qt.
+    if "--legacy-ui" not in sys.argv:
+        try:
+            from desktop_gui import run as run_native
+        except ModuleNotFoundError as exc:
+            if exc.name not in {"PySide6", "desktop_gui"}:
+                raise
+        else:
+            raise SystemExit(run_native())
     app = AssistantApp()
     if os.name == "nt":
         app.state("zoomed")

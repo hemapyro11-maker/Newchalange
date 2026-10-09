@@ -40,6 +40,7 @@ plugin_forge_plugin.py) — أي تغيير في المخ كان بيتطلب ت
 from __future__ import annotations
 
 import json
+import contextlib
 import concurrent.futures
 import os
 import pathlib
@@ -52,6 +53,53 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+
+_stream_state = threading.local()
+
+
+@contextlib.contextmanager
+def stream_listener(callback=None):
+    """Enable local response previews for this request/thread only."""
+    previous = getattr(_stream_state, "callback", None)
+    _stream_state.callback = callback
+    try:
+        yield
+    finally:
+        _stream_state.callback = previous
+
+
+def _post_local_stream(url, payload, timeout, callback):
+    """Collect native NDJSON, preview content, and validate completion before use."""
+    request = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
+                                     headers={"Content-Type": "application/json"}, method="POST")
+    text, calls, finished, total, last_preview = "", [], False, 0, 0.0
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            for raw in response:
+                total += len(raw)
+                if total > 2_000_000:
+                    raise RuntimeError("Local response exceeded the stream limit")
+                if not raw.strip():
+                    continue
+                data = json.loads(raw)
+                if data.get("error"):
+                    raise RuntimeError(str(data["error"]))
+                message = data.get("message") or {}
+                text += message.get("content", "")
+                calls.extend(message.get("tool_calls") or [])
+                now = time.monotonic()
+                if text and (now - last_preview >= 0.1 or data.get("done")):
+                    callback(text)
+                    last_preview = now
+                if data.get("done"):
+                    finished = True
+                    break
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:300]
+        raise RuntimeError(f"HTTP {exc.code}: {detail}") from exc
+    if not finished:
+        raise RuntimeError("Local response stream ended before completion")
+    return {"message": {"content": text, "tool_calls": calls}}
 
 try:
     import keyring
@@ -926,18 +974,24 @@ def _call_ollama(prov: Provider, model: str, messages: list[dict],
         if specs:
             payload["tools"] = specs
         payload["messages"] = [{k: v for k, v in msg.items() if k != "nezuko_tools"} for msg in messages]
+    callback = getattr(_stream_state, "callback", None) if cfg.get("assistant_mode") == "companion" else None
+    if callback:
+        payload["stream"] = True
+    def request_body(body):
+        if callback:
+            return _post_local_stream(f"{root}/api/chat", body, prov.timeout, callback)
+        return _post_json(f"{root}/api/chat", body, {"Content-Type": "application/json"}, prov.timeout)
     try:
-        data = _post_json(f"{root}/api/chat", payload, {"Content-Type": "application/json"}, prov.timeout)
+        data = request_body(payload)
     except RuntimeError as exc:
         detail = str(exc).lower()
         if not any(marker in detail for marker in _OLLAMA_MEMORY_ERRORS):
             raise
         cpu_payload = dict(payload)
         cpu_payload["options"] = dict(payload["options"], num_gpu=0, num_ctx=2048)
-        data = _post_json(
-            f"{root}/api/chat", cpu_payload,
-            {"Content-Type": "application/json"}, prov.timeout,
-        )
+        if callback:
+            callback("")
+        data = request_body(cpu_payload)
     message = data.get("message") or {}
     text = message.get("content", "")
     if cfg.get("assistant_mode") == "companion" and message.get("tool_calls"):

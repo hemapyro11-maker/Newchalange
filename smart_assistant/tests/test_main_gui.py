@@ -52,6 +52,18 @@ def app(monkeypatch):
     monkeypatch.setattr(sessions, "_base_dir", lambda: tmp)
     monkeypatch.setattr(hooks, "_base_dir", lambda: tmp)
     brain.reset_brain()
+    a = _create_test_app()
+    a.update()
+    yield a
+    a._closing = True
+    a.engine.stop()
+    if a.engine._worker:
+        a.engine._worker.join(timeout=2)
+    a.destroy()
+    brain.reset_brain()
+
+
+def _create_test_app():
     try:
         a = main_gui.AssistantApp()
     except tkinter.TclError as exc:
@@ -64,14 +76,7 @@ def app(monkeypatch):
         import gc
         gc.collect()
         a = main_gui.AssistantApp()
-    a.update()
-    yield a
-    a._closing = True
-    a.engine.stop()
-    if a.engine._worker:
-        a.engine._worker.join(timeout=2)
-    a.destroy()
-    brain.reset_brain()
+    return a
 
 
 # ── الثيم والخط ──────────────────────────────────────────────────────
@@ -92,7 +97,7 @@ def test_theme_choice_survives_restart(app, monkeypatch):
     app._toggle_theme()
     tmp = brain._base_dir()
     monkeypatch.setattr(brain, "_base_dir", lambda: tmp)
-    fresh = main_gui.AssistantApp()
+    fresh = _create_test_app()
     try:
         assert fresh.mode == "light"
     finally:

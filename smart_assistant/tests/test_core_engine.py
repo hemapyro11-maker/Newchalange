@@ -1282,3 +1282,25 @@ def test_a_single_line_tool_call_still_works(bare_engine, monkeypatch):
     bare_engine._converse("say hello")
     bare_engine._dispatch("y")
     assert seen["raw"] == "echo hello"
+
+
+def test_microphone_does_not_answer_pending_clarification_with_command_name(bare_engine, monkeypatch):
+    bare_engine._awaiting_answer = True
+    executed = []
+    monkeypatch.setattr(bare_engine, "_execute", lambda name, args, raw: executed.append(name))
+    bare_engine.listen()
+    name, fn = bare_engine._queue.get_nowait()
+    fn(None)
+    assert name == "listen_run"
+    assert executed == ["listen_run"]
+    assert bare_engine._awaiting_answer is True
+
+
+def test_cancel_invalidates_queued_microphone_request(bare_engine, monkeypatch):
+    executed = []
+    monkeypatch.setattr(bare_engine, "_execute", lambda *a: executed.append(True))
+    bare_engine.listen()
+    _, fn = bare_engine._queue.get_nowait()
+    bare_engine.cancel()
+    fn(None)
+    assert executed == []
