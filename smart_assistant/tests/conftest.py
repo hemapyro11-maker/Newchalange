@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "plugins"))
 import pytest
 
 import core_engine
+import brain
 from core_engine import AssistantEngine, CommandContext
 
 
@@ -21,6 +22,11 @@ def isolate_state_dir(tmp_path, monkeypatch):
     """كل اختبار بيشتغل بمجلد حالة (skills.json) خاص بيه، عشان محدش
     يكتب فوق smart_assistant/skills.json الحقيقي بتاع المستخدم."""
     monkeypatch.setattr(core_engine, "default_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(brain, "_base_dir", lambda: tmp_path)
+    monkeypatch.setattr(brain, "_HAS_KEYRING", False)
+    brain.reset_brain()
+    yield
+    brain.reset_brain()
 
 
 @pytest.fixture

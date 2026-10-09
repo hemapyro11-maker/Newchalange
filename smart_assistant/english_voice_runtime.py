@@ -17,6 +17,11 @@ DEFAULT_SPEED = 0.96
 _worker: PersistentVoiceWorker | None = None
 _worker_lock = threading.Lock()
 _warming = False
+_ready = False
+
+
+def ready() -> bool:
+    return _ready and _worker is not None and _worker.alive and not _warming
 
 
 def _settings() -> tuple[Path | None, str, float]:
@@ -84,6 +89,7 @@ def prewarm() -> None:
 
 def render(text: str, output: Path, timeout: int = 900,
            persistent: bool = False) -> tuple[bool, str]:
+    global _ready
     runtime, voice, speed = _settings()
     if runtime is None:
         return False, "configure the isolated Kokoro Python executable"
@@ -126,4 +132,6 @@ def render(text: str, output: Path, timeout: int = 900,
     except (OSError, ValueError, wave.Error) as exc:
         output.unlink(missing_ok=True)
         return False, f"invalid output: {exc}"
+    if _worker is not None and _worker.alive:
+        _ready = True
     return True, "ok"

@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 DARK = {
-    "bg":       "#111111",
-    "panel":    "#1b1b1b",
-    "panel_hi": "#252525",
+    "bg":       "#0b111a",
+    "panel":    "#111c29",
+    "panel_hi": "#1b2d40",
     "text":     "#f4f4f4",
     "dim":      "#b4b4b4",
     "faint":    "#777777",
-    "border":   "#303030",
-    "accent":   "#10a37f",
+    "border":   "#24364a",
+    "accent":   "#51d8ef",
     "green":    "#52c79a",
     "red":      "#ef6b73",
     "yellow":   "#e5b567",

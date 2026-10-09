@@ -337,16 +337,16 @@ def _cmd_stabilize(ctx) -> str:
         return f"❌ file not found: {missing[0]}"
 
     with tempfile.TemporaryDirectory() as tmp:
-        transforms = str(pathlib.Path(tmp) / "transforms.trf")
+        transforms = pathlib.Path(tmp, "transforms.trf").as_posix().replace(":", "\\:")
         ok, err = _run_ffmpeg(
-            ["ffmpeg", "-y", "-i", src, "-vf", f"vidstabdetect=shakiness=5:accuracy=15:result={transforms}",
+            ["ffmpeg", "-y", "-i", src, "-vf", f"vidstabdetect=shakiness=5:accuracy=15:result='{transforms}'",
              "-f", "null", "-"],
             timeout=300,
         )
         if not ok:
             return f"❌ the shake-analysis pass failed (pass 1):\n{err}"
         ok, err = _run_ffmpeg(
-            ["ffmpeg", "-y", "-i", src, "-vf", f"vidstabtransform=smoothing=30:input={transforms}",
+            ["ffmpeg", "-y", "-i", src, "-vf", f"vidstabtransform=smoothing=30:input='{transforms}'",
              "-c:a", "copy", dst],
             timeout=300,
         )

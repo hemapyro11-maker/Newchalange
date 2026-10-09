@@ -410,6 +410,12 @@ class Brain:
     def chain(self, cfg: dict | None = None, *, prefer_local: bool = False) -> list[Provider]:
         """المزوّدين المتاحين مرتبين حسب الجودة."""
         cfg = cfg if cfg is not None else load_config()
+        if cfg.get("assistant_mode") == "companion":
+            # One explicitly selected brain. Fail visibly rather than silently
+            # switching identity, quality, privacy or cost between providers.
+            name = cfg.get("primary_provider", "ollama")
+            prov = PROVIDERS.get(name)
+            return [prov] if prov and (not prov.needs_key or get_key(name)) else []
         enabled = set(cfg.get("enabled", list(PROVIDERS)))
         local_only = bool(cfg.get("local_only"))
         out = []
@@ -455,7 +461,8 @@ class Brain:
         for prov in candidates:
             now = time.time()
             with _lock:
-                if not self._available(prov, cfg, now):
+                single_local = cfg.get("assistant_mode") == "companion" and prov.name in LOCAL_PROVIDERS
+                if not single_local and not self._available(prov, cfg, now):
                     errors.append(f"{prov.label}: cooling down")
                     continue
                 self._inflight[prov.name] = self._inflight.get(prov.name, 0) + 1
@@ -525,6 +532,8 @@ class Brain:
         اختياري مش افتراضي.
         """
         cfg = load_config()
+        if cfg.get("assistant_mode") == "companion":
+            return self.chat(messages)
         candidates = self.chain(cfg)
         if len(candidates) < 2:
             return self.chat(messages)
@@ -785,13 +794,16 @@ def start_ollama_server() -> bool:
     return False
 
 
-def prewarm_local_async() -> None:
-    """Load the configured Ollama model on CPU without blocking the UI."""
+def prewarm_local_async(on_ready=None) -> None:
+    """Load the configured Ollama model without blocking the UI."""
     prov = PROVIDERS["ollama"]
-    model = load_config().get("models", {}).get("ollama", prov.model)
+    cfg = load_config()
+    model = cfg.get("models", {}).get("ollama", prov.model)
 
     def warm() -> None:
         if not is_local_alive(prov) and not start_ollama_server():
+            if on_ready:
+                on_ready(False)
             return
         root = prov.base_url.rsplit("/v1", 1)[0]
         try:
@@ -799,13 +811,16 @@ def prewarm_local_async() -> None:
                 f"{root}/api/generate",
                 {
                     "model": model, "prompt": "", "stream": False,
-                    "keep_alive": "10m",
-                    "options": {"num_gpu": 0, "num_ctx": 2048},
+                    "keep_alive": cfg.get("local_keep_alive", "30m"),
+                    "options": {"num_ctx": int(cfg.get("local_context", 4096))},
                 },
                 {"Content-Type": "application/json"}, prov.timeout,
             )
+            if on_ready:
+                on_ready(True)
         except Exception:
-            pass
+            if on_ready:
+                on_ready(False)
 
     threading.Thread(target=warm, name="nezuko-ollama-warmup", daemon=True).start()
 
@@ -893,6 +908,7 @@ def _call_ollama(prov: Provider, model: str, messages: list[dict],
     CPU instead of making every cloud fallback fail visibly to the user.
     """
     root = prov.base_url.rsplit("/v1", 1)[0]
+    cfg = load_config()
     payload = {
         "model": model,
         "messages": messages,
@@ -901,8 +917,15 @@ def _call_ollama(prov: Provider, model: str, messages: list[dict],
             "temperature": temperature,
             "num_predict": max_tokens,
         },
-        "keep_alive": "10m",
+        "keep_alive": cfg.get("local_keep_alive", "30m"),
     }
+    if cfg.get("assistant_mode") == "companion":
+        payload["think"] = bool(cfg.get("local_thinking", False))
+        payload["options"].update(num_ctx=int(cfg.get("local_context", 8192)))
+        specs = messages[0].get("nezuko_tools", []) if messages else []
+        if specs:
+            payload["tools"] = specs
+        payload["messages"] = [{k: v for k, v in msg.items() if k != "nezuko_tools"} for msg in messages]
     try:
         data = _post_json(f"{root}/api/chat", payload, {"Content-Type": "application/json"}, prov.timeout)
     except RuntimeError as exc:
@@ -917,6 +940,13 @@ def _call_ollama(prov: Provider, model: str, messages: list[dict],
         )
     message = data.get("message") or {}
     text = message.get("content", "")
+    if cfg.get("assistant_mode") == "companion" and message.get("tool_calls"):
+        call = message["tool_calls"][0].get("function", {})
+        allowed = {spec["function"]["name"] for spec in payload.get("tools", [])}
+        arguments = call.get("arguments", {}).get("arguments", "")
+        if call.get("name") not in allowed or not isinstance(arguments, str):
+            raise RuntimeError("Invalid local function call")
+        text = text + f"\nTOOL: {call['name']} {arguments}"
     if not text:
         raise RuntimeError(data.get("error") or "رد Ollama فارغ")
     return text

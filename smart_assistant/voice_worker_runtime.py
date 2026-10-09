@@ -41,7 +41,10 @@ class PersistentVoiceWorker:
         return self.process.poll() is None
 
     def submit(self, job: dict, timeout: int) -> tuple[bool, str]:
-        with self._lock:
+        deadline = time.monotonic() + timeout
+        if not self._lock.acquire(timeout=max(0, timeout)):
+            return False, "voice worker is still preparing; try again shortly"
+        try:
             if not self.alive:
                 return False, "persistent voice worker stopped"
             token = uuid.uuid4().hex
@@ -50,19 +53,30 @@ class PersistentVoiceWorker:
             temporary = self.queue / f"{token}.tmp"
             temporary.write_text(json.dumps(job, ensure_ascii=False), encoding="utf-8")
             os.replace(temporary, job_path)
-            deadline = time.monotonic() + timeout
             while time.monotonic() < deadline:
                 if result_path.is_file():
                     try:
                         result = json.loads(result_path.read_text(encoding="utf-8"))
-                        return bool(result.get("ok")), str(result.get("detail", "worker failed"))
-                    finally:
+                    except (OSError, json.JSONDecodeError):
+                        # The producer may still be flushing the file. Do not
+                        # remove a partial result or crash the conversation.
+                        time.sleep(0.03)
+                        continue
+                    try:
                         result_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    return bool(result.get("ok")), str(result.get("detail", "worker failed"))
                 if not self.alive:
                     return False, "persistent voice worker stopped"
                 time.sleep(0.03)
-            job_path.unlink(missing_ok=True)
+            try:
+                job_path.unlink(missing_ok=True)
+            except OSError:
+                pass
             return False, "voice generation timed out"
+        finally:
+            self._lock.release()
 
     def close(self) -> None:
         process = getattr(self, "process", None)

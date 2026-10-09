@@ -31,19 +31,45 @@ import sessions  # noqa: E402
 import theme  # noqa: E402
 
 
+@pytest.fixture(scope="module", autouse=True)
+def keep_tk_runtime_loaded():
+    """Keep the Windows bundled Tcl DLL alive across isolated app roots."""
+    guardian = tkinter.Tk()
+    guardian.withdraw()
+    yield
+    guardian.destroy()
+
+
 @pytest.fixture
 def app(monkeypatch):
     tmp = pathlib.Path(tempfile.mkdtemp())
     monkeypatch.setattr(brain, "_base_dir", lambda: tmp)
     monkeypatch.setattr(brain, "is_local_alive", lambda prov, **kw: False)
-    monkeypatch.setattr(brain, "prewarm_local_async", lambda: None)
+    monkeypatch.setattr(brain, "prewarm_local_async", lambda on_ready=None: None)
+    # This suite keeps coverage for the legacy settings. Companion-specific
+    # migration and settings are exercised separately below.
+    monkeypatch.setattr(main_gui.companion, "activate", lambda cfg: cfg)
     monkeypatch.setattr(sessions, "_base_dir", lambda: tmp)
     monkeypatch.setattr(hooks, "_base_dir", lambda: tmp)
     brain.reset_brain()
-    a = main_gui.AssistantApp()
+    try:
+        a = main_gui.AssistantApp()
+    except tkinter.TclError as exc:
+        # The bundled Windows test runtime intermittently fails to re-read its
+        # Tcl library while repeatedly creating roots. Retry bootstrap once;
+        # a persistent fault or any actual widget failure still fails the test.
+        if os.name != "nt" or not any(marker in str(exc) for marker in
+                                     ("tcl_findLibrary", "init.tcl", "tk.tcl")):
+            raise
+        import gc
+        gc.collect()
+        a = main_gui.AssistantApp()
     a.update()
     yield a
+    a._closing = True
     a.engine.stop()
+    if a.engine._worker:
+        a.engine._worker.join(timeout=2)
     a.destroy()
     brain.reset_brain()
 
@@ -70,7 +96,10 @@ def test_theme_choice_survives_restart(app, monkeypatch):
     try:
         assert fresh.mode == "light"
     finally:
+        fresh._closing = True
         fresh.engine.stop()
+        if fresh.engine._worker:
+            fresh.engine._worker.join(timeout=2)
         fresh.destroy()
 
 
@@ -104,7 +133,7 @@ def test_arabic_flows_right_to_left(app):
 
 
 def test_entry_justifies_left_in_english(app):
-    assert app.entry.cget("justify") == "left"
+    assert app.entry._textbox.tag_cget("composer_ltr", "justify") == "left"
 
 
 def test_mixed_arabic_chat_is_converted_for_tk_without_damaging_english():
@@ -186,7 +215,7 @@ def test_plugin_load_lines_go_to_the_status_line_not_the_stream(app):
     for i in range(8):
         app._render_log(f"🧩 plugin loaded: p{i}", "ok")
     assert len(app._rows) == before_rows
-    assert app._plugin_count == before_count + 8
+    assert app._plugin_count == len(app.engine._loaded_plugins)
 
 
 def test_plugin_count_appears_in_status_line(app):
@@ -741,3 +770,65 @@ def test_closing_clears_the_reference(app):
     app._open_settings()
     app._settings.close()
     assert app._settings is None
+
+
+def test_companion_settings_show_one_brain_and_editable_memory(app):
+    cfg = brain.load_config()
+    cfg.update(assistant_mode="companion", enabled=["ollama"], local_only=True)
+    brain.save_config(cfg)
+    app.engine.memory.save("I prefer Egyptian Arabic")
+    app._open_settings()
+    panel = app._settings
+    assert not any(i.get("cfg") in {"deep_mode", "verify_mode", "local_only"} for i in panel.data)
+    panel.page = "brain"
+    panel._build()
+    assert not any(i.get("kind") == "key" for i in panel.data)
+    target = next(i for i, idx in enumerate(panel._selectable()) if panel.data[idx]["kind"] == "memory_forget")
+    panel.cursor = target
+    panel._activate()
+    assert app.engine.memory.read() == []
+
+
+def test_conversation_stop_cancels_microphone(app):
+    app._toggle_conversation()
+    assert app._continuous_voice and app.voice_enabled
+    app._toggle_conversation()
+    assert not app._continuous_voice and app.engine._voice_cancel.is_set()
+
+
+def test_continuous_voice_does_not_record_during_pending_playback(app, monkeypatch):
+    called = []
+    app._continuous_voice = True
+    app._activity = "ready"
+    app._tts_pending = True
+    app._voice_ready_since = 1.0
+    monkeypatch.setattr(app, "_listen", lambda: called.append(True))
+    app._voice_tick()
+    assert called == [] and app._voice_ready_since == 0.0
+
+
+def test_companion_speaks_entire_answer_with_apostrophes(app, monkeypatch):
+    cfg = brain.load_config()
+    cfg["assistant_mode"] = "companion"
+    brain.save_config(cfg)
+    spoken = []
+    monkeypatch.setattr(app.engine, "speak", spoken.append)
+    text = "I'm here. " + "This is a complete sentence. "*20
+    app._speak(text)
+    assert " ".join(spoken) == " ".join(text.split())
+
+
+def test_companion_voice_modes_and_stt_choices_are_explicit(app):
+    cfg = brain.load_config()
+    cfg["assistant_mode"] = "companion"
+    brain.save_config(cfg)
+    app._open_settings()
+    panel = app._settings
+    panel.page = "voices"
+    panel._build()
+    assert {i["choice"] for i in panel.data if i.get("cfg") == "stt_model"} == {"base", "small", "turbo"}
+    for choice, offline in (("studio", True), ("instant", False)):
+        panel.cursor = next(i for i, idx in enumerate(panel._selectable())
+                            if panel.data[idx].get("cfg") == "voice_latency_mode" and panel.data[idx].get("choice") == choice)
+        panel._activate()
+        assert brain.load_config()["voice_local_only"] is offline

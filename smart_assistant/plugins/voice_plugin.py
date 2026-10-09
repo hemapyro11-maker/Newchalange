@@ -105,10 +105,12 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import urllib.error
 import urllib.request
 import unicodedata
 import wave
+from collections import deque
 import brain
 import media_runtime as mr
 import natural_voice_runtime as nvr
@@ -565,7 +567,13 @@ def _synthesize_english_native(text: str, out_path: pathlib.Path, lang: str = "e
     """Use Kokoro only for English so Arabic keeps its Egyptian identity."""
     if lang != "en" or not evr.available():
         return False
-    ok, _detail = evr.render(text, out_path)
+    if brain.load_config().get("assistant_mode") == "companion":
+        if not evr.ready():
+            evr.prewarm()
+            return False
+        ok, _detail = evr.render(text, out_path, timeout=8, persistent=True)
+    else:
+        ok, _detail = evr.render(text, out_path)
     return ok
 
 
@@ -592,7 +600,8 @@ def _synthesize_with_fallback(text: str, tmp_dir: pathlib.Path,
     lang = lang or _detect_lang(text)
     voice = _voice_for(lang)
     cfg = brain.load_config()
-    local_only = bool(cfg.get("local_only"))
+    local_only = bool(cfg.get("voice_local_only", False) if
+                      cfg.get("assistant_mode") == "companion" else cfg.get("local_only"))
     backends = list(_BACKENDS)
     # VoiceTut sounds like a studio model but diffusion inference is slow on CPU.
     # Conversation mode prefers Microsoft's Egyptian neural voice and retains
@@ -880,6 +889,14 @@ def _vad_prob(model, mono) -> float:
     return float(model(tensor, _SAMPLE_RATE).item())
 
 
+_recording_state = threading.local()
+
+
+def _record_cancelled() -> bool:
+    event = getattr(_recording_state, "cancel", None)
+    return event is not None and event.is_set()
+
+
 def _record_until_silence(out_path: pathlib.Path, max_seconds: int
                           ) -> tuple[str | None, bool]:
     """بيسجّل لحد ما تسكت. بيرجع (رسالة خطأ أو None، هل VAD اتستخدم).
@@ -891,6 +908,9 @@ def _record_until_silence(out_path: pathlib.Path, max_seconds: int
         return "sounddevice is not installed — pip install sounddevice", False
     model = _load_vad()
     if model is None:
+        import brain
+        if brain.load_config().get("assistant_mode") == "companion":
+            return _record_energy_turn(out_path, max_seconds), True
         return None, False
 
     kept: list = []
@@ -907,6 +927,8 @@ def _record_until_silence(out_path: pathlib.Path, max_seconds: int
         with sd.InputStream(samplerate=_SAMPLE_RATE, channels=1, dtype="int16",
                             blocksize=_VAD_CHUNK) as stream:
             for _ in range(int(max_chunks)):
+                if _record_cancelled():
+                    return "voice recording cancelled", True
                 block, _overflow = stream.read(_VAD_CHUNK)
                 mono = block[:, 0]
                 prob = _vad_prob(model, mono)
@@ -947,7 +969,76 @@ def _record_until_silence(out_path: pathlib.Path, max_seconds: int
     return None, True
 
 
+def _record_energy_turn(out_path: pathlib.Path, max_seconds: int) -> str | None:
+    """CPU-only endpointing when a neural VAD is unavailable in the EXE.
+
+    Adaptive RMS is less robust than Silero in noisy rooms, but avoids always
+    waiting a fixed five seconds. Retain a pre-roll so the first word survives.
+    """
+    import numpy as np
+    chunk_size = 512
+    chunks_per_second = _SAMPLE_RATE / chunk_size
+    noise, started, silent, voiced = 150.0, False, 0, 0
+    pre_roll, audio = deque(maxlen=8), []
+    try:
+        with sd.InputStream(samplerate=_SAMPLE_RATE, channels=1, dtype="int16",
+                            blocksize=chunk_size) as stream:
+            for index in range(int(max_seconds * chunks_per_second)):
+                if _record_cancelled():
+                    return "voice recording cancelled"
+                block, _ = stream.read(chunk_size)
+                mono = block[:, 0].copy()
+                rms = float(np.sqrt(np.mean(mono.astype(np.float32) ** 2)))
+                speech = rms > max(350.0, noise * 2.8)
+                if not started and not speech:
+                    noise = noise * 0.95 + rms * 0.05
+                if speech:
+                    if not started:
+                        audio.extend(pre_roll)
+                        started = True
+                    voiced += 1
+                    silent = 0
+                elif started:
+                    silent += 1
+                if started:
+                    audio.append(mono)
+                    if silent >= int(0.8 * chunks_per_second) and voiced >= 5:
+                        break
+                else:
+                    pre_roll.append(mono)
+                    if index >= int(10 * chunks_per_second):
+                        break
+        if voiced < 5:
+            return "did not hear clear speech — try again, closer to the mic"
+        with wave.open(str(out_path), "wb") as output:
+            output.setnchannels(1)
+            output.setsampwidth(2)
+            output.setframerate(_SAMPLE_RATE)
+            output.writeframes(np.concatenate(audio).tobytes())
+        return None
+    except Exception as exc:
+        return f"could not record from the microphone: {exc}"
+
+
 _faster_whisper_models: dict[str, object] = {}
+_faster_whisper_lock = threading.Lock()
+_STT_MODELS = {"tiny", "base", "small", "medium", "large-v3", "large-v3-turbo", "turbo"}
+
+
+def _listen_model() -> str:
+    model = brain.load_config().get("stt_model", WHISPER_MODEL)
+    return model if model in _STT_MODELS else WHISPER_MODEL
+
+
+def _whisper_model(model_size: str, *, cached_only=False):
+    from faster_whisper import WhisperModel
+    with _faster_whisper_lock:
+        model = _faster_whisper_models.get(model_size)
+        if model is None:
+            model = WhisperModel(model_size, device="cpu", compute_type="int8",
+                                 local_files_only=cached_only)
+            _faster_whisper_models[model_size] = model
+        return model
 
 
 def _transcribe_faster_whisper(wav_path: pathlib.Path, model_size: str,
@@ -959,10 +1050,7 @@ def _transcribe_faster_whisper(wav_path: pathlib.Path, model_size: str,
     except ImportError:
         return None, False
     try:
-        model = _faster_whisper_models.get(model_size)
-        if model is None:
-            model = WhisperModel(model_size, device="cpu", compute_type="int8")
-            _faster_whisper_models[model_size] = model
+        model = _whisper_model(model_size)
         try:
             segments, _info = model.transcribe(
                 str(wav_path), language=language, beam_size=5,
@@ -1397,12 +1485,12 @@ def _listen_smart(ctx) -> tuple[str | None, str | None]:
     """
     options = [a for a in ctx.args if "=" in a]
     positional = [a for a in ctx.args if "=" not in a]
-    language, model = None, WHISPER_MODEL
+    language, model = None, _listen_model()
     for option in options:
         key, value = option.split("=", 1)
         if key == "lang" and value in {"auto", "ar", "en"}:
             language = None if value == "auto" else value
-        elif key == "model" and value in {"tiny", "base", "small", "medium", "large-v3"}:
+        elif key == "model" and value in _STT_MODELS:
             model = value
         else:
             return None, "usage: listen [seconds] [lang=auto|ar|en] [model=tiny|base|small|medium|large-v3]"
@@ -1414,6 +1502,7 @@ def _listen_smart(ctx) -> tuple[str | None, str | None]:
         return None, err
 
     with tempfile.TemporaryDirectory(prefix="nezuko_listen_") as tmp:
+        _recording_state.cancel = getattr(ctx.engine, "_voice_cancel", None)
         wav_path = pathlib.Path(tmp) / "input.wav"
         if not explicit:
             err, used_vad = _record_until_silence(wav_path, _LISTEN_MAX_SECONDS)
@@ -1428,6 +1517,10 @@ def _listen_smart(ctx) -> tuple[str | None, str | None]:
             err = _record_audio(seconds, wav_path)
             if err:
                 return None, f"❌ {err}"
+        if _record_cancelled():
+            return None, "voice recording cancelled"
+        if hasattr(ctx.engine, "_set_status"):
+            ctx.engine._set_status("transcribing")
         try:
             return _transcribe(wav_path, model, language)
         except TypeError:
@@ -1445,6 +1538,8 @@ def _cmd_listen(ctx) -> str:
 
 def _cmd_listen_run(ctx) -> str:
     text, err = _listen_smart(ctx)
+    if _record_cancelled():
+        return "voice recording cancelled"
     if err:
         return err
     # The queued conversation is a two-way voice turn. The core selects its
@@ -1534,7 +1629,16 @@ def register(engine):
         # the 90-second diffusion model here only slows the whole application.
         # Kokoro is compact and benefits greatly: measured 18.62s cold vs 0.62s warm.
         evr.prewarm()
-        if cfg.get("local_only") and (cfg.get("preferred_voice_language") or "ar") == "ar":
+        if cfg.get("assistant_mode") == "companion":
+            def warm_stt():
+                try:
+                    _whisper_model(_listen_model(), cached_only=True)
+                except Exception:
+                    pass
+            threading.Thread(target=warm_stt, name="nezuko-stt-warmup", daemon=True).start()
+        offline_voice = (cfg.get("voice_local_only", False) if cfg.get("assistant_mode") == "companion"
+                         else cfg.get("local_only"))
+        if offline_voice and (cfg.get("preferred_voice_language") or "ar") == "ar":
             vtr.prewarm()
     except Exception:
         pass

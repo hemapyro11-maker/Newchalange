@@ -27,6 +27,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import brain
+import companion
 import command_text
 import hooks
 import intents
@@ -277,6 +278,7 @@ class AssistantEngine:
         self.plugins_dirs = default_plugin_dirs() if plugins_dirs is None else plugins_dirs
         self._loaded_plugins: list[str] = []
         self.skills_path = default_state_dir() / "skills.json"
+        self.memory = companion.Memory(default_state_dir())
         # المشروع اللي بنشتغل عليه — منه بتتبني خريطة الكود. المجلد
         # الحالي هو الافتراضي المعقول (إنت شغّلت نيزوكو من جوه
         # مشروعك)، وينفع تغيّره بأمر `project`.
@@ -443,6 +445,15 @@ class AssistantEngine:
         تنفيذه مبيطلّعش أحداث جديدة (منعًا للتكرار اللانهائي)."""
         self._queue.put((text, _HOOK_SENTINEL))
 
+    def speak(self, text: str):
+        """Queue literal speech without shell-style parsing of apostrophes."""
+        generation = self._generation
+        self._set_status("queued")
+        def speak_current(ctx):
+            if generation == self._generation:
+                self._execute("speak", [], "speak " + text)
+        self._queue.put(("speak", speak_current))
+
     def run_task(self, name: str, fn: Callable[[CommandContext], None]):
         """يضيف مهمة أتمتة (callable) لنفس طابور التنفيذ."""
         self._queue.put((name, fn))
@@ -531,6 +542,10 @@ class AssistantEngine:
 
     # ── builtin commands ──────────────────────────────────────────────
     def _register_builtin_commands(self):
+        self.registry.register("tool_find", self._cmd_tool_find, "tool_find <search words> — discover exact tool names and argument formats")
+        self.registry.register("memory_save", lambda ctx: self.memory.save(" ".join(ctx.args)), "memory_save <fact or preference> — remember an explicit user preference across sessions")
+        self.registry.register("memory_list", lambda ctx: self.memory.context() or "No saved memory notes.", "memory_list — inspect user-saved memory")
+        self.registry.register("memory_forget", lambda ctx: self.memory.forget(ctx.args[0] if ctx.args else ""), "memory_forget <number> — remove one saved memory note")
         import coding
         coding.register(self)
         self.registry.register("help", self._cmd_help, "عرض كل الأوامر المتاحة")
@@ -608,6 +623,17 @@ class AssistantEngine:
             for name, info in top:
                 lines.append(f"  • {name} — {info['count']} مرة")
         return "\n".join(lines)
+
+    def _cmd_tool_find(self, ctx: CommandContext) -> str:
+        terms = [intents.normalize(t) for t in ctx.args]
+        scored = []
+        for command in self.registry.list_commands():
+            haystack = intents.normalize(command.name + " " + command.description)
+            score = sum(term in haystack for term in terms if term)
+            if score:
+                scored.append((score, command.name, command.description))
+        scored.sort(key=lambda row: (-row[0], row[1]))
+        return "\n".join(f"{name}: {description}" for _, name, description in scored[:20]) or "No matching tool. Try another search term."
 
     # ── internal ───────────────────────────────────────────────────────
     def _log(self, msg: str, level: str = "info"):
@@ -776,7 +802,8 @@ class AssistantEngine:
             first = command_text.split(text)[0]
         except (ValueError, IndexError):
             first = text.split(maxsplit=1)[0] if text.split() else ""
-        close = difflib.get_close_matches(first.lower(), sorted(known), n=1, cutoff=FUZZY_CUTOFF)
+        close = ([] if companion.enabled(brain.load_config()) else
+                 difflib.get_close_matches(first.lower(), sorted(known), n=1, cutoff=FUZZY_CUTOFF))
         if close:
             rest = text.split(maxsplit=1)
             args = command_text.split(rest[1]) if len(rest) > 1 else []
@@ -1096,7 +1123,8 @@ class AssistantEngine:
         voice_turn = self._voice_turn_text == text
         if voice_turn:
             self._voice_turn_text = None
-        quick_reply = self._quick_social_reply(text)
+        cfg = brain.load_config()
+        quick_reply = None if companion.enabled(cfg) else self._quick_social_reply(text)
         if quick_reply is not None:
             with self._state_lock:
                 if generation != self._generation:
@@ -1138,11 +1166,28 @@ class AssistantEngine:
                 + (_THINK_HINT if hard else "")
                 + (f"\n{summary}\n" if summary else "")
                 + (f"\n{repo}\n" if repo else "")
-                + "\nAvailable commands:\n" + self._tool_catalog()
+                + "\nAvailable commands:\n" + ("" if companion.enabled(cfg) else self._tool_catalog())
             )},
             *self._live_turns()[-_MAX_CHAT_TURNS:],
             {"role": "user", "content": text},
         ]
+        if companion.enabled(cfg):
+            selected_tools = companion.tool_context(text, self.registry.list_commands())
+            system = companion.prompt(
+                language_instruction,
+                selected_tools,
+                self.memory.context(), voice=voice_turn,
+            )
+            if self._looks_like_code_work(text):
+                system += f"\nProject: {self.project_dir}\nMode: {self.coding_mode}\n" + coding.instructions(self.project_dir) + repo
+            specs = [{"type": "function", "function": {
+                "name": line.split(":", 1)[0], "description": line.split(":", 1)[1].strip(),
+                "parameters": {"type": "object", "properties": {
+                    "arguments": {"type": "string", "description": "Command arguments in the exact documented order; quote paths or arguments containing spaces. Empty string for no arguments."}},
+                    "required": ["arguments"], "additionalProperties": False}}}
+                for line in selected_tools.splitlines() if ":" in line]
+            messages = [{"role": "system", "content": system, "nezuko_tools": specs},
+                        *self._live_turns()[-20:], {"role": "user", "content": text}]
         # تلات مسارات، من الأرخص للأغلى:
         #   عادي   — نداء واحد
         #   محقّق  — 4 نداءات، النموذج بيراجع نفسه (CoVe)
@@ -1153,7 +1198,9 @@ class AssistantEngine:
             bool(cfg.get("auto_deep")) and hard
         )
         verify = (not go_deep) and bool(cfg.get("verify_mode")) and hard
-        if voice_turn:
+        if companion.enabled(cfg):
+            reply = b.chat(messages, max_tokens=240 if voice_turn else 900, temperature=0.6)
+        elif voice_turn:
             reply = b.chat(messages, max_tokens=250, prefer_local=True)
         elif go_deep:
             reply = b.deep_chat(messages)
@@ -1168,7 +1215,11 @@ class AssistantEngine:
             # Keep the provider dump for self-repair/diagnostics, but do not
             # flood the conversation with API JSON from six failed services.
             self.log_history.append(("diagnostic", f"brain providers: {reply.error}"))
-            if reply_language == "ar":
+            if companion.enabled(cfg):
+                public = ("العقل المحلي مش جاهز دلوقتي. افتح إعدادات المحرك وتأكد إن Ollama شغال والنموذج متثبت؛ تفاصيل العطل محفوظة في التشخيص."
+                          if reply_language == "ar" else
+                          "The local brain is not ready. Check the engine settings: Ollama must be running and the selected model installed. Details are saved in diagnostics.")
+            elif reply_language == "ar":
                 public = "محركات الذكاء مش متاحة دلوقتي. حاولت المزودين السحابيين والمحرك المحلي تلقائيًا؛ جرّب تاني بعد لحظة."
             else:
                 public = "The AI engines are unavailable right now. I tried the cloud providers and the local engine automatically; please try again in a moment."
@@ -1179,14 +1230,15 @@ class AssistantEngine:
             return
 
         body, tool, question = self._split_directives(reply.text)
-        badge = f"{'🔒' if reply.is_local else '☁️'} {reply.label}"
+        badge = "Nezuko · Local" if companion.enabled(cfg) else f"{'🔒' if reply.is_local else '☁️'} {reply.label}"
 
         with self._state_lock:
             if generation != self._generation:
                 return
             self.chat_history.append({"role": "user", "content": text})
             self.chat_history.append({"role": "assistant", "content": reply.text})
-        self._compact_history(b)
+        if not companion.enabled(cfg):
+            self._compact_history(b)
         if generation != self._generation:
             return
         with self._state_lock:

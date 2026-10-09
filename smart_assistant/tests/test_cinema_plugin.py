@@ -806,7 +806,9 @@ def test_burn_subtitles_produces_a_real_video(make_ctx, tmp_path, clip1, srt_fil
 def test_burn_subtitles_handles_a_colon_in_the_path(make_ctx, tmp_path, clip1):
     """مسار فيه `:` (زي C:\\...) لازم يتهرّب قبل ما يتحط في فلتر
     ffmpeg، وإلا الفلتر بيتفسر غلط."""
-    weird_dir = tmp_path / "weird:name"
+    # Windows already supplies a drive colon; a colon in a directory name
+    # is invalid on Windows and cannot exercise a real media operation.
+    weird_dir = tmp_path / ("weird name" if __import__("os").name == "nt" else "weird:name")
     weird_dir.mkdir()
     srt = weird_dir / "s.srt"
     srt.write_text("1\n00:00:00,000 --> 00:00:01,000\nHi\n", encoding="utf-8")

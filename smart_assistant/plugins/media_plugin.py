@@ -221,6 +221,11 @@ def _cmd_overlay_text(ctx) -> str:
         f"drawtext=text='{escaped}':fontcolor=white:fontsize=32:"
         "x=(w-text_w)/2:y=h-text_h-20:box=1:boxcolor=black@0.5"
     )
+    font = next((p for p in ("C:/Windows/Fonts/segoeui.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+                 if pathlib.Path(p).is_file()), None)
+    if font:
+        font = font.replace(":", "\\:")
+        vf += f":fontfile='{font}'"
     ok, err = _run_ffmpeg(["ffmpeg", "-y", "-i", src, "-vf", vf, "-codec:a", "copy", dst], timeout=300)
     if not ok:
         return f"❌ could not add the text:\n{err}"

@@ -1,5 +1,8 @@
 """Nezuko's bilingual chat workspace: conversations, composer and tools."""
 import os
+import math
+import time
+import threading
 import pathlib
 import shlex
 import sys
@@ -16,6 +19,7 @@ except ImportError:
 
 try:
     import brain
+    import companion
     import hooks
     import permissions
     import sessions
@@ -26,6 +30,7 @@ try:
 except ImportError:
     sys.path.insert(0, os.path.dirname(sys.executable))
     import brain
+    import companion
     import hooks
     import permissions
     import sessions
@@ -335,6 +340,9 @@ class AssistantApp(ctk.CTk):
         super().__init__()
 
         cfg = brain.load_config()
+        if not companion.enabled(cfg):
+            cfg = companion.activate(cfg)
+            brain.save_config(cfg)
         self.t = Translator(cfg.get("ui_lang", "en"))
         self.mode = cfg.get("ui_theme", "dark")
         self.c = theme.palette(self.mode)
@@ -342,8 +350,15 @@ class AssistantApp(ctk.CTk):
         self.ui_font = theme.pick_ui(self)
 
         self.engine = AssistantEngine(on_log=self._on_log, on_status=self._on_status)
+        self.engine._voice_cancel = threading.Event()
         self.engine.on_need_file = self._on_need_file
         self.voice_enabled = False
+        self._continuous_voice = False
+        self._tts_pending = False
+        self._voice_ready_since = 0.0
+        self._orb_phase = 0.0
+        self._closing = False
+        self._brain_health = "loading"
         self._last_command_name = ""
         self._plugin_count = 0
         self._thinking = None
@@ -356,7 +371,7 @@ class AssistantApp(ctk.CTk):
 
         self._build()
         self.engine.start()
-        brain.prewarm_local_async()
+        brain.prewarm_local_async(self._on_brain_ready)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.bind("<Escape>", lambda e: self._close_settings())
         self.bind("<Control-n>", lambda e: self._new_chat())
@@ -368,6 +383,8 @@ class AssistantApp(ctk.CTk):
         self.bind("<Control-Shift-O>", lambda e: self._toggle_tools_panel())
         self.bind("<F1>", lambda e: self._seed_prompt("help"))
         self.after(350, self._banner)
+        self.after(350, self._voice_tick)
+        self.after(100, self._animate_orb)
 
     # ── مساعدات ────────────────────────────────────────────────────────
     @property
@@ -467,7 +484,7 @@ class AssistantApp(ctk.CTk):
         # Left navigation mirrors a modern coding assistant: identity, new chat,
         # recent conversations and settings stay visible instead of hiding in commands.
         self.sidebar = ctk.CTkFrame(
-            self.root, width=258, fg_color="#171717" if self.mode == "dark" else "#f2f2ef",
+            self.root, width=220, fg_color=c["panel"] if self.mode == "dark" else "#f2f2ef",
             corner_radius=0, border_width=0,
         )
         self.sidebar.grid(row=0, column=0, sticky="nsew")
@@ -535,6 +552,14 @@ class AssistantApp(ctk.CTk):
             header, text="", text_color=c["green"], font=self._font(11, True),
         )
         self.activity_label.pack(side=badge_side, padx=10, pady=17)
+        self.conversation_button = ctk.CTkButton(
+            header, text=self.t.t("start_conversation"), command=self._toggle_conversation,
+            width=140, height=32, corner_radius=16, fg_color=c["panel_hi"],
+            hover_color=c["border"], text_color=c["accent"], font=self._font(11, True),
+        )
+        self.conversation_button.pack(side=badge_side, padx=6, pady=16)
+        self.orb = tk.Canvas(header, width=48, height=48, bg=c["bg"], highlightthickness=0)
+        self.orb.pack(side=badge_side, padx=4, pady=6)
 
         self.stream = ctk.CTkTextbox(
             self.main, fg_color=c["bg"], corner_radius=0,
@@ -566,8 +591,8 @@ class AssistantApp(ctk.CTk):
         send_side = "left" if self._rtl else "right"
         self.send_button = ctk.CTkButton(
             box, text="➤", command=self._send, width=38, height=38,
-            corner_radius=19, fg_color="#2463b4", hover_color="#3478d4",
-            text_color="#ffffff", font=self._font(15, True),
+            corner_radius=19, fg_color=c["accent"], hover_color=c["blue"],
+            text_color=c["bg"], font=self._font(15, True),
         )
         self.send_button.pack(side=send_side, padx=7, pady=7)
 
@@ -622,7 +647,7 @@ class AssistantApp(ctk.CTk):
 
         # Codex-style outputs rail: generated work, sources and tools stay visible.
         self.tools_panel = ctk.CTkFrame(
-            self.root, width=300, fg_color=c["panel"], corner_radius=18,
+            self.root, width=260, fg_color=c["panel"], corner_radius=18,
             border_width=1, border_color=c["border"],
         )
         self.tools_panel.grid(row=0, column=2, sticky="nsew", padx=(0, 12), pady=12)
@@ -967,7 +992,9 @@ class AssistantApp(ctk.CTk):
             parts.append(self.t.t("coding_plan"))
         else:
             parts.append(self.t.t("coding_auto") if permissions.automatic() else self.t.t("coding_ask"))
-        if ready:
+        if companion.enabled(brain.load_config()):
+            parts.append("عقل محلي واحد · بدون اشتراك" if self._rtl else "One local brain · No subscription")
+        elif ready:
             left = sum(max(0, r["rpd"] - r["used_today"]) for r in ready)
             parts.append(f"{ready[0]['label'].lower()}")
             if len(ready) > 1:
@@ -978,7 +1005,7 @@ class AssistantApp(ctk.CTk):
         cfg = brain.load_config()
         if cfg.get("deep_mode"):
             parts.append(self.t.t("mode_deep"))
-        if cfg.get("local_only"):
+        if cfg.get("local_only") and not companion.enabled(cfg):
             parts.append(self.t.t("mode_local"))
         if self.voice_enabled:
             parts.append(self.t.t("mode_voice"))
@@ -987,9 +1014,18 @@ class AssistantApp(ctk.CTk):
         if self._plugin_count:
             parts.append(self.t.t("plugins_loaded", n=self._plugin_count))
         self.status_label.configure(text=f"{GLYPH_STATUS}  " + "  ·  ".join(parts))
+        if hasattr(self, "conversation_button"):
+            self.conversation_button.configure(text=self.t.t(
+                "end_conversation" if self._continuous_voice else "start_conversation"))
         if hasattr(self, "activity_label"):
             key = f"activity_{self._activity}"
-            self.activity_label.configure(text="●  " + self.t.t(key))
+            label = self.t.t(key)
+            if companion.enabled(cfg) and self._activity == "ready":
+                if self._brain_health == "loading":
+                    label = "تحميل العقل…" if self._rtl else "Loading brain…"
+                elif self._brain_health == "not_ready":
+                    label = "العقل مش جاهز" if self._rtl else "Brain not ready"
+            self.activity_label.configure(text="●  " + label)
         if hasattr(self, "mode_badge"):
             self.mode_badge.configure(
                 text=self.t.t("coding_plan") if self.engine.coding_mode == "plan"
@@ -1091,11 +1127,53 @@ class AssistantApp(ctk.CTk):
         # Pressing the conversation microphone implies a two-way voice session.
         # Keep voice enabled so the assistant reads its answer back automatically.
         self.voice_enabled = True
+        self.engine._voice_cancel.clear()
         self._refresh_status()
-        self._add_user("🎤 …")
+        if not companion.enabled(brain.load_config()):
+            self._add_user("🎤 …")
         self._last_command_name = "listen_run"
         self._show_thinking()
         self.engine.submit("listen_run")
+
+    def _toggle_conversation(self):
+        self._continuous_voice = not self._continuous_voice
+        if self._continuous_voice:
+            self.voice_enabled = True
+            self._voice_ready_since = 0.0
+        else:
+            self.engine._voice_cancel.set()
+        self._refresh_status()
+
+    def _voice_tick(self):
+        """Listen again only after tools and actual playback have finished."""
+        if self._closing:
+            return
+        if self._continuous_voice:
+            ready = (self._activity == "ready" and not self._tts_pending
+                     and self.engine._queue.empty() and not self.engine._pending_intent
+                     and not self.engine._pending_args and self._settings is None
+                     and (not companion.enabled(brain.load_config()) or self._brain_health == "ready"))
+            if ready:
+                if not self._voice_ready_since:
+                    self._voice_ready_since = time.monotonic()
+                elif time.monotonic() - self._voice_ready_since > 0.8:
+                    self._voice_ready_since = 0.0
+                    self._listen()
+            else:
+                self._voice_ready_since = 0.0
+        self.after(300, self._voice_tick)
+
+    def _animate_orb(self):
+        if self._closing:
+            return
+        self._orb_phase += 0.12
+        if hasattr(self, "orb") and self.orb.winfo_exists():
+            self.orb.delete("all")
+            active = self._activity not in {"ready", "stopped"} or self._brain_health == "loading"
+            radius = 10 + (2 * math.sin(self._orb_phase) if active else 0)
+            for r, color in ((21, self.c["border"]), (16, self.c["blue"]), (radius, self.c["accent"])):
+                self.orb.create_oval(24-r, 24-r, 24+r, 24+r, outline=color, width=2)
+        self.after(80, self._animate_orb)
 
     def _repair(self):
         self._add_user("🩺 " + self.t.t("tool_repair"))
@@ -1105,6 +1183,9 @@ class AssistantApp(ctk.CTk):
 
     def _toggle_voice(self):
         self.voice_enabled = not self.voice_enabled
+        if not self.voice_enabled:
+            self._continuous_voice = False
+            self.engine._voice_cancel.set()
         self._refresh_status()
 
     def _toggle_theme(self):
@@ -1135,6 +1216,22 @@ class AssistantApp(ctk.CTk):
     def _speak(self, text: str):
         text = text.rpartition("\n— ")[0] if "\n— " in text else text
         snippet = " ".join(text.split()).replace('"', "").replace("'", "")
+        if companion.enabled(brain.load_config()):
+            snippet = " ".join(text.split())
+            self._tts_pending = False
+            self._last_command_name = "speak"
+            # Queue the entire answer as short utterances, with no lost words.
+            chunks, chunk = [], ""
+            for word in snippet.split():
+                if len(chunk) + len(word) > 240 and chunk:
+                    chunks.append(chunk)
+                    chunk = ""
+                chunk = (chunk + " " + word).strip()
+            if chunk:
+                chunks.append(chunk)
+            for chunk in chunks:
+                self.engine.speak(chunk)
+            return
         # Short conversational turns begin speaking much sooner and feel more
         # natural than waiting to synthesize a long formatted answer.
         if len(snippet) > 180:
@@ -1145,8 +1242,17 @@ class AssistantApp(ctk.CTk):
             self.engine.submit(f"speak {snippet}")
 
     def _on_close(self):
+        self._closing = True
+        self._continuous_voice = False
+        self.engine._voice_cancel.set()
         self.engine.shutdown()
         self.destroy()
+
+    def destroy(self):
+        self._closing = True
+        if hasattr(self, "engine") and hasattr(self.engine, "_voice_cancel"):
+            self.engine._voice_cancel.set()
+        super().destroy()
 
     # ── ربط اختيار الملف ───────────────────────────────────────────────
     def _on_need_file(self, spec, callback):
@@ -1172,9 +1278,11 @@ class AssistantApp(ctk.CTk):
     def _safe_after(self, fn, *args):
         """`after` بترمي RuntimeError لو النافذة اتقفلت — بيحصل فعليًا
         وقت الخروج لما الـ worker يطلع وينادي on_status بعد التدمير."""
+        if getattr(self, "_closing", False):
+            return
         try:
             self.after(0, fn, *args)
-        except RuntimeError:
+        except (RuntimeError, tk.TclError):
             pass
 
     def _on_log(self, msg: str, level: str = "info"):
@@ -1184,20 +1292,43 @@ class AssistantApp(ctk.CTk):
         )
         if level == "info" and self.voice_enabled and is_final_model_reply and \
                 self._last_command_name not in ("speak", "voice_status"):
+            self._tts_pending = True
             self._safe_after(self._speak, msg)
         elif level == "error" and self.voice_enabled and \
                 self._last_command_name not in ("speak", "voice_status") and \
-                ("محركات الذكاء مش متاحة" in msg or "AI engines are unavailable" in msg):
+                any(marker in msg for marker in ("محركات الذكاء مش متاحة", "AI engines are unavailable",
+                                                "العقل المحلي مش جاهز", "The local brain is not ready")):
             # A microphone turn must always end with audible feedback. Speak a
             # concise status rather than reading provider JSON and stack traces.
             audible = (
                 "محركات الذكاء مش متاحة دلوقتي. حاول تاني بعد لحظة."
-                if self.t.lang == "ar" else
+                if _has_arabic(msg) else
                 "The AI engines are unavailable right now. Please try again in a moment."
             )
+            if companion.enabled(brain.load_config()):
+                audible = ("العقل المحلي مش جاهز دلوقتي. راجع إعدادات المحرك."
+                           if _has_arabic(msg) else "The local brain is not ready. Please check the engine settings.")
             self._safe_after(self._speak, audible)
 
     def _render_log(self, msg: str, level: str):
+        if "voice recording cancelled" in msg:
+            self._hide_thinking()
+            return
+        if self._continuous_voice and "did not hear clear speech" in msg:
+            self._hide_thinking()
+            return
+        if self._continuous_voice and level == "error":
+            self._continuous_voice = False
+            self._tts_pending = False
+        if msg.startswith("🔊 spoken with") and companion.enabled(brain.load_config()):
+            self._refresh_status()
+            return
+        if companion.enabled(brain.load_config()) and msg.startswith(("🎤 سمعتك:", "🎤 I heard:")):
+            transcript = msg.splitlines()[0].split(":", 1)[1].strip()
+            self._hide_thinking()
+            self._add_user(transcript)
+            self._show_thinking()
+            return
         # تحميل الإضافات بيطبع عشرات الأسطر عند كل تشغيل — بيتعدّوا في
         # سطر الحالة بدل ما يغرقوا أول شاشة. النص الكامل في log_history.
         if level == "ok" and "plugin loaded:" in msg:
@@ -1209,6 +1340,8 @@ class AssistantApp(ctk.CTk):
         badge = ""
         if "\n— " in msg:
             msg, _, badge = msg.rpartition("\n— ")
+            if badge == "Nezuko · Local":
+                self._brain_health = "ready"
         # سطر بيبدأ بـ ↪ معناه أمر اتنفذ — بنعرضه كأداة مش كرد
         if msg.startswith("↪"):
             self._blank()
@@ -1220,6 +1353,10 @@ class AssistantApp(ctk.CTk):
     def _on_status(self, status: str):
         self._activity = status
         self._safe_after(lambda: self._refresh_status())
+
+    def _on_brain_ready(self, ready: bool):
+        self._brain_health = "ready" if ready else "not_ready"
+        self._safe_after(self._refresh_status)
 
     # ── الإعدادات ──────────────────────────────────────────────────────
     def _open_settings(self):
@@ -1281,7 +1418,11 @@ class SettingsPanel(ctk.CTkToplevel):
 
     # ── بنود كل صفحة ───────────────────────────────────────────────────
     def _items(self) -> list[dict]:
-        return getattr(self, f"_page_{self.page}")()
+        items = getattr(self, f"_page_{self.page}")()
+        if self.page == "home" and companion.enabled(brain.load_config()):
+            items = [item for item in items if item.get("cfg") not in
+                     {"deep_mode", "auto_deep", "verify_mode", "local_only"}]
+        return items
 
     def _page_home(self) -> list[dict]:
         rows = self.app._brain_rows()
@@ -1329,6 +1470,24 @@ class SettingsPanel(ctk.CTkToplevel):
         ]
 
     def _page_brain(self) -> list[dict]:
+        cfg = brain.load_config()
+        if companion.enabled(cfg):
+            ar = self.app._rtl
+            prov = brain.PROVIDERS["ollama"]
+            items = [
+                {"kind": "head", "label": "العقل المحلي" if ar else "Local brain"},
+                {"kind": "info", "label": cfg.get("models", {}).get("ollama", companion.MODEL),
+                 "value": self._tr("running_word") if brain.is_local_alive(prov) else self._tr("not_running"),
+                 "note": "نموذج واحد، بدون تبديل أو اشتراك." if ar else "One selected model, no provider switching or subscription."},
+                {"kind": "cmd", "label": "فحص المحرك" if ar else "Engine diagnostics", "cmd": "brain_status", "value": "›"},
+                {"kind": "head", "label": "ذاكرتك المحفوظة" if ar else "Your saved memory"},
+            ]
+            for i, note in enumerate(self.app.engine.memory.read(), 1):
+                items.append({"kind": "memory_forget", "label": note, "index": str(i),
+                              "value": "حذف" if ar else "Forget"})
+            items.append({"kind": "info", "label": "قول لي افتكري كذا لحفظ معلومة. اضغط على المعلومة لحذفها." if ar else
+                          "Ask me to remember a fact. Select a saved note to forget it.", "value": ""})
+            return items
         items = [{"kind": "head", "label": self._tr("free_providers")}]
         for prov in sorted(brain.PROVIDERS.values(), key=lambda p: -p.quality):
             if prov.needs_key:
@@ -1514,10 +1673,26 @@ class SettingsPanel(ctk.CTkToplevel):
         cfg = brain.load_config()
         arabic = cfg.get("human_voice_speaker", "Omnia")
         english = cfg.get("english_voice_voice", "af_heart")
-        items = [
+        items = []
+        if companion.enabled(cfg):
+            ar = self.app._rtl
+            items.extend([
+                {"kind": "head", "label": "فهم الكلام · نماذج محلية" if ar else "Speech recognition · Local models"},
+                *[{"kind": "voice_choice", "label": label, "cfg": "stt_model", "choice": model,
+                   "value": "✓" if cfg.get("stt_model", "base") == model else ""}
+                  for model, label in (("base", "Base · سريع" if ar else "Base · Fast"),
+                                       ("small", "Small · متوازن" if ar else "Small · Balanced"),
+                                       ("turbo", "Turbo · أكبر وأبطأ على المعالج" if ar else "Turbo · Larger and slower on CPU"))],
+                {"kind": "head", "label": "طريقة الصوت العربي" if ar else "Arabic speech mode"},
+                {"kind": "voice_choice", "label": "سريع: سلمى المصرية · يحتاج إنترنت" if ar else "Fast: Egyptian Salma · Internet required",
+                 "cfg": "voice_latency_mode", "choice": "instant", "value": "✓" if cfg.get("voice_latency_mode", "instant") == "instant" else ""},
+                {"kind": "voice_choice", "label": "استوديو محلي: الأصوات التالية · أبطأ" if ar else "Local studio: voices below · Slower",
+                 "cfg": "voice_latency_mode", "choice": "studio", "value": "✓" if cfg.get("voice_latency_mode") == "studio" else ""},
+            ])
+        items.extend([
             {"kind": "head", "label": self._tr("arabic_voices")},
             {"kind": "info", "label": self._tr("voice_ar_note"), "value": ""},
-        ]
+        ])
         for name in ("Omnia", "Asmaa", "Hanan", "Yasmin", "Esraa", "Sarah"):
             items.append({"kind": "voice_choice", "label": name,
                           "cfg": "human_voice_speaker", "choice": name,
@@ -1693,6 +1868,8 @@ class SettingsPanel(ctk.CTkToplevel):
             cfg = brain.load_config()
             cfg[item["cfg"]] = not cfg.get(item["cfg"])
             brain.save_config(cfg)
+        elif kind == "memory_forget":
+            self.app.engine.memory.forget(item["index"])
         elif kind == "theme":
             self.app._toggle_theme()
             self.c = self.app.c
@@ -1702,6 +1879,8 @@ class SettingsPanel(ctk.CTkToplevel):
         elif kind == "voice_choice":
             cfg = brain.load_config()
             cfg[item["cfg"]] = item["choice"]
+            if item["cfg"] == "voice_latency_mode":
+                cfg["voice_local_only"] = item["choice"] == "studio"
             brain.save_config(cfg)
         elif kind == "voice_preview":
             sample = ("أهلاً، أنا نيزوكو. هساعدك بهدوء وبصوت مصري طبيعي."
@@ -1790,4 +1969,6 @@ class SettingsPanel(ctk.CTkToplevel):
 
 if __name__ == "__main__":
     app = AssistantApp()
+    if os.name == "nt":
+        app.state("zoomed")
     app.mainloop()

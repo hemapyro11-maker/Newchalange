@@ -51,7 +51,8 @@ _NEVER = frozenset({
 # These commands only read state or play/preview local audio. They do not write
 # files, contact another person, or execute user-controlled code, so asking the
 # user to type `y` makes normal voice conversation unusably slow.
-_ALWAYS_SAFE = frozenset({"speak", "voice_status", "stt_status", "listen"})
+_ALWAYS_SAFE = frozenset({"speak", "voice_status", "stt_status", "listen",
+                          "tool_find", "memory_save", "memory_list", "memory_forget"})
 
 
 def never_allowed() -> frozenset[str]:
