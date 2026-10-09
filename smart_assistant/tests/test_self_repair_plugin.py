@@ -49,6 +49,23 @@ def test_parse_patch_rejects_non_json():
     assert sr._parse_patch('{"search":"old","replace":"new","reason":"fix"}')["replace"] == "new"
 
 
+def test_companion_repair_preserves_selected_brain(monkeypatch):
+    cfg = {"assistant_mode": "companion", "primary": "ollama",
+           "enabled": ["ollama", "groq"], "models": {"ollama": "qwen3.5:4b"}}
+    inspected = []
+    monkeypatch.setattr(sr.brain, "load_config", lambda: cfg)
+    monkeypatch.setattr(sr.brain, "is_local_alive", lambda *a, **k: True)
+    monkeypatch.setattr(sr, "_models_for", lambda p: inspected.append(p.name) or ["llama3.2:1b"])
+    monkeypatch.setattr(sr.brain, "save_config", lambda c: (_ for _ in ()).throw(AssertionError("changed brain")))
+    monkeypatch.setattr(sr, "_functional_probe", lambda *a: (_ for _ in ()).throw(AssertionError("wrong model probe")))
+    fixed, reports = sr._repair_external_providers()
+    assert inspected == ["ollama"]
+    assert fixed == []
+    assert cfg["models"]["ollama"] == "qwen3.5:4b"
+    assert any("ollama pull qwen3.5:4b" in report for report in reports)
+    assert "AI engines answering real prompts: 0/1" in reports
+
+
 def test_sensitive_call_scanner_detects_new_subprocess_use():
     safe = ast.parse("def f():\n    return 1\n")
     unsafe = ast.parse("def f():\n    return subprocess.run(['x'])\n")

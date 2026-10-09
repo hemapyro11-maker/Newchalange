@@ -68,6 +68,9 @@ def _repair_external_providers() -> tuple[list[str], list[str]]:
     fixed, reports = [], []
     cfg = brain.load_config()
     enabled = set(cfg.get("enabled", brain.PROVIDERS))
+    companion_mode = cfg.get("assistant_mode") == "companion"
+    if companion_mode:
+        enabled = {cfg.get("primary", "ollama")}
     ollama = brain.PROVIDERS["ollama"]
     if "ollama" in enabled and not brain.is_local_alive(ollama, timeout=0.5):
         if _start_ollama():
@@ -105,6 +108,14 @@ def _repair_external_providers() -> tuple[list[str], list[str]]:
             reports.append(f"{provider.label}: unreachable; fallback active")
             continue
         if configured not in models:
+            if companion_mode:
+                reports.append(
+                    f"{provider.label}: selected model '{configured}' is missing; "
+                    f"install it with ollama pull {configured}"
+                    if provider.name == "ollama" else
+                    f"{provider.label}: selected model '{configured}' is unavailable"
+                )
+                continue
             same_family = next(
                 (model for model in models
                  if model.split(":", 1)[0] == configured.split(":", 1)[0]), None
