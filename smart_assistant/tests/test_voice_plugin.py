@@ -555,10 +555,11 @@ class _FakeSD:
         self.rec_args = None
         self.waited = False
 
-    def rec(self, n, samplerate, channels, dtype):
+    def rec(self, n, samplerate, channels, dtype, device=None):
         if self._raise:
             raise self._raise
         self.rec_args = (n, samplerate, channels, dtype)
+        self.device = device
         return _FakeAudioArray(self._data)
 
     def wait(self):

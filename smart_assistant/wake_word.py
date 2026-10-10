@@ -47,8 +47,8 @@ def load_detector(folder):
 
 
 class TriggerGate:
-    """Reject single-frame spikes and repeated detections of the same utterance."""
-    def __init__(self, threshold=0.6, frames=2, cooldown=5.0):
+    """Configurable evidence window with a cooldown between utterances."""
+    def __init__(self, threshold=0.5, frames=1, cooldown=5.0):
         self.threshold, self.frames, self.cooldown = threshold, frames, cooldown
         self.count, self.next_allowed = 0, 0.0
 
@@ -65,9 +65,14 @@ class TriggerGate:
 
 
 class WakeListener:
-    def __init__(self, folder, on_wake, on_status, *, detector_factory=load_detector, stream_factory=None):
+    def __init__(self, folder, on_wake, on_status, *, detector_factory=load_detector, stream_factory=None,
+                 device=None, threshold=0.5, frames=1, on_metrics=None):
         self.folder, self.on_wake, self.on_status = pathlib.Path(folder), on_wake, on_status
         self.detector_factory, self.stream_factory = detector_factory, stream_factory
+        self.device = device
+        self.threshold = max(0.1, min(0.95, float(threshold)))
+        self.frames = max(1, min(3, int(frames)))
+        self.on_metrics = on_metrics or (lambda metrics: None)
         self.active = threading.Event()
         self.stopped = threading.Event()
         self.released = threading.Event()
@@ -95,7 +100,8 @@ class WakeListener:
             self.on_status("loading")
             detector = self.detector_factory(self.folder)
             stream_factory = self.stream_factory or sd.RawInputStream
-            gate = TriggerGate()
+            gate = TriggerGate(self.threshold, self.frames)
+            last_metrics, peak_score = 0.0, 0.0
             while not self.stopped.is_set():
                 if not self.active.wait(0.2):
                     continue
@@ -120,7 +126,9 @@ class WakeListener:
                 fired = False
                 self.released.clear()
                 try:
+                    device_args = {"device": self.device} if self.device is not None else {}
                     with stream_factory(samplerate=16000, blocksize=1280, channels=1,
+                                        **device_args,
                                         dtype="int16", callback=receive):
                         self.on_status("waiting")
                         while self.active.is_set() and not self.stopped.is_set():
@@ -128,8 +136,19 @@ class WakeListener:
                                 chunk = audio.get(timeout=0.1)
                             except queue.Empty:
                                 continue
-                            scores = detector.predict(np.frombuffer(chunk, dtype=np.int16))
-                            if gate.accept(max(scores.values(), default=0), time.monotonic()):
+                            samples = np.frombuffer(chunk, dtype=np.int16)
+                            scores = detector.predict(samples)
+                            score = float(max(scores.values(), default=0))
+                            now = time.monotonic()
+                            peak_score = max(peak_score, score)
+                            accepted = gate.accept(score, now)
+                            if now - last_metrics >= 0.25 or accepted:
+                                last_metrics = now
+                                self.on_metrics({"rms": float(np.sqrt(np.mean(samples.astype(np.float32)**2)))
+                                                 if samples.size else 0.0,
+                                                 "score": score, "peak_score": peak_score,
+                                                 "threshold": self.threshold})
+                            if accepted:
                                 fired = True
                                 self.active.clear()
                                 break
@@ -142,9 +161,28 @@ class WakeListener:
                 else:
                     self.on_status("paused")
         except Exception as exc:
-            self.on_status("error:" + type(exc).__name__)
+            self.on_status("error:" + type(exc).__name__ + ": " + str(exc)[:240])
         finally:
             self.active.clear()
+
+
+def input_devices():
+    """Stable names distinguish the same microphone under different host APIs."""
+    import sounddevice as sd
+    hosts = sd.query_hostapis()
+    return [(f"{device['name']} [{hosts[device['hostapi']]['name']}]", index)
+            for index, device in enumerate(sd.query_devices()) if device['max_input_channels'] > 0]
+
+
+def configured_input(cfg):
+    """Resolve by name on each run: Windows device indices can change after reboot."""
+    name = cfg.get("microphone_device", "")
+    if not name:
+        return None
+    for label, index in input_devices():
+        if label == name:
+            return index
+    raise ValueError("Selected microphone is disconnected. Select another microphone in Settings.")
 
 
 def play_acknowledgement(language="ar"):

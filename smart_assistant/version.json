@@ -1,5 +1,5 @@
 {
-  "version": "0.5.1",
-  "notes": "Central Jarvis orbital console with schematic grid, truthful system state, and compact conversation mode.",
+  "version": "0.6.0",
+  "notes": "Jarvis command center with real local telemetry, shared-engine tools, microphone selection and wake confidence diagnostics.",
   "url": "https://github.com/hemapyro11-maker/Newchalange/tree/nezuko-professional-upgrade/smart_assistant"
 }

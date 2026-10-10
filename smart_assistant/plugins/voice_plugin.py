@@ -825,12 +825,17 @@ def _cmd_voice_status(ctx) -> str:
 
 # ── استماع صوتي (STT): sounddevice للتسجيل + whisper CLI للتفريغ ────────
 
+def _input_device():
+    import wake_word
+    return wake_word.configured_input(brain.load_config())
+
+
 def _record_audio(seconds: int, out_path: pathlib.Path) -> str | None:
     """يسجل من المايك الافتراضي، يرجع None لو نجح أو رسالة خطأ لو فشل."""
     if sd is None:
         return "sounddevice is not installed — pip install sounddevice"
     try:
-        audio = sd.rec(int(seconds * _SAMPLE_RATE), samplerate=_SAMPLE_RATE, channels=1, dtype="int16")
+        audio = sd.rec(int(seconds * _SAMPLE_RATE), samplerate=_SAMPLE_RATE, channels=1, dtype="int16", device=_input_device())
         sd.wait()
     except Exception as e:
         return f"could not record from the microphone: {e}"
@@ -936,7 +941,7 @@ def _record_until_silence(out_path: pathlib.Path, max_seconds: int
     max_chunks = (max_seconds * _SAMPLE_RATE) // _VAD_CHUNK
 
     try:
-        with sd.InputStream(samplerate=_SAMPLE_RATE, channels=1, dtype="int16",
+        with sd.InputStream(samplerate=_SAMPLE_RATE, channels=1, dtype="int16", device=_input_device(),
                             blocksize=_VAD_CHUNK) as stream:
             for _ in range(int(max_chunks)):
                 if _record_cancelled():
@@ -993,7 +998,7 @@ def _record_energy_turn(out_path: pathlib.Path, max_seconds: int) -> str | None:
     noise, started, silent, voiced = 150.0, False, 0, 0
     pre_roll, audio = deque(maxlen=8), []
     try:
-        with sd.InputStream(samplerate=_SAMPLE_RATE, channels=1, dtype="int16",
+        with sd.InputStream(samplerate=_SAMPLE_RATE, channels=1, dtype="int16", device=_input_device(),
                             blocksize=chunk_size) as stream:
             for index in range(int(max_seconds * chunks_per_second)):
                 if _record_cancelled():

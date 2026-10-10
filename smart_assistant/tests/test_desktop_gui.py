@@ -116,6 +116,44 @@ def test_wake_ignores_disabled_busy_or_playing_voice(desktop, monkeypatch):
     assert not calls
 
 
+def test_wake_still_acknowledges_when_local_brain_needs_attention(desktop, monkeypatch):
+    calls = []
+    desktop.health = "not_ready"
+    desktop.wake_enabled = True
+    monkeypatch.setattr(desktop.engine, "run_task", lambda name, fn: calls.append(name))
+    monkeypatch.setattr(desktop.engine, "listen", lambda: calls.append("listen"))
+    desktop.on_wake()
+    assert calls == ["wake acknowledgement", "listen"]
+
+
+def test_dashboard_navigation_keeps_chat_and_uses_real_telemetry(desktop):
+    desktop.health = "ready"
+    desktop.dashboard.refresh()
+    assert "ready" in desktop.dashboard.overview.text()
+    assert "18" in desktop.dashboard.overview.text()
+    desktop.dashboard.set_metrics({"rms": 3276.8, "score": .42, "peak_score": .48, "threshold": .5})
+    assert desktop.dashboard.level.value() == 67
+    assert "0.42" in desktop.dashboard.score.text()
+    desktop.add_message("user", "اختبار English")
+    assert desktop.pages.currentIndex() == 1
+    desktop.show_dashboard()
+    assert desktop.pages.currentIndex() == 0
+    assert desktop.messages == [("user", "اختبار English")]
+    desktop.show_chat()
+    assert not desktop.entry.isHidden()
+
+
+def test_composer_shortcut_opens_chat_from_command_center(desktop, qtapp):
+    desktop.show_dashboard()
+    QTest.keyClick(desktop, Qt.Key.Key_L, Qt.KeyboardModifier.ControlModifier)
+    qtapp.processEvents()
+    assert desktop.pages.currentIndex() == 1
+    assert desktop.entry.hasFocus()
+    desktop.show_dashboard()
+    desktop.new_chat()
+    assert desktop.pages.currentIndex() == 1
+
+
 def test_arabic_markdown_wraps_without_reversing_copy(qtapp):
     text = "أهلاً بيك، هنراجع فيديو Tuty Storytime ونكتب خطة واضحة. " * 6
     browser = ui.MessageText(text + "\n\nEnglish paragraph stays readable.", QFont("Segoe UI", 14), markdown=True)

@@ -4,7 +4,7 @@ import wake_word as wake
 
 
 def test_spikes_and_repeat_detections_are_filtered():
-    gate = wake.TriggerGate()
+    gate = wake.TriggerGate(threshold=0.6, frames=2)
     assert not gate.accept(0.99, 0)
     assert not gate.accept(0.1, 0.08)
     assert not gate.accept(0.99, 0.16)
@@ -79,3 +79,45 @@ def test_cached_models_never_require_network(tmp_path, monkeypatch):
         (tmp_path / name).write_bytes(b"x" * 2048)
     monkeypatch.setattr(wake.urllib.request, "urlopen", lambda *args, **kw: (_ for _ in ()).throw(AssertionError("network")))
     assert wake.prepare_models(tmp_path) == tmp_path
+
+
+def test_brief_call_is_detected_at_default_threshold_without_repeating():
+    gate = wake.TriggerGate()
+    assert not gate.accept(0.49, 0)
+    assert gate.accept(0.52, 0.08)
+    assert not gate.accept(0.99, 1)
+    assert gate.accept(0.52, 5.1)
+
+
+def test_microphone_name_survives_device_reordering(monkeypatch):
+    monkeypatch.setattr(wake, "input_devices", lambda: [("Realtek [WASAPI]", 9)])
+    assert wake.configured_input({"microphone_device": "Realtek [WASAPI]"}) == 9
+    assert wake.configured_input({}) is None
+    import pytest
+    with pytest.raises(ValueError, match="disconnected"):
+        wake.configured_input({"microphone_device": "Old microphone"})
+
+
+def test_detection_reports_actual_audio_level_and_confidence(tmp_path):
+    done, reports = threading.Event(), []
+    class Detector:
+        def reset(self): pass
+        def predict(self, data): return {"jarvis": 0.55}
+    class Stream:
+        def __init__(self, **kwargs):
+            assert kwargs["device"] == 9
+            self.callback = kwargs["callback"]
+        def __enter__(self):
+            self.callback(np.full(1280, 1200, dtype=np.int16).tobytes(), 1280, None, None)
+            return self
+        def __exit__(self, *args): pass
+    listener = wake.WakeListener(tmp_path, done.set, lambda state: None, device=9,
+                                 detector_factory=lambda folder: Detector(), stream_factory=Stream,
+                                 on_metrics=reports.append)
+    listener.start(); listener.allow(True)
+    try:
+        assert done.wait(3)
+        assert reports[-1]["rms"] == 1200
+        assert reports[-1]["score"] == 0.55
+    finally:
+        listener.close(); listener.thread.join(2)

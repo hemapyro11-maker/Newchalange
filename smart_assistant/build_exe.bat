@@ -94,6 +94,8 @@ py -m PyInstaller ^
     --name "Jarvis" ^
     --icon "assets/jarvis.ico" ^
     --hidden-import jarvis_hud ^
+    --hidden-import jarvis_dashboard ^
+    --hidden-import psutil ^
     --hidden-import customtkinter ^
     --hidden-import core_engine ^
     --hidden-import coding ^

@@ -16,9 +16,9 @@ from PySide6.QtCore import Qt, QObject, Signal, QTimer, QUrl
 from PySide6.QtGui import (QAction, QColor, QDesktopServices, QFont, QKeySequence,
                           QTextBlockFormat, QTextCursor, QTextDocument)
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
-    QDialogButtonBox, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel,
-    QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QPushButton,
-    QScrollArea, QSizePolicy, QSpinBox, QSplitter, QTextBrowser, QTextEdit,
+    QDialogButtonBox, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QCalendarWidget,
+    QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QPushButton, QDoubleSpinBox,
+    QScrollArea, QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QTextBrowser, QTextEdit,
     QVBoxLayout, QWidget)
 
 import brain
@@ -27,6 +27,7 @@ import sessions
 import theme
 import wake_word
 from jarvis_hud import Reactor, app_icon
+from jarvis_dashboard import CommandCenter
 from core_engine import AssistantEngine
 from version import __version__
 
@@ -126,6 +127,7 @@ class Events(QObject):
     preview = Signal(str, int)
     wake = Signal()
     wake_status = Signal(str)
+    wake_metrics = Signal(dict)
 
 
 class Desktop(QMainWindow):
@@ -153,6 +155,7 @@ class Desktop(QMainWindow):
         self.wake_listener = None
         self.wake_enabled = False
         self.wake_state = "off"
+        self.wake_epoch = 0
         self.events = Events(self)
         self.events.log.connect(self.render_log)
         self.events.status.connect(self.set_status)
@@ -161,6 +164,7 @@ class Desktop(QMainWindow):
         self.events.preview.connect(self.show_preview)
         self.events.wake.connect(self.on_wake)
         self.events.wake_status.connect(self.on_wake_status)
+        self.events.wake_metrics.connect(lambda metrics: self.dashboard.set_metrics(metrics))
         self.engine = AssistantEngine(on_log=self.events.log.emit,
                                       on_status=self.events.status.emit)
         self.engine._voice_cancel = threading.Event()
@@ -202,7 +206,7 @@ class Desktop(QMainWindow):
         self.sidebar = QWidget()
         self.sidebar.setObjectName("sidebar")
         self.sidebar.setMinimumWidth(190)
-        self.sidebar.setMaximumWidth(280)
+        self.sidebar.setMaximumWidth(220)
         left = QVBoxLayout(self.sidebar)
         left.setContentsMargins(14, 22, 14, 16)
         brand = QLabel("J A R V I S")
@@ -212,6 +216,14 @@ class Desktop(QMainWindow):
         subtitle.setObjectName("muted")
         left.addWidget(subtitle)
         self.button(self.tr_pair("＋  New chat", "＋  محادثة جديدة"), self.new_chat, left)
+        self.button(self.tr_pair("Command Center", "مركز التحكم"), self.show_dashboard, left)
+        self.button(self.tr_pair("AI Core", "العقل والصوت"), self.settings, left)
+        self.button(self.tr_pair("Tasks", "المهام"), lambda: self.command("todo list"), left)
+        self.button(self.tr_pair("Calendar", "التقويم"), self.calendar_dialog, left)
+        self.button(self.tr_pair("Memory", "الذاكرة"), self.memory_dialog, left)
+        self.button(self.tr_pair("Knowledge Base", "مصادر المعرفة"), self.attach_file, left)
+        self.button(self.tr_pair("Workflows", "سير العمل"), lambda: self.command("jarvis_workflow"), left)
+        self.button(self.tr_pair("Conversations", "المحادثات"), self.show_chat, left)
         for en, ar, cmd in (("Projects", "المشاريع", "project"),
                             ("Scheduled", "المهام المجدولة", "schedule list"),
                             ("Connectors", "المنصات المتصلة", "connectors list"),
@@ -239,18 +251,22 @@ class Desktop(QMainWindow):
         self.state_label = QLabel()
         self.state_label.setObjectName("muted")
         header.addWidget(self.state_label)
+        search = QLineEdit()
+        search.setPlaceholderText(self.tr_pair("Search tools & memory…", "ابحث في الأدوات والذاكرة…"))
+        search.setMaximumWidth(240)
+        search.returnPressed.connect(lambda: self.search_dialog(search.text()))
+        header.addWidget(search)
         self.button(self.tr_pair("Copy chat", "نسخ المحادثة"), self.copy_chat, header)
         self.conversation = self.button(self.tr_pair("Start conversation", "ابدأ محادثة صوتية"),
                                         self.toggle_conversation, header)
         center.addLayout(header)
-        self.reactor = Reactor()
-        self.reactor.setFixedHeight(330)
-        center.addWidget(self.reactor)
-        self.core_status = QLabel()
-        self.core_status.setObjectName("coreStatus")
-        self.core_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.core_status.setWordWrap(True)
-        center.addWidget(self.core_status)
+        self.pages = QStackedWidget()
+        self.chat_page = QWidget()
+        chat_layout = QVBoxLayout(self.chat_page)
+        chat_layout.setContentsMargins(0, 0, 0, 0)
+        self.chat_reactor = Reactor()
+        self.chat_reactor.setFixedHeight(160)
+        chat_layout.addWidget(self.chat_reactor)
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -278,12 +294,24 @@ class Desktop(QMainWindow):
         self.transcript_layout.addStretch()
         self.scroll.setWidget(self.transcript)
         self.scroll.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        center.addWidget(self.scroll, 1)
+        chat_layout.addWidget(self.scroll, 1)
+        self.dashboard = CommandCenter(self)
+        self.reactor = self.dashboard.reactor
+        self.core_status = self.dashboard.core_status
+        self.core_status.setObjectName("coreStatus")
+        dashboard_scroll = QScrollArea()
+        dashboard_scroll.setWidgetResizable(True)
+        dashboard_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        dashboard_scroll.setWidget(self.dashboard)
+        self.pages.addWidget(dashboard_scroll)
+        self.pages.addWidget(self.chat_page)
+        center.addWidget(self.pages, 1)
         self.progress = QLabel()
         self.progress.setObjectName("muted")
         self.progress.setWordWrap(True)
         center.addWidget(self.progress)
         composer = QFrame()
+        self.composer_frame = composer
         composer.setObjectName("composer")
         composer_layout = QVBoxLayout(composer)
         composer_layout.setContentsMargins(12, 8, 12, 8)
@@ -304,6 +332,7 @@ class Desktop(QMainWindow):
         hint = QLabel(self.tr_pair("Enter send · Shift+Enter new line · Ctrl+Enter send · Ctrl+S save",
                                     "Enter إرسال · Shift+Enter سطر جديد · Ctrl+Enter إرسال · Ctrl+S حفظ"))
         hint.setObjectName("hint")
+        self.hint = hint
         center.addWidget(hint)
         self.splitter.addWidget(self.main)
 
@@ -340,7 +369,22 @@ class Desktop(QMainWindow):
         self.splitter.addWidget(self.tools)
         self.splitter.setSizes([220, 980, 280])
         self.splitter.setCollapsible(1, False)
+        self.tools.hide()
+        self.composer_frame.hide()
+        self.hint.hide()
         self.add_menu()
+
+    def show_dashboard(self):
+        self.pages.setCurrentIndex(0)
+        self.tools.hide()
+        self.composer_frame.hide()
+        self.hint.hide()
+        self.dashboard.refresh()
+
+    def show_chat(self):
+        self.pages.setCurrentIndex(1)
+        self.composer_frame.show()
+        self.hint.show()
 
     def add_menu(self):
         file_menu = self.menuBar().addMenu(self.tr_pair("File", "ملف"))
@@ -350,7 +394,7 @@ class Desktop(QMainWindow):
                    (file_menu, "Save chat", "Ctrl+S", self.save_chat),
                    (file_menu, "Export chat", "Ctrl+Shift+S", self.export_chat),
                    (edit_menu, "Settings", "Ctrl+,", self.settings),
-                   (edit_menu, "Focus composer", "Ctrl+L", self.entry.setFocus),
+                   (edit_menu, "Focus composer", "Ctrl+L", self.focus_composer),
                    (view_menu, "Larger text", "Ctrl+=", lambda: self.resize_text(1)),
                    (view_menu, "Smaller text", "Ctrl+-", lambda: self.resize_text(-1)),
                    (view_menu, "Sidebar", "Ctrl+B", lambda: self.sidebar.setVisible(not self.sidebar.isVisible())),
@@ -376,6 +420,14 @@ class Desktop(QMainWindow):
             QLabel#coreStatus {{color:{c['accent']};font-size:17px;font-weight:600;}}
             QLabel#greeting {{font-size:23px;font-weight:600;padding-top:2px;}}
             QFrame#welcome {{border:1px solid {c['border']};border-left:3px solid {c['accent']};padding:8px;}}
+            QFrame#dashboardPanel {{background:{c['panel']};border:1px solid {c['border']};border-radius:4px;}}
+            QLabel#panelTitle {{color:{c['accent']};font-size:13px;font-weight:600;letter-spacing:1px;}}
+            QLabel#dashboardTitle {{color:{c['accent']};font-size:22px;font-weight:600;}}
+            QLabel#dashboardClock {{color:{c['accent']};font-size:16px;}}
+            QWidget#commandCenter QPushButton {{background:{c['panel_hi']};border:1px solid {c['border']};border-radius:4px;}}
+            QWidget#commandCenter QPushButton {{padding:5px 8px;font-size:14px;}}
+            QProgressBar {{border:1px solid {c['border']};border-radius:4px;text-align:center;min-height:22px;}}
+            QProgressBar::chunk {{background:{c['accent']};}}
             QLabel#muted {{color:{c['dim']};font-size:14px;}}
             QLabel#hint {{color:{c['faint']};font-size:12px;}}
             QFrame#composer {{background:{c['panel_hi']};border:1px solid {c['border']};border-radius:4px;}}
@@ -390,7 +442,7 @@ class Desktop(QMainWindow):
             QListWidget {{border:0;background:transparent;outline:0;}}
             QListWidget::item {{padding:9px;border-radius:7px;}}
             QListWidget::item:selected {{background:{c['panel_hi']};}}
-            QLineEdit,QComboBox,QSpinBox {{background:{c['panel_hi']};border:1px solid {c['border']};padding:7px;border-radius:6px;}}
+            QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox {{background:{c['panel_hi']};border:1px solid {c['border']};padding:7px;border-radius:6px;}}
             QScrollBar:vertical {{background:transparent;width:8px;}}
             QScrollBar::handle:vertical {{background:{c['border']};border-radius:4px;min-height:30px;}}
             QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical {{height:0;}}
@@ -413,8 +465,8 @@ class Desktop(QMainWindow):
         self.apply_theme()
 
     def add_message(self, role, text, *, level="info", record=True):
+        self.show_chat()
         self.welcome.hide()
-        self.reactor.setFixedHeight(190)
         if record:
             self.messages.append((role, text))
         card = QFrame()
@@ -449,7 +501,12 @@ class Desktop(QMainWindow):
         self.scroll.verticalScrollBar().setValue(self.scroll.verticalScrollBar().maximum())
 
     def seed(self, text):
+        self.show_chat()
         self.entry.setPlainText(text)
+        self.entry.setFocus()
+
+    def focus_composer(self):
+        self.show_chat()
         self.entry.setFocus()
 
     def send(self):
@@ -536,7 +593,7 @@ class Desktop(QMainWindow):
 
     def voice_tick(self):
         if self.wake_listener:
-            self.wake_listener.allow(self.wake_enabled and self.voice_idle() and not self.continuous)
+            self.wake_listener.allow(self.wake_enabled and self.voice_idle(require_brain=False) and not self.continuous)
         if self.closed or not self.continuous:
             return
         ready = (self.activity == "ready" and self.health == "ready" and not self.tts_pending
@@ -552,25 +609,40 @@ class Desktop(QMainWindow):
         else:
             self.voice_ready_since = 0
 
-    def voice_idle(self):
-        return (not self.closed and self.activity == "ready" and self.health == "ready"
+    def voice_idle(self, *, require_brain=True):
+        return (not self.closed and self.activity == "ready" and (self.health == "ready" or not require_brain)
                 and not self.tts_pending and self.engine._queue.empty()
                 and not self.engine._pending_intent and not self.engine._pending_args
                 and not self.dialog_open)
 
     def toggle_wake(self):
+        self.wake_epoch += 1
+        epoch = self.wake_epoch
         self.wake_enabled = not self.wake_enabled
         cfg = brain.load_config()
         cfg["wake_word_enabled"] = self.wake_enabled
         brain.save_config(cfg)
-        if self.wake_listener:
-            self.wake_listener.close()
+        previous = self.wake_listener
+        if previous:
+            previous.close()
             self.wake_listener = None
         self.wake_state = "off"
         if self.wake_enabled:
-            self.wake_listener = wake_word.WakeListener(brain._base_dir() / "wake_models",
-                                                       self.events.wake.emit, self.events.wake_status.emit)
-            self.wake_listener.start()
+            try:
+                device = wake_word.configured_input(cfg)
+                def detector_factory(folder):
+                    if previous and not previous.released.wait(2):
+                        raise RuntimeError("Previous microphone session is still closing")
+                    return wake_word.load_detector(folder)
+                self.wake_listener = wake_word.WakeListener(brain._base_dir() / "wake_models",
+                    lambda: self.events.wake.emit() if epoch == self.wake_epoch else None,
+                    lambda state: self.events.wake_status.emit(state) if epoch == self.wake_epoch else None,
+                    device=device, threshold=cfg.get("wake_threshold", 0.5), frames=cfg.get("wake_frames", 1),
+                    detector_factory=detector_factory,
+                    on_metrics=lambda data: self.events.wake_metrics.emit(data) if epoch == self.wake_epoch else None)
+                self.wake_listener.start()
+            except Exception as exc:
+                self.on_wake_status("error:" + str(exc)[:240])
         self.update_status()
 
     def on_wake_status(self, status):
@@ -583,11 +655,11 @@ class Desktop(QMainWindow):
                 self.wake_listener.close()
                 self.wake_listener = None
             self.add_message("tool", self.tr_pair("Wake detection couldn't start. Check the microphone and wake models.",
-                                                  "تعذّر تشغيل النداء. راجع المايك ونماذج النداء."), level="warn")
+                                                  "تعذّر تشغيل النداء. راجع المايك ونماذج النداء.") + "\n" + status[6:], level="warn")
         self.update_status()
 
     def on_wake(self):
-        if not self.wake_enabled or not self.voice_idle() or self.continuous:
+        if not self.wake_enabled or not self.voice_idle(require_brain=False) or self.continuous:
             return
         self.voice = True
         self.engine._voice_cancel.clear()
@@ -598,7 +670,9 @@ class Desktop(QMainWindow):
         def acknowledge(ctx):
             if generation == self.engine._generation and not self.engine._voice_cancel.is_set():
                 self.engine._set_status("speaking")
-                wake_word.play_acknowledgement(language)
+                if not wake_word.play_acknowledgement(language):
+                    self.engine._log(self.tr_pair("Wake detected, but the acknowledgement could not play. Check the output device.",
+                                                "النداء اتسمع، لكن صوت الرد القصير فشل. راجع سماعات الجهاز."), "warn")
         self.engine.run_task("wake acknowledgement", acknowledge)
         self.engine.listen()
         self.update_status()
@@ -638,6 +712,9 @@ class Desktop(QMainWindow):
         self.reactor.brain_health = self.health
         self.reactor.wake_enabled = self.wake_enabled
         self.reactor.set_state(reactor_state)
+        self.chat_reactor.brain_health = self.health
+        self.chat_reactor.wake_enabled = self.wake_enabled
+        self.chat_reactor.set_state(reactor_state)
         self.core_status.setText(self.progress.text() or
             (self.tr_pair("Hey Jarvis · standing by", "Hey Jarvis · مستني النداء") if reactor_state == "waiting" else
              self.state_label.text()))
@@ -669,8 +746,9 @@ class Desktop(QMainWindow):
         self.cards.clear()
         self.messages.clear()
         self.welcome.show()
-        self.reactor.setFixedHeight(330)
+        self.show_chat()
         self.entry.clear()
+        self.entry.setFocus()
         self.refresh_sessions()
 
     def show_preview(self, text, generation):
@@ -680,7 +758,7 @@ class Desktop(QMainWindow):
             self.clear_preview()
             return
         self.welcome.hide()
-        self.reactor.setFixedHeight(190)
+        self.show_chat()
         if self.preview_browser is None:
             font = QFont("Segoe UI")
             font.setPixelSize(self.text_size)
@@ -764,6 +842,34 @@ class Desktop(QMainWindow):
         finally:
             self.dialog_open = False
 
+    def search_dialog(self, query=""):
+        dialog = QDialog(self)
+        dialog.setWindowTitle(self.tr_pair("Search Jarvis", "البحث في جارفيس"))
+        dialog.resize(700, 500)
+        layout = QVBoxLayout(dialog)
+        search = QLineEdit(query); layout.addWidget(search)
+        listing = QListWidget(); layout.addWidget(listing)
+        commands = self.engine.registry.list_commands()
+        rows = [("Tool · " + c.name + "\n" + c.description, c.name + " ") for c in commands]
+        rows += [("Memory · " + str(note), None) for note in self.engine.memory.read()]
+        rows += [("Chat · " + text[:500], None) for _, text in self.messages]
+        def populate(text):
+            listing.clear()
+            for label, command in rows:
+                if text.casefold() in label.casefold():
+                    item = QListWidgetItem(label); item.setData(Qt.ItemDataRole.UserRole, command)
+                    listing.addItem(item)
+        def choose(item):
+            if item.data(Qt.ItemDataRole.UserRole):
+                self.seed(item.data(Qt.ItemDataRole.UserRole)); dialog.accept()
+        listing.itemDoubleClicked.connect(choose)
+        search.textChanged.connect(populate); populate(query)
+        self.dialog_open = True
+        try:
+            dialog.exec()
+        finally:
+            self.dialog_open = False
+
     def memory_dialog(self):
         dialog = QDialog(self)
         dialog.setWindowTitle(self.tr_pair("Saved memory", "الذاكرة المحفوظة"))
@@ -778,6 +884,25 @@ class Desktop(QMainWindow):
                 self.engine.memory.forget(str(row+1))
                 listing.takeItem(row)
         self.button(self.tr_pair("Delete selected note", "حذف المعلومة المختارة"), forget, layout)
+        self.dialog_open = True
+        try:
+            dialog.exec()
+        finally:
+            self.dialog_open = False
+
+    def calendar_dialog(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle(self.tr_pair("Local calendar", "التقويم المحلي"))
+        layout = QVBoxLayout(dialog)
+        calendar = QCalendarWidget()
+        layout.addWidget(calendar)
+        date = QLabel()
+        def selected():
+            date.setText(calendar.selectedDate().toString("yyyy-MM-dd"))
+        calendar.selectionChanged.connect(selected)
+        selected(); layout.addWidget(date)
+        self.button(self.tr_pair("View scheduled jobs", "عرض المهام المجدولة"),
+                    lambda: (dialog.accept(), self.command("schedule list")), layout)
         self.dialog_open = True
         try:
             dialog.exec()
@@ -818,6 +943,23 @@ class Desktop(QMainWindow):
             stt_language.addItem(label, value)
         stt_language.setCurrentIndex(max(0, stt_language.findData(cfg.get("stt_language", "auto"))))
         form.addRow(self.tr_pair("Microphone language", "لغة المايك"), stt_language)
+        microphone = QComboBox()
+        microphone.addItem(self.tr_pair("Windows default", "مايك ويندوز الافتراضي"), "")
+        try:
+            for label, index in wake_word.input_devices():
+                microphone.addItem(label, label)
+        except Exception as exc:
+            microphone.setToolTip(str(exc)[:240])
+        selected = cfg.get("microphone_device", "")
+        if selected and microphone.findData(selected) < 0:
+            microphone.addItem(selected + " · disconnected", selected)
+        microphone.setCurrentIndex(max(0, microphone.findData(selected)))
+        form.addRow(self.tr_pair("Input microphone", "مايك الإدخال"), microphone)
+        sensitivity = QDoubleSpinBox()
+        sensitivity.setRange(0.1, 0.95); sensitivity.setSingleStep(0.05)
+        sensitivity.setValue(cfg.get("wake_threshold", 0.5))
+        sensitivity.setToolTip(self.tr_pair("Lower threshold hears softer calls; may trigger on other sounds.", "القيمة الأقل تسمع النداء الخافت، لكنها ممكن تلتقط أصوات تانية."))
+        form.addRow(self.tr_pair("Wake threshold", "درجة قبول النداء"), sensitivity)
         latency = QComboBox()
         latency.addItem(self.tr_pair("Fast Salma · Internet", "سلمى السريعة · إنترنت"), "instant")
         latency.addItem(self.tr_pair("Local studio · Slower", "استوديو محلي · أبطأ"), "studio")
@@ -846,6 +988,7 @@ class Desktop(QMainWindow):
                 return
             cfg.update(chat_font_size=size.value(), ui_theme=mode.currentText(), ui_lang=lang.currentData(),
                        stt_model=stt.currentText(), stt_language=stt_language.currentData(),
+                       microphone_device=microphone.currentData(), wake_threshold=sensitivity.value(),
                        voice_latency_mode=latency.currentData(),
                        voice_local_only=latency.currentData() == "studio",
                        human_voice_speaker=arabic.currentText(), english_voice_voice=english.currentData())
@@ -871,6 +1014,9 @@ class Desktop(QMainWindow):
                 self.refresh_sessions()
             self.apply_theme()
             self.update_status()
+            if self.wake_enabled:
+                self.toggle_wake()
+                self.toggle_wake()
         finally:
             self.dialog_open = False
 
@@ -879,6 +1025,7 @@ class Desktop(QMainWindow):
         if self.wake_listener:
             self.wake_listener.close()
         self.timer.stop()
+        self.dashboard.timer.stop()
         self.continuous = False
         self.engine._voice_cancel.set()
         self.engine.shutdown()
