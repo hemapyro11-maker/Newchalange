@@ -48,6 +48,7 @@ def desktop(qtapp, tmp_path, monkeypatch):
     monkeypatch.setattr(ui.brain, "load_config", lambda: dict(cfg))
     monkeypatch.setattr(ui.brain, "save_config", lambda value: cfg.update(value))
     monkeypatch.setattr(ui.sessions, "list_all", lambda: [])
+    monkeypatch.setattr(ui.sessions, "_base_dir", lambda: tmp_path)
     monkeypatch.setattr(core_engine, "default_state_dir", lambda: tmp_path)
     monkeypatch.setattr(ui, "AssistantEngine", lambda **kw: core_engine.AssistantEngine(**kw, plugins_dirs=[]))
     window = ui.Desktop(start_engine=False)
@@ -129,8 +130,8 @@ def test_wake_still_acknowledges_when_local_brain_needs_attention(desktop, monke
 def test_dashboard_navigation_keeps_chat_and_uses_real_telemetry(desktop):
     desktop.health = "ready"
     desktop.dashboard.refresh()
-    assert "ready" in desktop.dashboard.overview.text()
-    assert "18" in desktop.dashboard.overview.text()
+    assert "ready" in desktop.dashboard.summary.text()
+    assert "18" in desktop.dashboard.summary.text()
     desktop.dashboard.set_metrics({"rms": 3276.8, "score": .42, "peak_score": .48, "threshold": .5})
     assert desktop.dashboard.level.value() == 67
     assert "0.42" in desktop.dashboard.score.text()
@@ -235,10 +236,59 @@ def test_final_model_reply_is_spoken_once_without_badge(desktop, monkeypatch):
     desktop.voice = True
     desktop.last_command = "listen_run"
     desktop.render_log("I'm ready.\n— Jarvis · Local", "info")
+    assert spoken == []  # logs never trigger speech
+    desktop.on_reply("I'm ready.",desktop.engine._generation,True)
     assert spoken == ["I'm ready."]
     assert desktop.messages[-1] == ("assistant", "I'm ready.")
     desktop.render_log("🔊 spoken with Kokoro", "ok")
     assert len(spoken) == 1
+
+
+def test_repeated_voice_turns_speak_every_final_answer_and_never_drafts(desktop,monkeypatch):
+    spoken=[]
+    monkeypatch.setattr(desktop.engine,'speak',spoken.append)
+    desktop.render_log('🎤 I heard: How are you?', 'info')
+    desktop.show_preview('partial response',desktop.engine._generation)
+    assert desktop.preview_browser is None
+    desktop.on_reply('I am well.',desktop.engine._generation,True)
+    desktop.render_log('🔊 spoken with Kokoro','ok')
+    desktop.render_log('🎤 I heard: What is your name?', 'info')
+    desktop.on_reply('I am Jarvis.',desktop.engine._generation,True)
+    assert spoken==['I am well.','I am Jarvis.']
+    desktop.on_reply('Typed reply.',desktop.engine._generation,False)
+    assert len(spoken)==2
+
+
+def test_navigation_never_submits_commands_and_background_logs_keep_selected_view(desktop,monkeypatch):
+    submitted=[]
+    monkeypatch.setattr(desktop.engine,'submit',submitted.append)
+    desktop.show_workspace('tools')
+    page=desktop.pages.currentWidget()
+    desktop.render_log('Background diagnostic','info')
+    assert desktop.pages.currentWidget() is page
+    assert submitted==[]
+    assert not desktop.entry.isVisible()
+    assert not desktop.dashboard.backdrop.timer.isActive()
+    desktop.show_dashboard()
+    assert desktop.dashboard.backdrop.timer.isActive()
+
+
+def test_session_switch_saves_previous_chat_and_ignores_stale_voice(desktop,monkeypatch):
+    old=desktop.engine.session_id
+    desktop.engine.chat_history=[{'role':'user','content':'first chat'},{'role':'assistant','content':'first answer'}]
+    generation=desktop.engine._generation
+    desktop.new_chat()
+    assert ui.sessions.load(old)[0]['content']=='first chat'
+    assert desktop.engine.session_id!=old
+    assert desktop.engine.chat_history==[]
+    spoken=[]
+    monkeypatch.setattr(desktop.engine,'speak',spoken.append)
+    desktop.on_reply('Old answer',generation,True)
+    assert spoken==[]
+    item=ui.QListWidgetItem('first chat');item.setData(Qt.ItemDataRole.UserRole,old)
+    desktop.resume(item)
+    assert desktop.engine.session_id==old
+    assert desktop.engine.chat_history[0]['content']=='first chat'
 
 
 def test_unicode_composer_is_submitted_unchanged(desktop, monkeypatch):

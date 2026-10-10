@@ -270,7 +270,7 @@ class AssistantEngine:
     ويحمّل إضافات (plugins) ديناميكياً لتوسيع الأوامر المتاحة.
     """
 
-    def __init__(self, on_log=None, on_status=None, plugins_dirs: list[pathlib.Path] | None = None):
+    def __init__(self, on_log=None, on_status=None, plugins_dirs: list[pathlib.Path] | None = None, *, defer_plugins=False):
         self.on_log = on_log or (lambda msg, level="info": None)
         self.on_status = on_status or (lambda status: None)
         self.registry = CommandRegistry()
@@ -327,7 +327,8 @@ class AssistantEngine:
         # الواجهة بتحطه عشان تفتح نافذة اختيار ملف بدل ما تسأل بالنص
         self.on_need_file = None
         self._register_builtin_commands()
-        self.load_plugins()
+        self._plugins_deferred=defer_plugins
+        if not defer_plugins:self.load_plugins()
 
     # ── skills ledger (تعلّم تراكمي دائم — بيتراكم ومبيتنساش) ─────────
     def _load_skills(self) -> dict:
@@ -368,10 +369,21 @@ class AssistantEngine:
         if self._worker and self._worker.is_alive():
             return
         self._stop_flag.clear()
-        self._worker = threading.Thread(target=self._run_loop, daemon=True)
+        deferred=self._plugins_deferred
+        def run():
+            if self._plugins_deferred:
+                self._set_status('loading_tools')
+                self.load_plugins()
+                self._plugins_deferred=False
+                if self._stop_flag.is_set():return
+                self._set_status('ready')
+                hooks.fire(self,'startup')
+            self._run_loop()
+        self._worker = threading.Thread(target=run, daemon=True)
         self._worker.start()
-        self._set_status("ready")
-        hooks.fire(self, "startup")
+        if not deferred:
+            self._set_status("ready")
+            hooks.fire(self, "startup")
 
     def stop(self):
         if not self.is_running():
@@ -654,6 +666,9 @@ class AssistantEngine:
 
     # ── internal ───────────────────────────────────────────────────────
     def _log(self, msg: str, level: str = "info"):
+        generation = getattr(self._request_local, "generation", self._generation)
+        if generation != self._generation:
+            return
         self.log_history.append((level, msg))
         self.on_log(msg, level)
 
@@ -1199,6 +1214,7 @@ class AssistantEngine:
                 self._companion_turn_language or companion.language_for(text, reply_language),
                 selected_tools,
                 self.memory.context(), voice=voice_turn,
+                persona=cfg.get("assistant_persona", "jarvis"),
             )
             if self._looks_like_code_work(text):
                 system += f"\nProject: {self.project_dir}\nMode: {self.coding_mode}\n" + coding.instructions(self.project_dir) + repo
@@ -1282,10 +1298,16 @@ class AssistantEngine:
                 self._awaiting_answer = True
             prefix = f"{body}\n\n" if body else ""
             self._log(f"{prefix}❓ {question}\n— {badge}", "info")
+            callback = getattr(self, "on_reply", None)
+            if callback:
+                callback(f"{body}\n{question}".strip(), generation, voice_turn)
             return
 
         if tool is None:
             self._log(f"{body}\n\n— {badge}", "info")
+            callback = getattr(self, "on_reply", None)
+            if callback:
+                callback(body, generation, voice_turn)
             return
 
         tool_name, tool_args, tool_raw = tool

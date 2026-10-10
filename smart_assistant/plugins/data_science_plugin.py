@@ -8,24 +8,30 @@ data_science_plugin.py — تحليل بيانات حقيقي عبر pandas/matp
 from __future__ import annotations
 
 import pathlib
+import importlib.util
 
-try:
-    import pandas as pd
-    PANDAS_AVAILABLE = True
-except ImportError:
-    PANDAS_AVAILABLE = False
+PANDAS_AVAILABLE = importlib.util.find_spec('pandas') is not None
+MATPLOTLIB_AVAILABLE = importlib.util.find_spec('matplotlib') is not None
+pd = None
+plt = None
 
-try:
-    import matplotlib
-    matplotlib.use("Agg")  # بدون شاشة — التطبيق بيولّد صور مش يعرضها في نافذة
-    import matplotlib.pyplot as plt
-    MATPLOTLIB_AVAILABLE = True
-except ImportError:
-    MATPLOTLIB_AVAILABLE = False
+
+def _plotting():
+    global plt
+    if plt is None:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as pyplot
+        plt=pyplot
+    return plt
 
 
 def _load_csv(path: pathlib.Path):
+    global pd
     try:
+        if pd is None:
+            import pandas
+            pd=pandas
         return pd.read_csv(path), None
     except Exception as e:
         return None, f"❌ could not read the CSV: {e}"
@@ -83,7 +89,7 @@ def _cmd_csv_plot(ctx) -> str:
         return f"❌ no such column: {column} (available: {', '.join(df.columns)})"
 
     try:
-        fig, ax = plt.subplots(figsize=(8, 5))
+        fig, ax = _plotting().subplots(figsize=(8, 5))
         if kind == "hist":
             df[column].dropna().plot.hist(ax=ax, bins=30)
         elif kind == "line":
@@ -122,7 +128,7 @@ def _cmd_csv_correlate(ctx) -> str:
         if not MATPLOTLIB_AVAILABLE:
             return "❌ matplotlib is not installed — pip install matplotlib"
         try:
-            fig, ax = plt.subplots(figsize=(7, 6))
+            fig, ax = _plotting().subplots(figsize=(7, 6))
             im = ax.imshow(corr, cmap="coolwarm", vmin=-1, vmax=1)
             ax.set_xticks(range(len(corr.columns)))
             ax.set_yticks(range(len(corr.columns)))

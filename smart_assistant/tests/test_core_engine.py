@@ -54,6 +54,33 @@ def test_registry_register_and_get():
     assert cmd.description == "greet"
 
 
+def test_deferred_plugins_load_before_queued_tasks_and_startup_hook_once(monkeypatch):
+    engine=AssistantEngine(plugins_dirs=[],defer_plugins=True)
+    order=[];done=threading.Event()
+    monkeypatch.setattr(engine,'load_plugins',lambda:order.append('plugins'))
+    monkeypatch.setattr(hooks,'fire',lambda engine,event:order.append(event))
+    engine.run_task('probe',lambda ctx:(order.append('task'),done.set()))
+    engine.start()
+    assert done.wait(2)
+    engine.stop()
+    assert order[:3]==['plugins','startup','task']
+    assert order.count('startup')==1
+
+
+def test_each_voice_turn_emits_one_final_speech_event(monkeypatch):
+    monkeypatch.setattr(brain,'load_config',lambda:{'assistant_mode':'companion'})
+    _fake_brain(monkeypatch,'I am listening.')
+    engine=AssistantEngine(plugins_dirs=[])
+    replies=[]
+    engine.on_reply=lambda *args:replies.append(args)
+    for text in ('hello','how are you'):
+        engine._voice_turn_text=text
+        engine._converse(text)
+    assert len(replies)==2
+    assert all(r[0]=='I am listening.' and r[2] is True for r in replies)
+
+
+
 def test_registry_unregister():
     reg = CommandRegistry()
     reg.register("x", lambda ctx: "y")

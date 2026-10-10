@@ -383,7 +383,9 @@ def _synthesize_edge(text: str, out_path: pathlib.Path, lang: str = "ar") -> boo
             text, _voice_for(lang)["edge"], rate=profile["rate"],
             volume=profile["volume"], pitch=profile["pitch"],
         )
-        asyncio.run(speech.save(str(out_path)))
+        async def save_bounded():
+            await asyncio.wait_for(speech.save(str(out_path)),timeout=12)
+        asyncio.run(save_bounded())
     except Exception:
         # aiohttp handshake failures (including 403) and edge_tts' own
         # NoAudioReceived are not OSError/RuntimeError. A service outage
@@ -571,10 +573,8 @@ def _synthesize_english_native(text: str, out_path: pathlib.Path, lang: str = "e
     if lang != "en" or not evr.available():
         return False
     if brain.load_config().get("assistant_mode") == "companion":
-        if not evr.ready():
-            evr.prewarm()
-            return False
-        ok, _detail = evr.render(text, out_path, timeout=8, persistent=True)
+        # A cold Kokoro worker is still faster than starting a diffusion fallback.
+        ok, _detail = evr.render(text, out_path, timeout=45, persistent=True)
     else:
         ok, _detail = evr.render(text, out_path)
     return ok
@@ -606,6 +606,10 @@ def _synthesize_with_fallback(text: str, tmp_dir: pathlib.Path,
     local_only = bool(cfg.get("voice_local_only", False) if
                       cfg.get("assistant_mode") == "companion" else cfg.get("local_only"))
     backends = list(_BACKENDS)
+    if cfg.get('assistant_mode') == 'companion' and cfg.get('voice_latency_mode','instant') == 'instant':
+        # Diffusion/cloning is an explicit studio operation, never a silent
+        # multi-minute fallback during a live conversation.
+        backends=[item for item in backends if item[1] not in {'_synthesize_human','_synthesize_natural'}]
     # VoiceTut sounds like a studio model but diffusion inference is slow on CPU.
     # Conversation mode prefers Microsoft's Egyptian neural voice and retains
     # VoiceTut as the high-quality offline fallback. English remains local Kokoro.
@@ -679,7 +683,7 @@ def _cmd_speak(ctx) -> str:
         result = _synthesize_with_fallback(text, pathlib.Path(tmp), lang)
         if result is None:
             return (
-                "❌ every speech engine failed — check Kokoro/VoiceTut setup, internet for edge-tts, "
+                "❌ the conversational speech engines failed — check Kokoro, internet for edge-tts, "
                 "and sherpa/Piper/espeak-ng local fallbacks with voice_status."
             )
         audio_path, backend_label = result

@@ -9,6 +9,7 @@ import tempfile
 import time
 
 VOICES = {
+    "am_adam", "am_michael", "am_fenrir", "am_puck", "am_echo", "am_eric", "am_liam", "am_onyx", "bm_daniel", "bm_george", "bm_lewis", "bm_fable",
     "af_heart", "af_bella", "af_nicole", "af_aoede", "af_kore",
     "af_sarah", "af_nova", "af_sky", "af_alloy", "af_jessica", "af_river",
     "bf_emma", "bf_isabella", "bf_alice", "bf_lily",
@@ -36,7 +37,7 @@ def render(job: dict) -> None:
         raise ValueError("speech text must contain 1-5000 characters")
     voice = str(job.get("voice", "af_heart"))
     if voice not in VOICES:
-        raise ValueError("unknown Kokoro female voice")
+        raise ValueError("unknown Kokoro voice")
     speed = min(1.25, max(0.75, float(job.get("speed", 0.96))))
     if not torch.cuda.is_available():
         torch.set_num_threads(min(8, os.cpu_count() or 1))

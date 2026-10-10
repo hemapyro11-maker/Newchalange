@@ -474,6 +474,17 @@ def test_native_english_then_human_arabic_are_the_quality_first_backends():
     assert order[:3] == ["_synthesize_english_native", "_synthesize_human", "_synthesize_natural"]
 
 
+def test_live_voice_never_silently_enters_diffusion_cloning(tmp_path,monkeypatch):
+    monkeypatch.setattr(vp.brain,'load_config',lambda:{'assistant_mode':'companion','voice_latency_mode':'instant'})
+    calls=[]
+    for _,name,_,_ in vp._BACKENDS:
+        monkeypatch.setattr(vp,name,lambda text,path,lang,n=name:calls.append(n) or False)
+    assert vp._synthesize_with_fallback('hello',tmp_path,'en') is None
+    assert '_synthesize_human' not in calls
+    assert '_synthesize_natural' not in calls
+
+
+
 def test_instant_arabic_conversation_prefers_neural_edge_voice(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(vp.brain, "load_config", lambda: {

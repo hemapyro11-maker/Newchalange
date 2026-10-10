@@ -28,7 +28,8 @@ import theme
 import wake_word
 import audio_health
 from jarvis_hud import Reactor, app_icon
-from jarvis_dashboard import CommandCenter
+from jarvis_stage import VoiceStage as CommandCenter
+from workspace_views import WorkspaceView
 from core_engine import AssistantEngine
 from version import __version__
 
@@ -129,6 +130,7 @@ class Events(QObject):
     wake = Signal()
     wake_status = Signal(str)
     wake_metrics = Signal(dict)
+    reply = Signal(str, int, bool)
 
 
 class Desktop(QMainWindow):
@@ -139,6 +141,11 @@ class Desktop(QMainWindow):
             cfg = companion.activate(cfg)
             brain.save_config(cfg)
         self.ar = cfg.get("ui_lang") == "ar"
+        self.persona = cfg.get("assistant_persona", "jarvis")
+        if 'assistant_persona' not in cfg:
+            cfg['assistant_persona']='jarvis'
+            cfg['english_voice_voice']='am_michael'
+            brain.save_config(cfg)
         self.mode = cfg.get("ui_theme", "dark")
         self.text_size = max(16, min(26, int(cfg.get("chat_font_size", 19))))
         self.messages = []
@@ -163,13 +170,15 @@ class Desktop(QMainWindow):
         self.events.health.connect(self.brain_ready)
         self.events.pick.connect(self.pick_file)
         self.events.preview.connect(self.show_preview)
+        self.events.reply.connect(self.on_reply)
         self.events.wake.connect(self.on_wake)
         self.events.wake_status.connect(self.on_wake_status)
         self.events.wake_metrics.connect(lambda metrics: self.dashboard.set_metrics(metrics))
         self.engine = AssistantEngine(on_log=self.events.log.emit,
-                                      on_status=self.events.status.emit)
+                                      on_status=self.events.status.emit, defer_plugins=True)
         self.engine._voice_cancel = threading.Event()
         self.engine.on_preview = self.events.preview.emit
+        self.engine.on_reply = self.events.reply.emit
         self.engine.on_need_file = self.events.pick.emit
         self.setWindowTitle("Jarvis · " + __version__)
         self.setWindowIcon(app_icon())
@@ -210,42 +219,39 @@ class Desktop(QMainWindow):
         self.sidebar.setMaximumWidth(220)
         left = QVBoxLayout(self.sidebar)
         left.setContentsMargins(14, 22, 14, 16)
-        brand = QLabel("J A R V I S")
+        brand = QLabel(self.persona.upper())
+        self.brand=brand
         brand.setObjectName("brand")
         left.addWidget(brand)
         subtitle = QLabel(self.tr_pair("PERSONAL ASSISTANT", "مساعدك الشخصي"))
         subtitle.setObjectName("muted")
         left.addWidget(subtitle)
-        self.button(self.tr_pair("＋  New chat", "＋  محادثة جديدة"), self.new_chat, left)
+        self.button(self.tr_pair("+  New chat", "+  محادثة جديدة"), self.new_chat, left)
         self.button(self.tr_pair("Command Center", "مركز التحكم"), self.show_dashboard, left)
-        self.button(self.tr_pair("AI Core", "العقل والصوت"), self.settings, left)
-        self.button(self.tr_pair("Tasks", "المهام"), lambda: self.command("todo list"), left)
-        self.button(self.tr_pair("Calendar", "التقويم"), self.calendar_dialog, left)
-        self.button(self.tr_pair("Memory", "الذاكرة"), self.memory_dialog, left)
-        self.button(self.tr_pair("Knowledge Base", "مصادر المعرفة"), self.attach_file, left)
-        self.button(self.tr_pair("Workflows", "سير العمل"), lambda: self.command("jarvis_workflow"), left)
-        self.button(self.tr_pair("Conversations", "المحادثات"), self.show_chat, left)
-        for en, ar, cmd in (("Projects", "المشاريع", "project"),
-                            ("Scheduled", "المهام المجدولة", "schedule list"),
-                            ("Connectors", "المنصات المتصلة", "connectors list"),
-                            ("Skills", "المهارات", "skills")):
-            self.button(self.tr_pair(en, ar), lambda _=False, c=cmd: self.command(c), left)
-        self.button(self.tr_pair("Tools & plugins", "الأدوات والإضافات"), self.tools_dialog, left)
+        for en,ar,section in (("Conversations","المحادثات","chats"),("Tools & skills","الأدوات والمهارات","tools"),("Projects & files","المشاريع والملفات","projects"),("Tasks & scheduled","المهام والجدولة","tasks"),("Connectors","المنصات المتصلة","connectors")):
+            self.button(self.tr_pair(en,ar),lambda _=False,s=section:self.show_workspace(s),left)
+        self.button(self.tr_pair("Memory","الذاكرة"),self.memory_dialog,left)
         recent = QLabel(self.tr_pair("Recent chats", "المحادثات السابقة"))
         recent.setObjectName("muted")
         left.addWidget(recent)
         self.recent = QListWidget()
+        self.recent.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.recent.itemClicked.connect(self.resume)
         left.addWidget(self.recent, 1)
+        self.persona_picker=QComboBox()
+        self.persona_picker.addItem("Jarvis", "jarvis");self.persona_picker.addItem("Jen", "jen")
+        self.persona_picker.setCurrentIndex(1 if self.persona=='jen' else 0)
+        self.persona_picker.currentIndexChanged.connect(self.change_persona)
+        left.addWidget(self.persona_picker)
         self.button(self.tr_pair("Voice library", "مكتبة الأصوات"), self.settings, left)
-        self.button(self.tr_pair("⚙  Settings", "⚙  الإعدادات"), self.settings, left)
+        self.button(self.tr_pair("Settings", "الإعدادات"), self.settings, left)
         self.splitter.addWidget(self.sidebar)
 
         self.main = QWidget()
         center = QVBoxLayout(self.main)
         center.setContentsMargins(28, 16, 28, 18)
         header = QHBoxLayout()
-        self.title = QLabel(self.tr_pair("J.A.R.V.I.S.  /  COMMAND INTERFACE", "جارفيس  /  واجهة التحكم"))
+        self.title = QLabel(self.persona.title())
         self.title.setObjectName("workspaceTitle")
         header.addWidget(self.title)
         header.addStretch()
@@ -306,6 +312,9 @@ class Desktop(QMainWindow):
         dashboard_scroll.setWidget(self.dashboard)
         self.pages.addWidget(dashboard_scroll)
         self.pages.addWidget(self.chat_page)
+        self.workspaces={}
+        for section in ('chats','tools','projects','tasks','connectors'):
+            page=WorkspaceView(self,section);self.workspaces[section]=page;self.pages.addWidget(page)
         center.addWidget(self.pages, 1)
         self.progress = QLabel()
         self.progress.setObjectName("muted")
@@ -387,6 +396,19 @@ class Desktop(QMainWindow):
         self.composer_frame.show()
         self.hint.show()
 
+    def show_workspace(self, section):
+        page=self.workspaces[section];page.refresh()
+        self.pages.setCurrentWidget(page);self.composer_frame.hide();self.hint.hide();self.tools.hide()
+
+    def change_persona(self):
+        self.persona=self.persona_picker.currentData()
+        cfg=brain.load_config();cfg['assistant_persona']=self.persona
+        cfg['english_voice_voice']='af_heart' if self.persona=='jen' else 'am_michael'
+        brain.save_config(cfg)
+        self.brand.setText(self.persona.upper())
+        self.title.setText(self.persona.title())
+        self.dashboard.refresh()
+
     def add_menu(self):
         file_menu = self.menuBar().addMenu(self.tr_pair("File", "ملف"))
         edit_menu = self.menuBar().addMenu(self.tr_pair("Edit", "تحرير"))
@@ -427,6 +449,8 @@ class Desktop(QMainWindow):
             QLabel#dashboardClock {{color:{c['accent']};font-size:16px;}}
             QWidget#commandCenter QPushButton {{background:{c['panel_hi']};border:1px solid {c['border']};border-radius:4px;}}
             QWidget#commandCenter QPushButton {{padding:5px 8px;font-size:14px;}}
+            QWidget#voiceStage QPushButton {{background:rgba(5,30,46,180);border:1px solid #31758b;border-radius:14px;padding:10px 18px;text-align:center;}}
+            QWidget#voiceStage QPushButton:hover {{border-color:#b9dcde;background:#12405a;}}
             QProgressBar {{border:1px solid {c['border']};border-radius:4px;text-align:center;min-height:22px;}}
             QProgressBar::chunk {{background:{c['accent']};}}
             QLabel#muted {{color:{c['dim']};font-size:14px;}}
@@ -465,8 +489,8 @@ class Desktop(QMainWindow):
         brain.save_config(cfg)
         self.apply_theme()
 
-    def add_message(self, role, text, *, level="info", record=True):
-        self.show_chat()
+    def add_message(self, role, text, *, level="info", record=True, navigate=True):
+        if navigate:self.show_chat()
         self.welcome.hide()
         if record:
             self.messages.append((role, text))
@@ -477,7 +501,7 @@ class Desktop(QMainWindow):
             card.setStyleSheet(f"QFrame {{background:{theme.palette(self.mode)['panel_hi']};border-radius:14px;}}")
         head = QHBoxLayout()
         label = QLabel(self.tr_pair("You", "أنت") if role == "user" else
-                       self.tr_pair("Activity", "النشاط") if role == "tool" else "Jarvis")
+                       self.tr_pair("Activity", "النشاط") if role == "tool" else self.persona.title())
         label.setObjectName("muted")
         head.addWidget(label)
         head.addStretch()
@@ -541,24 +565,31 @@ class Desktop(QMainWindow):
         if "voice recording cancelled" in text or (self.continuous and "did not hear clear speech" in text):
             return
         if text.startswith(("🎤 سمعتك:", "🎤 I heard:")):
-            self.add_message("user", text.splitlines()[0].split(":", 1)[1].strip())
+            self.last_command = "voice_reply"
+            heard=text.splitlines()[0].split(":", 1)[1].strip()
+            self.dashboard.subtitle.setText(heard)
+            self.add_message("user", heard, navigate=False)
             return
         final = "\n— " in text and not any(m in text for m in ("🔧", "↪", "اكتب y", "write y", "❓"))
         body = text.rpartition("\n— ")[0] if "\n— " in text else text
-        tool = body.lstrip().startswith("↪") or self.last_command == "speak"
-        self.add_message("tool" if tool else "assistant", body.strip(), level=level)
-        if final and level == "info" and self.voice and self.last_command not in {"speak", "voice_status"}:
-            self.speak(body)
-        elif level == "error" and self.voice and self.last_command != "speak":
+        tool = body.lstrip().startswith("↪") or text.startswith("🔊")
+        self.add_message("tool" if tool else "assistant", body.strip(), level=level, navigate=False)
+        if level == "error" and self.voice and self.last_command != "speak":
             self.continuous = False
-            self.speak(self.tr_pair("I couldn't complete that. The details are in the chat.",
-                                    "مقدرتش أكمل الطلب. التفاصيل موجودة في الشات."))
+            # A failed voice backend must not recursively speak its own error.
         self.refresh_sessions()
         self.update_status()
 
+    def on_reply(self, text, generation, voice_turn):
+        """Speak one validated answer, never a draft, tool log or earlier session."""
+        if self.closed or generation != self.engine._generation or not text.strip():
+            return
+        if voice_turn or brain.load_config().get('read_replies_aloud',False):
+            self.dashboard.subtitle.setText(text[:500])
+            self.speak(text)
+
     def speak(self, text):
         self.tts_pending = True
-        self.last_command = "speak"
         # Keep all words and punctuation, including apostrophes.
         chunk = ""
         for word in text.split():
@@ -609,6 +640,19 @@ class Desktop(QMainWindow):
                 self.listen()
         else:
             self.voice_ready_since = 0
+
+    def stop_voice(self):
+        self.continuous=False
+        self.voice=False
+        self.engine.cancel()
+        self.engine._voice_cancel.set()
+        self.tts_pending=False
+        self.voice_ready_since=0
+        if sys.platform=='win32':
+            import ctypes
+            ctypes.windll.winmm.PlaySoundW(None,None,0)
+        self.activity='ready'
+        self.update_status()
 
     def voice_idle(self, *, require_brain=True):
         return (not self.closed and self.activity == "ready" and (self.health == "ready" or not require_brain)
@@ -702,6 +746,7 @@ class Desktop(QMainWindow):
                                 self.tr_pair("Loading local brain…", "تحميل العقل المحلي…") if self.health == "loading" else
                                 self.tr_pair("Local brain needs attention", "العقل المحلي محتاج مراجعة"))
         labels = {"thinking": ("Thinking…", "بفكر…"), "listening": ("Listening…", "بسمعك…"),
+                  "loading_tools": ("Loading tools…", "بحمّل الأدوات…"),
                   "transcribing": ("Understanding your speech…", "بفهم كلامك…"),
                   "speaking": ("Speaking…", "بتكلم…"), "reading": ("Reading…", "بقرأ…"),
                   "updating": ("Updating…", "بعدّل…"), "rendering": ("Rendering video…", "بجهز الفيديو…"),
@@ -743,9 +788,14 @@ class Desktop(QMainWindow):
             self.dialog_open = False
 
     def new_chat(self):
+        sessions.save(self.engine.session_id, self.engine.chat_history)
         self.engine.new_session()
         self.engine._voice_cancel.set()
         self.tts_pending = False
+        self.last_command = ""
+        self.activity = "ready"
+        self.continuous = False
+        self.voice_ready_since = 0
         self.clear_preview()
         for card, _ in self.cards:
             card.deleteLater()
@@ -759,6 +809,8 @@ class Desktop(QMainWindow):
 
     def show_preview(self, text, generation):
         if self.closed or generation != self.engine._generation:
+            return
+        if self.continuous or self.last_command == 'voice_reply':
             return
         if not text:
             self.clear_preview()
@@ -783,11 +835,16 @@ class Desktop(QMainWindow):
             self.preview_browser = None
 
     def refresh_sessions(self):
+        self.recent.blockSignals(True)
         self.recent.clear()
         for entry in sessions.list_all()[:20]:
             item = QListWidgetItem(entry.get("title", "Chat"))
             item.setData(Qt.ItemDataRole.UserRole, entry["id"])
+            item.setToolTip(entry.get("title", "Chat"))
             self.recent.addItem(item)
+            if entry["id"] == self.engine.session_id:
+                self.recent.setCurrentItem(item)
+        self.recent.blockSignals(False)
 
     def resume(self, item):
         sid = item.data(Qt.ItemDataRole.UserRole)
@@ -798,7 +855,11 @@ class Desktop(QMainWindow):
         self.engine.new_session(sid, messages)
         for msg in messages:
             if msg["role"] in {"user", "assistant"}:
-                self.add_message(msg["role"], msg["content"])
+                content=msg['content']
+                if msg['role']=='assistant':
+                    body,tool,question=self.engine._split_directives(content)
+                    content=(body+'\n'+question).strip() if question else body
+                if content.strip():self.add_message(msg["role"],content)
 
     def markdown(self):
         return "# Jarvis conversation\n\n" + "\n\n".join(
@@ -941,7 +1002,7 @@ class Desktop(QMainWindow):
         lang.setCurrentIndex(1 if self.ar else 0)
         form.addRow(self.tr_pair("Interface language", "لغة الواجهة"), lang)
         speech = QCheckBox(self.tr_pair("Read replies aloud", "اقرأ الردود بالصوت"))
-        speech.setChecked(self.voice)
+        speech.setChecked(cfg.get('read_replies_aloud',False))
         form.addRow(speech)
         stt = QComboBox()
         stt.addItems(["base", "small", "turbo"])
@@ -1028,6 +1089,7 @@ class Desktop(QMainWindow):
                        wake_ack_language=wake_language.currentData(),
                        voice_latency_mode=latency.currentData(),
                        voice_local_only=latency.currentData() == "studio",
+                       read_replies_aloud=speech.isChecked(),
                        human_voice_speaker=arabic.currentText(), english_voice_voice=english.currentData())
             brain.save_config(cfg)
             self.text_size = size.value()
