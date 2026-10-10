@@ -57,8 +57,8 @@ def _configured_model() -> str:
 
 
 def _nezuko_root() -> pathlib.Path:
-    """جذر كود نيزوكو نفسها (مش مشروع المستخدم) — عشان الأمر ده بالتحديد
-    بيحسّن نيزوكو ذات نفسها. في الـ exe المبني (frozen)، الملفات
+    """جذر كود جارفيس نفسها (مش مشروع المستخدم) — عشان الأمر ده بالتحديد
+    بيحسّن جارفيس ذات نفسها. في الـ exe المبني (frozen)، الملفات
     المصدرية مبعوتة عبر --add-data وبتتفك في sys._MEIPASS وقت التشغيل."""
     if getattr(sys, "frozen", False):
         return pathlib.Path(getattr(sys, "_MEIPASS", "."))
@@ -126,7 +126,7 @@ def _cmd_self_improve(ctx) -> str:
 
     context_blocks = []
     if code_map:
-        context_blocks.append(f"Real map of Nezuko's own source code:\n{code_map}")
+        context_blocks.append(f"Real map of Jarvis's own source code:\n{code_map}")
     if plugin_list:
         context_blocks.append(plugin_list)
     context = "\n\n".join(context_blocks)
@@ -140,7 +140,7 @@ def _cmd_self_improve(ctx) -> str:
 
     prompt = (
         "You are reviewing the recent activity log of a local desktop assistant app "
-        "called Nezuko (nickname 'nezuko'), written in Python.\n"
+        "called Jarvis (nickname 'nezuko'), written in Python.\n"
         "Base every suggestion ONLY on the real code map and command list below, plus "
         "the log — never invent a plugin name, a missing command, or code in a language "
         "other than Python. If a plugin is listed as registered, it exists and is documented; "
@@ -181,7 +181,7 @@ def _cmd_self_improve(ctx) -> str:
 def register(engine):
     engine.registry.register(
         "self_improve", _cmd_self_improve,
-        "self_improve [focus text] — read the recent log + a real map of Nezuko's own code and "
+        "self_improve [focus text] — read the recent log + a real map of Jarvis's own code and "
         "suggest grounded improvements via the best available model (cloud or local); optional "
         "focus text steers what it prioritises (e.g. 'compare with Wisp's addon isolation system'); "
         "changes nothing on its own",

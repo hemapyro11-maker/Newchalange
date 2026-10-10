@@ -501,7 +501,7 @@ def test_free_text_goes_to_brain_and_replies_conversationally(bare_engine, monke
     assert any("أهلاً" in msg for _, msg in logs)
 
 
-@pytest.mark.parametrize("text", ["عامله اي", "عاملة إيه؟", "إزيك يا نيزكو"])
+@pytest.mark.parametrize("text", ["عامله اي", "عاملة إيه؟", "إزيك يا جارفيس"])
 def test_short_arabic_greeting_is_instant_and_does_not_call_brain(
         bare_engine, monkeypatch, text):
     monkeypatch.setattr(
@@ -815,20 +815,20 @@ def _long_history(n: int) -> list[dict]:
 def test_old_messages_become_notes_instead_of_being_dropped(
     bare_engine, monkeypatch
 ):
-    """الفرق العملي: بعد 30 دور، نيزوكو تفضل فاكرة إنك شغال على
+    """الفرق العملي: بعد 30 دور، جارفيس تفضل فاكرة إنك شغال على
     مشروع معيّن — مش تسأل من الأول."""
     monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
     monkeypatch.setattr(
         brain.Brain, "chat",
         lambda self, messages, **kw: brain.BrainReply(
-            text="المستخدم شغال على مشروع نيزوكو", provider="f", label="F"
+            text="المستخدم شغال على مشروع جارفيس", provider="f", label="F"
         ),
     )
     bare_engine.chat_history = _long_history(core_engine._MAX_CHAT_TURNS)
     bare_engine._compact_history(brain.get_brain())
 
     assert bare_engine.chat_history[0]["role"] == "system"
-    assert "مشروع نيزوكو" in bare_engine.chat_history[0]["content"]
+    assert "مشروع جارفيس" in bare_engine.chat_history[0]["content"]
     assert len(bare_engine.chat_history) == core_engine._COMPACT_KEEP + 1
 
 
@@ -891,10 +891,10 @@ def test_the_notes_reach_the_model(bare_engine, monkeypatch):
         ][1],
     )
     bare_engine.chat_history = [
-        {"role": "system", "content": "ملاحظات: المشروع اسمه نيزوكو"},
+        {"role": "system", "content": "ملاحظات: المشروع اسمه جارفيس"},
     ]
     bare_engine._converse("كمّل")
-    assert "المشروع اسمه نيزوكو" in seen["system"]
+    assert "المشروع اسمه جارفيس" in seen["system"]
 
 
 def test_notes_are_not_replayed_as_a_conversation_turn(bare_engine, monkeypatch):
@@ -1142,7 +1142,7 @@ def test_startup_hook_fires_on_start(bare_engine, monkeypatch, tmp_path):
 # ── الرد بلغة المستخدم ───────────────────────────────────────────────
 
 def test_system_prompt_tells_the_model_to_mirror_the_user_language(bare_engine, monkeypatch):
-    """راجع: تعليمات النظام كانت مكتوبة بالعربي، فنيزوكو كانت بترد
+    """راجع: تعليمات النظام كانت مكتوبة بالعربي، فجارفيس كانت بترد
     عربي حتى لو المستخدم كتب إنجليزي."""
     captured = {}
     monkeypatch.setattr(brain.Brain, "ready", lambda self: True)
@@ -1168,7 +1168,7 @@ def test_system_prompt_is_not_hardcoded_to_one_language(bare_engine, monkeypatch
     bare_engine._converse("x")
     system = captured["m"][0]["content"]
     # التعليمات نفسها إنجليزية، فمش بتجرّ النموذج للعربي
-    assert "أنتي نيزوكو" not in system
+    assert "أنتي جارفيس" not in system
 
 
 def test_reply_language_can_lock_egyptian_arabic(bare_engine, monkeypatch):

@@ -11,7 +11,7 @@ def test_intent_accuracy_is_measured(bare_engine):
 
 
 def test_labelled_set_covers_both_languages():
-    """نيزوكو بتدّعي إنها بتفهم اللغتين — الادعاء لازم يتقاس فيهم."""
+    """جارفيس بتدّعي إنها بتفهم اللغتين — الادعاء لازم يتقاس فيهم."""
     arabic = [p for p, _ in benchmark.INTENT_CASES if any("؀" <= c <= "ۿ" for c in p)]
     english = [p for p, _ in benchmark.INTENT_CASES if p.isascii()]
     assert len(arabic) >= 5

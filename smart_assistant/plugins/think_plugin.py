@@ -1,7 +1,7 @@
 """
 think_plugin.py — مساعد تفكير عميق حقيقي: محادثة متعددة الأدوار (بتفتكر
 اللي فات في نفس الجلسة، مش رد واحد وخلاص)، وقادر يستخدم أي أمر حقيقي
-مسجّل في نيزوكو كـ "أداة" بنفسه عشان يجيب معلومة حقيقية بدل ما يخمّن —
+مسجّل في جارفيس كـ "أداة" بنفسه عشان يجيب معلومة حقيقية بدل ما يخمّن —
 عبر نموذج Ollama محلي مجاني، اتساقاً مع Zero-Cost First.
 
 **بصراحة تامة عن الحدود:** ده مش "ذكاء خارق" — ده نموذج محلي (زي
@@ -36,7 +36,7 @@ channel_growth_report قبل أي حاجة تانية"). `think` بيفلتر أ
 أقرب playbook لموضوع سؤالك (نفس أسلوب فلترة الأدوار فوق) ويحقنه في
 سياق النموذج بس لو كان فعلاً ذو صلة — مش كل الـ playbooks كل مرة. سُمّي
 "playbook" مش "skill" عشان الاسم ده مستخدم فعلاً لحاجة تانية تمامًا في
-نيزوكو (سجل `skills.json`/أمر `skills` بتاع core_engine).
+جارفيس (سجل `skills.json`/أمر `skills` بتاع core_engine).
 
 **الأمان أهم حاجة هنا:** النموذج ممكن "يقترح" يشغّل أي أداة، لكن
 **مفيش أي تنفيذ تلقائي أبدًا** — نفس مبدأ المشروع كله. لازم تأكيد
@@ -267,7 +267,7 @@ def _system_prompt(engine, query: str, state: dict) -> str:
     catalog = "\n".join(f"{c.name} — {c.description}" for c in tools)
     parts = [
         (
-            "You are Nezuko, a deeply thoughtful problem-solving assistant embedded in a "
+            "You are Jarvis, a deeply thoughtful problem-solving assistant embedded in a "
             "desktop automation tool. When the user brings you a problem:\n"
             "- Think step by step, out loud. Consider multiple angles before settling on an "
             "answer. Don't rush to a shallow response.\n"
@@ -348,7 +348,7 @@ def _ask_ollama_chat(messages: list[dict], model: str) -> str:
 def _invoke_tool(engine, name: str, args: list[str]) -> str:
     cmd = engine.registry.get(name)
     if cmd is None:
-        return "❌ that tool does not actually exist in Nezuko"
+        return "❌ that tool does not actually exist in Jarvis"
     from core_engine import CommandContext
     tool_ctx = CommandContext(raw=f"{name} {' '.join(args)}".strip(), args=args, engine=engine)
     try:
@@ -613,7 +613,7 @@ def _cmd_think_playbooks(ctx) -> str:
 
 def register(engine):
     engine.registry.register("think", _cmd_think,
-                              "think <your message> — multi-turn deep reasoning that uses Nezuko's real commands as tools")
+                              "think <your message> — multi-turn deep reasoning that uses Jarvis's real commands as tools")
     engine.registry.register("think_reset", _cmd_think_reset,
                               "think_reset — start a fresh thinking session")
     engine.registry.register("think_status", _cmd_think_status,

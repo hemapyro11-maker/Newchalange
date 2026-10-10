@@ -1,4 +1,4 @@
-"""Nezuko's bilingual chat workspace: conversations, composer and tools."""
+"""Jarvis's bilingual chat workspace: conversations, composer and tools."""
 import os
 import math
 import time
@@ -310,7 +310,7 @@ def _attach_editable_textbox_shortcuts(widget, *, rtl: bool = False) -> None:
 
 
 class ChatComposer(ctk.CTkTextbox):
-    """Multiline composer with the small Entry-compatible API used by Nezuko."""
+    """Multiline composer with the small Entry-compatible API used by Jarvis."""
 
     @staticmethod
     def _map_index(index):
@@ -427,7 +427,7 @@ class AssistantApp(ctk.CTk):
             "outputs": "إظهار/إخفاء الأدوات" if ar else "Toggle tools panel",
             "settings": "الإعدادات" if ar else "Settings",
             "shortcuts": "اختصارات لوحة المفاتيح" if ar else "Keyboard shortcuts",
-            "about": "عن نيزوكو" if ar else "About Nezuko",
+            "about": "عن جارفيس" if ar else "About Jarvis",
         }
         bar = tk.Menu(self)
         file_menu = tk.Menu(bar, tearoff=0)
@@ -777,11 +777,11 @@ class AssistantApp(ctk.CTk):
             "Ctrl+S — Save\nCtrl+Shift+S — Export\nCtrl+N — New chat\n"
             "Ctrl+B — Sidebar\nCtrl+Shift+O — Tools panel\nCtrl+, — Settings"
         )
-        messagebox.showinfo("اختصارات نيزوكو" if self._rtl else "Nezuko shortcuts", text, parent=self)
+        messagebox.showinfo("اختصارات جارفيس" if self._rtl else "Jarvis shortcuts", text, parent=self)
 
     def _show_about(self):
         messagebox.showinfo(
-            "Nezuko", f"Nezuko {__version__}\nBilingual AI workspace with voice and media tools.", parent=self
+            "Jarvis", f"Jarvis {__version__}\nBilingual AI workspace with voice and media tools.", parent=self
         )
 
     def _save_chat(self):
@@ -794,10 +794,10 @@ class AssistantApp(ctk.CTk):
         self._add_assistant("✓ اتحفظت المحادثة" if self._rtl else "✓ Conversation saved", "ok")
 
     def _conversation_markdown(self) -> str:
-        lines = ["# Nezuko conversation", ""]
+        lines = ["# Jarvis conversation", ""]
         role_names = {
             "user": "أنت" if self._rtl else "You",
-            "assistant": "نيزوكو" if self._rtl else "Nezuko",
+            "assistant": "جارفيس" if self._rtl else "Jarvis",
             "system": "System",
         }
         for message in self.engine.chat_history:
@@ -924,7 +924,7 @@ class AssistantApp(ctk.CTk):
             "warn": c["yellow"], "error": c["red"],
         }.get(level, c["text"])
         self._blank(12)
-        self._line("✦", "نيزوكو" if self._rtl else "Nezuko", c["accent"], size=11, bold=True)
+        self._line("✦", "جارفيس" if self._rtl else "Jarvis", c["accent"], size=11, bold=True)
         self._line("", text, color, size=15, roomy=True)
         if badge:
             self._line("", badge, c["faint"], indent=1, size=10)
@@ -1340,7 +1340,7 @@ class AssistantApp(ctk.CTk):
         badge = ""
         if "\n— " in msg:
             msg, _, badge = msg.rpartition("\n— ")
-            if badge == "Nezuko · Local":
+            if badge == "Jarvis · Local":
                 self._brain_health = "ready"
         # سطر بيبدأ بـ ↪ معناه أمر اتنفذ — بنعرضه كأداة مش كرد
         if msg.startswith("↪"):
@@ -1375,7 +1375,7 @@ class SettingsPanel(ctk.CTkToplevel):
 
     ↑ ↓ تنقل · Enter تغيير · ← رجوع · Esc خروج
 
-    الصفحات بتغطي كل أنظمة نيزوكو الفرعية في مكان واحد بدل ما تكون
+    الصفحات بتغطي كل أنظمة جارفيس الفرعية في مكان واحد بدل ما تكون
     متفرقة على أوامر مختلفة: المخ، الموصلات (MCP)، الإضافات، المهارات،
     الماكروهات، الجلسات، الصلاحيات، الأحداث (hooks)، والواجهة.
     """
@@ -1883,9 +1883,9 @@ class SettingsPanel(ctk.CTkToplevel):
                 cfg["voice_local_only"] = item["choice"] == "studio"
             brain.save_config(cfg)
         elif kind == "voice_preview":
-            sample = ("أهلاً، أنا نيزوكو. هساعدك بهدوء وبصوت مصري طبيعي."
+            sample = ("أهلاً، أنا جارفيس. هساعدك بهدوء وبصوت مصري طبيعي."
                       if item["lang"] == "ar" else
-                      "Hi, I'm Nezuko. I'll help you calmly, naturally, and one step at a time.")
+                      "Hi, I'm Jarvis. I'll help you calmly, naturally, and one step at a time.")
             self.app.engine.submit(f"speak {sample} lang={item['lang']}")
             self.close()
             return

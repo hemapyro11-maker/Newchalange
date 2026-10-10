@@ -10,7 +10,7 @@ binaries = [
     (r'C:\Users\Hemap\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\DLLs\tcl86t.dll', '.'),
     (r'C:\Users\Hemap\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\DLLs\tk86t.dll', '.'),
 ]
-hiddenimports = ['desktop_gui', 'PySide6.QtWidgets', 'customtkinter', 'arabic_reshaper', 'bidi.algorithm', 'core_engine', 'coding', 'command_text', 'media_runtime', 'i18n', 'version', 'brain', 'intents', 'theme', 'sessions', 'permissions', 'hooks', 'agents', 'styles', 'benchmark', 'natural_voice_runtime', 'voicetut_runtime', 'english_voice_runtime', 'pywintypes', 'pythoncom', 'win32api']
+hiddenimports = ['jarvis_hud', 'desktop_gui', 'PySide6.QtWidgets', 'customtkinter', 'arabic_reshaper', 'bidi.algorithm', 'core_engine', 'coding', 'command_text', 'media_runtime', 'i18n', 'version', 'brain', 'intents', 'theme', 'sessions', 'permissions', 'hooks', 'agents', 'styles', 'benchmark', 'natural_voice_runtime', 'voicetut_runtime', 'english_voice_runtime', 'pywintypes', 'pythoncom', 'win32api']
 tmp_ret = collect_all('CTkToolTip')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('mcp')
@@ -81,7 +81,8 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='Nezuko',
+    name='Jarvis',
+    icon='assets/jarvis.ico',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

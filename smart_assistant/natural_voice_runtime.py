@@ -1,4 +1,4 @@
-"""Launch the optional Chatterbox engine without importing it into Nezuko."""
+"""Launch the optional Chatterbox engine without importing it into Jarvis."""
 from __future__ import annotations
 
 import json

@@ -1,19 +1,19 @@
-"""Modern, calm colours and fonts for Nezuko's chat workspace."""
+"""Modern, calm colours and fonts for Jarvis's chat workspace."""
 from __future__ import annotations
 
 DARK = {
-    "bg":       "#181818",
-    "panel":    "#202020",
-    "panel_hi": "#2b2b2b",
-    "text":     "#ececec",
-    "dim":      "#b4b4b4",
-    "faint":    "#777777",
-    "border":   "#383838",
-    "accent":   "#e8e8e8",
+    "bg":       "#0b111a",
+    "panel":    "#101b28",
+    "panel_hi": "#162536",
+    "text":     "#e5f2f8",
+    "dim":      "#a1bbca",
+    "faint":    "#748c9c",
+    "border":   "#274052",
+    "accent":   "#53d9ed",
     "green":    "#52c79a",
     "red":      "#ef6b73",
     "yellow":   "#e5b567",
-    "blue":     "#7ab7ff",
+    "blue":     "#69d7ef",
 }
 
 LIGHT = {

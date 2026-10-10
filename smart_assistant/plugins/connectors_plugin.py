@@ -1,8 +1,8 @@
-"""Production MCP connector host for Nezuko.
+"""Production MCP connector host for Jarvis.
 
 Supports local stdio servers and remote Streamable HTTP servers. Secrets are
 referenced from environment variables instead of being copied into the config.
-Every discovered MCP tool becomes ``<connector>.<tool>`` in Nezuko.
+Every discovered MCP tool becomes ``<connector>.<tool>`` in Jarvis.
 """
 from __future__ import annotations
 

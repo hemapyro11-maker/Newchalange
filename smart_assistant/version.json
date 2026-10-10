@@ -1,5 +1,5 @@
 {
-  "version": "0.4.3",
-  "notes": "Optional local Hey Jarvis wake detection with cached spoken acknowledgement and microphone handoff.",
+  "version": "0.5.0",
+  "notes": "Jarvis identity and native cyan command interface with live activity reactor; preserves settings, voices and hands-free wake mode.",
   "url": "https://github.com/hemapyro11-maker/Newchalange/tree/nezuko-professional-upgrade/smart_assistant"
 }

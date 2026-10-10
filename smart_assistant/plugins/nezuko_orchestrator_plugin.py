@@ -59,7 +59,7 @@ def _cmd_nezuko_integrate(ctx) -> str:
         missing = [step for step in workflow.steps if step not in known]
         (incomplete if missing else complete).append((name, missing))
     lines = [
-        "🧠 Nezuko unified tool system",
+        "🧠 Jarvis unified tool system",
         f"Plugins: {len(loaded)}/{len(health)} healthy | Commands: {len(known)} integrated",
         f"Workflows: {len(complete)}/{len(WORKFLOWS)} complete",
         f"Descriptions: {len(known) - len(undocumented)}/{len(known)} documented for model selection",
@@ -92,17 +92,17 @@ def _cmd_nezuko_workflow(ctx) -> str:
         command = known.get(step)
         lines.append(f"{i}. {'✅' if command else '❌'} {step}" + (f" — {command.description}" if command else " — missing"))
     if all(step in known for step in flow.steps):
-        lines.append("All stages are loaded. Nezuko can chain them and inspect each real result before choosing the next stage.")
+        lines.append("All stages are loaded. Jarvis can chain them and inspect each real result before choosing the next stage.")
     return "\n".join(lines)
 
 
 def _cmd_nezuko_evolve(ctx) -> str:
     if not ctx.args:
-        return "usage: nezuko_evolve <plugin_name> — validated improvement with backup, tests, and rollback"
+        return "usage: jarvis_evolve <plugin_name> — validated improvement with backup, tests, and rollback"
     target = ctx.args[0].removesuffix(".py")
     state = ctx.engine.plugin_health.get(target)
     if not state:
-        return f"❌ unknown plugin: {target}. Run nezuko_integrate first."
+        return f"❌ unknown plugin: {target}. Run jarvis_integrate first."
     repair = ctx.engine.registry.get("self_repair")
     if not repair:
         return "❌ self_repair is not loaded"
@@ -111,9 +111,15 @@ def _cmd_nezuko_evolve(ctx) -> str:
 
 
 def register(engine):
+    engine.registry.register("jarvis_integrate", _cmd_nezuko_integrate,
+                             "jarvis_integrate — audit loaded tools and cross-tool workflows")
+    engine.registry.register("jarvis_workflow", _cmd_nezuko_workflow,
+                             "jarvis_workflow [growth_video|professional_edit|voice_studio|coding|connectors|repair] — inspect an integrated workflow")
+    engine.registry.register("jarvis_evolve", _cmd_nezuko_evolve,
+                             "jarvis_evolve <plugin_name> — validated improvement with backup, tests and rollback")
     engine.registry.register("nezuko_integrate", _cmd_nezuko_integrate,
                              "nezuko_integrate — audit every loaded plugin, command, collision, description, and cross-tool workflow")
     engine.registry.register("nezuko_workflow", _cmd_nezuko_workflow,
-                             "nezuko_workflow [growth_video|professional_edit|voice_studio|coding|connectors|repair] — verified integrated sequences across Nezuko tools")
+                             "nezuko_workflow [growth_video|professional_edit|voice_studio|coding|connectors|repair] — verified integrated sequences across Jarvis tools")
     engine.registry.register("nezuko_evolve", _cmd_nezuko_evolve,
-                             "nezuko_evolve <plugin_name> — let Nezuko improve one of its own plugins through validated backup, tests, reload, and rollback")
+                             "nezuko_evolve <plugin_name> — let Jarvis improve one of its own plugins through validated backup, tests, reload, and rollback")

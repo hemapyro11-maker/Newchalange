@@ -1,4 +1,4 @@
-"""Run the optional Egyptian VoiceTut engine outside Nezuko's GUI process."""
+"""Run the optional Egyptian VoiceTut engine outside Jarvis's GUI process."""
 from __future__ import annotations
 
 import json

@@ -1,7 +1,7 @@
 """
-schedule_plugin.py — أتمتة أوامر نيزوكو على مواعيد (زي cron، لكن أبسط
+schedule_plugin.py — أتمتة أوامر جارفيس على مواعيد (زي cron، لكن أبسط
 وبصياغة نصية بسيطة بدل خمس حقول رقمية). مستوحى من ميزة الـ cron/webhook
-automation في Clawdbot، وده كان غايب تمامًا من نيزوكو قبل كده.
+automation في Clawdbot، وده كان غايب تمامًا من جارفيس قبل كده.
 
 صيغ المواعيد المدعومة:
   every:<N>s|m|h|d    — كل N ثانية/دقيقة/ساعة/يوم (زي: every:30m)
@@ -273,6 +273,6 @@ def _cmd_schedule(ctx) -> str:
 def register(engine):
     engine.registry.register(
         "schedule", _cmd_schedule,
-        "schedule add|list|remove|pause|resume|run_now — run Nezuko commands on a timer (every:/daily:/weekly:)",
+        "schedule add|list|remove|pause|resume|run_now — run Jarvis commands on a timer (every:/daily:/weekly:)",
     )
     _ensure_scheduler_started(engine)

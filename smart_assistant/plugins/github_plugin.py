@@ -1,12 +1,12 @@
 """
-github_plugin.py — تكامل Git/GitHub جوه نيزوكو، بنفس فكرة Claude Code:
+github_plugin.py — تكامل Git/GitHub جوه جارفيس، بنفس فكرة Claude Code:
 عمليات Git محلية (status, add, commit, push, pull, branch, diff, log)
 + عمليات GitHub الفعلية (فتح Pull Request, إنشاء Issue, عرض الحالة)
 عن طريق GitHub REST API مباشرة، من غير أي اعتمادية خارجية (زي brain.py
 بالظبط: urllib من المكتبة القياسية بس).
 
 **نموذج الثقة:** زي external_tools_plugin.py و run — الأوامر هنا بتنفذ
-subprocess حقيقي (git) على المشروع اللي نيزوكو شغالة فيه (ctx.engine.
+subprocess حقيقي (git) على المشروع اللي جارفيس شغالة فيه (ctx.engine.
 project_dir). مفيش shell=True، ومفيش أي أمر بيتنفذ من غير ما تكتبه إنت
 بنفسك — نفس المبدأ الثابت في كل المشروع: "the user confirms first".
 

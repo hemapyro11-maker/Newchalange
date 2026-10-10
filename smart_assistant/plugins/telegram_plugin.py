@@ -1,15 +1,15 @@
 """
-telegram_plugin.py — قناة تحكم عن بُعد: تتحكم في نيزوكو من موبايلك عبر
+telegram_plugin.py — قناة تحكم عن بُعد: تتحكم في جارفيس من موبايلك عبر
 بوت تليجرام، بيستخدم نفس الـ 100+ أمر المسجّلة بالظبط، من غير أي مسار
 تنفيذ "خاص" أو مختصر. مستوحى من فكرة الـ multi-channel messaging في
 أدوات زي Clawdbot، لكن بنطاق أبسط بكتير (قناة واحدة، مش gateway كامل).
 
-**الأمان أولاً — ده أول مرة نيزوكو بيتعرّض لمدخلات من الإنترنت:**
+**الأمان أولاً — ده أول مرة جارفيس بيتعرّض لمدخلات من الإنترنت:**
 كل الأدوات التانية في المشروع بتفترض إن اللي بيكتب الأمر هو نفسه اللي
 قاعد قدام الجهاز. القناة دي بتكسر الافتراض ده، فمحتاجة حماية حقيقية:
 
 1. **Pairing إجباري (زي Clawdbot بالظبط):** أول مرة حد يكلم البوت،
-   بيتولّد له كود، والبوت بيقوله يروح لنيزوكو نفسه على الجهاز ويكتب
+   بيتولّد له كود، والبوت بيقوله يروح لجارفيس نفسه على الجهاز ويكتب
    `telegram_approve <code>`. يعني **قرار الموافقة بيتاخد من على
    الجهاز نفسه**، مش من تليجرام — محدش يقدر يوافق على نفسه عن بُعد.
 2. **Allowlist صارم:** غير الـ owner_ids المعتمدين، أي رسالة من أي
@@ -144,7 +144,7 @@ def _set_token(token: str) -> bool:
 
 def _generate_pair_code(existing_codes: set[str]) -> str:
     """كود عشوائي حقيقي عبر secrets (مش random العادية — مش آمنة
-    تشفيريًا، وده كود بيتحكم في صلاحية وصول كاملة لنيزوكو) وفريد فعليًا
+    تشفيريًا، وده كود بيتحكم في صلاحية وصول كاملة لجارفيس) وفريد فعليًا
     بين الطلبات المعلّقة الحالية — عشان لو حصل تصادم كود بين طلبين،
     صاحب الجهاز يوافق بالغلط على مرسل مش قاصده."""
     for _ in range(50):
@@ -192,7 +192,7 @@ def _run_and_capture(engine, text: str, source: str = "telegram") -> str:
 
         def capturing_log(msg, level="info"):
             captured.append(str(msg))
-            original_log(msg, level)  # لسه بيتسجل في لوج نيزوكو المحلي كمان
+            original_log(msg, level)  # لسه بيتسجل في لوج جارفيس المحلي كمان
 
         engine._log = capturing_log
         try:
@@ -205,7 +205,7 @@ def _run_and_capture(engine, text: str, source: str = "telegram") -> str:
     try:
         return result_holder.get(timeout=_DISPATCH_TIMEOUT)
     except queue.Empty:
-        return "⏱ the command is still queued — check that Nezuko is running (the ▶ button on your machine)"
+        return "⏱ the command is still queued — check that Jarvis is running (the ▶ button on your machine)"
 
 
 def _handle_incoming(engine, sender_id: int, text: str) -> str:
@@ -217,8 +217,8 @@ def _handle_incoming(engine, sender_id: int, text: str) -> str:
         return _run_and_capture(engine, text, source=f"telegram:{sender_id}")
     code = _request_pairing(sender_id)
     return (
-        "🔒 Nezuko does not recognise your account.\n"
-        "If this is your machine, go to Nezuko on it and type:\n"
+        "🔒 Jarvis does not recognise your account.\n"
+        "If this is your machine, go to Jarvis on it and type:\n"
         f"telegram_approve {code}"
     )
 
@@ -269,7 +269,7 @@ def _cmd_telegram_approve(ctx) -> str:
         if int(match_id) not in data["owner_ids"]:
             data["owner_ids"].append(int(match_id))
         _save_config(data)
-    return f"✅ approved user {match_id} — they now have full control of Nezuko from Telegram, as if sitting at your machine"
+    return f"✅ approved user {match_id} — they now have full control of Jarvis from Telegram, as if sitting at your machine"
 
 
 def _cmd_telegram_deauthorize(ctx) -> str:
@@ -282,7 +282,7 @@ def _cmd_telegram_deauthorize(ctx) -> str:
             return f"❌ user {target} was not approved in the first place"
         data["owner_ids"].remove(target)
         _save_config(data)
-    return f"🚫 removed {target} — they can no longer control Nezuko from Telegram"
+    return f"🚫 removed {target} — they can no longer control Jarvis from Telegram"
 
 
 def _cmd_telegram_status(ctx) -> str:
@@ -313,7 +313,7 @@ def _run_bot(engine, token: str, stop_event: threading.Event) -> None:
     import asyncio
 
     async def _on_start(update, context):
-        await update.message.reply_text("Hi! I am Nezuko 🦊 — if this is your machine, send me any command.")
+        await update.message.reply_text("Hi! I am Jarvis 🦊 — if this is your machine, send me any command.")
 
     async def _on_message(update, context):
         if update.effective_user is None or update.message is None or update.message.text is None:

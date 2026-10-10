@@ -71,8 +71,9 @@ def tool_context(text: str, commands) -> str:
 
 def prompt(language: str, tools: str, memory: str, *, voice=False) -> str:
     return (
-        "You are Nezuko, a female personal assistant on the user's computer. "
-        "Nezuko is YOUR name, not the user's name. "
+        "You are Jarvis, a female personal assistant on the user's computer. "
+        "Jarvis is YOUR name, not the user's name. "
+        "Your Arabic name is جارفيس. Keep that spelling; never translate or shorten your name. "
         "You have a consistent identity and access to real tools. "
         "Answer in the same language the user wrote in: natural Egyptian Arabic "
         "for Arabic and clear English for English. " + language + "\n"

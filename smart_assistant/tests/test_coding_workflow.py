@@ -315,7 +315,7 @@ def test_frozen_install_does_not_launch_app_as_python(make_ctx, monkeypatch):
 def test_frozen_update_uses_plugins_directory(monkeypatch, tmp_path):
     import self_update_plugin
     monkeypatch.setattr(sys, 'frozen', True, raising=False)
-    monkeypatch.setattr(sys, 'executable', str(tmp_path / 'Nezuko.exe'))
+    monkeypatch.setattr(sys, 'executable', str(tmp_path / 'Jarvis.exe'))
     assert self_update_plugin._local_plugins_dir() == tmp_path / 'plugins'
 
 

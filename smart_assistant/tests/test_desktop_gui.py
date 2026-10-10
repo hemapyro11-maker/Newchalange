@@ -12,6 +12,31 @@ import core_engine
 import desktop_gui as ui
 
 
+def test_jarvis_identity_and_activity_indicator_follow_real_status(desktop, qtapp):
+    assert desktop.windowTitle().startswith("Jarvis ·")
+    assert "Jarvis" in desktop.entry.placeholderText()
+    desktop.health = "ready"
+    desktop.set_status("listening")
+    assert desktop.reactor.state == "listening"
+    assert desktop.reactor.timer.isActive()
+    assert "Listening" in desktop.core_status.text()
+    desktop.set_status("ready")
+    assert not desktop.reactor.timer.isActive()
+    desktop.set_status("thinking")
+    desktop.tools.hide()
+    qtapp.processEvents()
+    assert not desktop.reactor.timer.isActive()
+
+
+def test_jarvis_welcome_returns_for_new_session_without_erasing_saved_data(desktop):
+    assert not desktop.welcome.isHidden()
+    desktop.add_message("user", "مرحبا Jarvis")
+    assert desktop.welcome.isHidden()
+    desktop.new_chat()
+    assert not desktop.welcome.isHidden()
+    assert desktop.messages == []
+
+
 @pytest.fixture(scope="module")
 def qtapp():
     return QApplication.instance() or QApplication([])
@@ -120,7 +145,7 @@ def test_markdown_styles_and_untrusted_images(qtapp):
 
 
 def test_native_chat_keeps_original_text_and_larger_font(desktop, qtapp):
-    original = "عاملة إيه يا نيزكو؟ Let's work on الفيديو."
+    original = "عاملة إيه يا جارفيس؟ Let's work on الفيديو."
     desktop.add_message("assistant", original)
     qtapp.processEvents()
     assert original in desktop.markdown()
@@ -128,7 +153,7 @@ def test_native_chat_keeps_original_text_and_larger_font(desktop, qtapp):
     assert desktop.cards[-1][1].font().pixelSize() == 19
     desktop.copy_chat()
     assert original in qtapp.clipboard().text()
-    assert ui.theme.DARK["bg"] == "#181818"
+    assert ui.theme.DARK["bg"] == "#0b111a"
 
 
 def test_native_settings_save_font_without_overwriting_brain(desktop, qtapp):
@@ -158,7 +183,7 @@ def test_final_model_reply_is_spoken_once_without_badge(desktop, monkeypatch):
     monkeypatch.setattr(desktop.engine, "speak", spoken.append)
     desktop.voice = True
     desktop.last_command = "listen_run"
-    desktop.render_log("I'm ready.\n— Nezuko · Local", "info")
+    desktop.render_log("I'm ready.\n— Jarvis · Local", "info")
     assert spoken == ["I'm ready."]
     assert desktop.messages[-1] == ("assistant", "I'm ready.")
     desktop.render_log("🔊 spoken with Kokoro", "ok")
@@ -182,7 +207,7 @@ def test_streaming_draft_is_not_saved_or_spoken_and_disappears_on_final(desktop,
     assert desktop.preview_browser.toPlainText() == "رد لسه بيتكتب…"
     assert desktop.messages == []
     assert spoken == []
-    desktop.render_log("الرد النهائي.\n— Nezuko · Local", "info")
+    desktop.render_log("الرد النهائي.\n— Jarvis · Local", "info")
     assert desktop.preview_browser is None
     assert desktop.messages == [("assistant", "الرد النهائي.")]
 

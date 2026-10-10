@@ -514,7 +514,7 @@ def test_openrouter_adapter_adds_required_identity_headers(monkeypatch):
         brain.PROVIDERS["openrouter"], "m", [{"role": "user", "content": "hi"}], 0.5, 10
     )
     assert "HTTP-Referer" in captured["headers"]
-    assert captured["headers"]["X-Title"] == "Nezuko"
+    assert captured["headers"]["X-Title"] == "Jarvis"
 
 
 def test_ollama_retries_cuda_allocation_failure_on_cpu(monkeypatch):

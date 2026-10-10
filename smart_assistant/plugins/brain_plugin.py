@@ -1,5 +1,5 @@
 """
-brain_plugin.py — أوامر إدارة "مخ" نيزوكو: تظبيط المزوّدين المجانيين،
+brain_plugin.py — أوامر إدارة "مخ" جارفيس: تظبيط المزوّدين المجانيين،
 متابعة الحصة المتبقية، تبديل الأوضاع، وإدارة القاموس المتعلّم.
 
 كل المزوّدين المدعومين ليهم خطة مجانية دايمة من غير كارت ائتمان.
@@ -19,7 +19,7 @@ def _cmd_brain_setup(ctx) -> str:
     rows = ctx.engine.brain.status() if hasattr(ctx.engine, "brain") else brain.get_brain().status()
     ready = [r for r in rows if r["has_key"] and r["enabled"]]
     lines = [
-        "🧠 Set up Nezuko's brain — every option here is free, no card needed.",
+        "🧠 Set up Jarvis's brain — every option here is free, no card needed.",
         "",
         "Fastest (2 min): Gemini — best Arabic of the free tiers, most generous daily cap",
         "  1. Open https://aistudio.google.com/apikey",
@@ -174,7 +174,7 @@ def _cmd_brain_mode(ctx) -> str:
         cfg["verify_mode"] = True
         brain.save_config(cfg)
         return (
-            "🔍 Verify mode — on hard questions Nezuko answers, then writes\n"
+            "🔍 Verify mode — on hard questions Jarvis answers, then writes\n"
             "verification questions against its own answer, answers those\n"
             "independently, and rewrites what the checks contradict.\n"
             "Published research puts this at 50-70% fewer hallucinations.\n"
@@ -254,4 +254,4 @@ def register(engine):
     r("brain_local", _cmd_brain_local, "brain_local on|off — disable every cloud provider")
     r("brain_dict", _cmd_brain_dict, "brain_dict — local dictionary coverage and learned phrasings")
     r("brain_forget_dict", _cmd_brain_forget_dict, "brain_forget_dict — clear learned phrasings")
-    r("benchmark", _cmd_benchmark, "benchmark [--full] — measure Nezuko against a labelled task set")
+    r("benchmark", _cmd_benchmark, "benchmark [--full] — measure Jarvis against a labelled task set")

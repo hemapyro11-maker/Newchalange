@@ -39,7 +39,7 @@ def _models_for(provider) -> list[str]:
                 if "generateContent" in row.get("supportedGenerationMethods", [])]
     headers = {"Authorization": f"Bearer {key}", "Accept": "application/json"}
     if provider.name == "openrouter":
-        headers.update({"HTTP-Referer": "https://github.com/hemapyro11-maker/Newchalange", "X-Title": "Nezuko"})
+        headers.update({"HTTP-Referer": "https://github.com/hemapyro11-maker/Newchalange", "X-Title": "Jarvis"})
     data = _json_get(f"{provider.base_url}/models", headers=headers)
     return [row["id"] for row in data.get("data", []) if row.get("id")]
 
@@ -340,7 +340,7 @@ def _cmd_self_repair(ctx) -> str:
     ai_result = _tested_ai_plugin_repair(engine, transcript, source=improve_source, improve=improve) if not improve or improve_source else None
     if ai_result:
         (fixed if ai_result.startswith("AI repaired") else found).append(ai_result)
-    lines = ["🩺 Nezuko hybrid self-repair completed."]
+    lines = ["🩺 Jarvis hybrid self-repair completed."]
     lines += [f"✅ {item}" for item in fixed]
     failure_markers = ("media problem", "rejected", "chat failed", "offline",
                        "unreachable", "0/")

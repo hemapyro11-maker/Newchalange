@@ -1,5 +1,5 @@
 """
-discord_plugin.py — قناة تحكم عن بُعد تانية: تتحكم في نيزوكو من ديسكورد،
+discord_plugin.py — قناة تحكم عن بُعد تانية: تتحكم في جارفيس من ديسكورد،
 بنفس الأوامر بالظبط اللي telegram_plugin.py بتستخدمها ونفس نموذج
 الأمان بالكامل (pairing إجباري من على الجهاز، allowlist صارم). مستوحى
 من نفس فكرة الـ multi-channel messaging في Clawdbot.
@@ -136,7 +136,7 @@ def _set_token(token: str) -> bool:
 
 def _generate_pair_code(existing_codes: set[str]) -> str:
     """كود عشوائي حقيقي عبر secrets (مش random العادية — مش آمنة
-    تشفيريًا، وده كود بيتحكم في صلاحية وصول كاملة لنيزوكو) وفريد فعليًا
+    تشفيريًا، وده كود بيتحكم في صلاحية وصول كاملة لجارفيس) وفريد فعليًا
     بين الطلبات المعلّقة الحالية — عشان لو حصل تصادم كود بين طلبين،
     صاحب الجهاز يوافق بالغلط على مرسل مش قاصده."""
     for _ in range(50):
@@ -182,7 +182,7 @@ def _run_and_capture(engine, text: str, source: str = "discord") -> str:
 
         def capturing_log(msg, level="info"):
             captured.append(str(msg))
-            original_log(msg, level)  # لسه بيتسجل في لوج نيزوكو المحلي كمان
+            original_log(msg, level)  # لسه بيتسجل في لوج جارفيس المحلي كمان
 
         engine._log = capturing_log
         try:
@@ -195,7 +195,7 @@ def _run_and_capture(engine, text: str, source: str = "discord") -> str:
     try:
         return result_holder.get(timeout=_DISPATCH_TIMEOUT)
     except queue.Empty:
-        return "⏱ the command is still queued — check that Nezuko is running (the ▶ button on your machine)"
+        return "⏱ the command is still queued — check that Jarvis is running (the ▶ button on your machine)"
 
 
 def _handle_incoming(engine, sender_id: int, text: str) -> str:
@@ -206,8 +206,8 @@ def _handle_incoming(engine, sender_id: int, text: str) -> str:
         return _run_and_capture(engine, text, source=f"discord:{sender_id}")
     code = _request_pairing(sender_id)
     return (
-        "🔒 Nezuko does not recognise your account.\n"
-        "If this is your machine, go to Nezuko on it and type:\n"
+        "🔒 Jarvis does not recognise your account.\n"
+        "If this is your machine, go to Jarvis on it and type:\n"
         f"discord_approve {code}"
     )
 
@@ -260,7 +260,7 @@ def _cmd_discord_approve(ctx) -> str:
         if int(match_id) not in data["owner_ids"]:
             data["owner_ids"].append(int(match_id))
         _save_config(data)
-    return f"✅ approved user {match_id} — they now have full control of Nezuko from Discord, as if sitting at your machine"
+    return f"✅ approved user {match_id} — they now have full control of Jarvis from Discord, as if sitting at your machine"
 
 
 def _cmd_discord_deauthorize(ctx) -> str:
@@ -273,7 +273,7 @@ def _cmd_discord_deauthorize(ctx) -> str:
             return f"❌ user {target} was not approved in the first place"
         data["owner_ids"].remove(target)
         _save_config(data)
-    return f"🚫 removed {target} — they can no longer control Nezuko from Discord"
+    return f"🚫 removed {target} — they can no longer control Jarvis from Discord"
 
 
 def _cmd_discord_status(ctx) -> str:

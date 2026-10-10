@@ -86,4 +86,4 @@ def register(engine):
     r("agent_new", _cmd_agent_new, "agent_new <name> <instructions> — create a subagent")
     r("agent_delete", _cmd_agent_delete, "agent_delete <name> — remove a subagent")
     r("styles", _cmd_styles, "styles — list output styles")
-    r("style", _cmd_style, "style <name> — change how Nezuko writes replies")
+    r("style", _cmd_style, "style <name> — change how Jarvis writes replies")

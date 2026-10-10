@@ -154,9 +154,9 @@ def test_channel_view_goal_routes_to_growth_lab():
 
 
 def test_rest_of_sentence_becomes_free_text_arg():
-    m = intents.resolve("قولي صباح الخير يا نيزوكو", ALL)
+    m = intents.resolve("قولي صباح الخير يا جارفيس", ALL)
     assert m.command == "speak"
-    assert m.args == ["صباح الخير يا نيزوكو"]
+    assert m.args == ["صباح الخير يا جارفيس"]
 
 
 def test_zero_arg_command_needs_nothing():

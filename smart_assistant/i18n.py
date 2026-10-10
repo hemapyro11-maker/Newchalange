@@ -1,7 +1,7 @@
 """
 i18n.py — طبقة الترجمة: إنجليزي / عربي.
 
-**الافتراضي إنجليزي.** نيزوكو بتشتغل باللغتين بالكامل — كتابة، نطق،
+**الافتراضي إنجليزي.** جارفيس بتشتغل باللغتين بالكامل — كتابة، نطق،
 وسمع — وتبدّل من الإعدادات أو `/lang`.
 
 كل نص بيظهر في الواجهة بيتسحب من هنا بمفتاح، مش مكتوب في مكانه. أي
@@ -15,9 +15,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "coding_ask": "code · approval required",
         "coding_auto": "code · automatic execution",
         # الهوية
-        "app_title": "nezuko",
+        "app_title": "Jarvis",
         "app_subtitle": "your local AI assistant",
-        "workspace_title": "NEZUKO  /  Personal assistant",
+        "workspace_title": "JARVIS  /  Personal assistant",
         "start_conversation": "Start conversation",
         "end_conversation": "End conversation",
         "new_chat": "New chat",
@@ -31,18 +31,18 @@ STRINGS: dict[str, dict[str, str]] = {
         "sources_empty": "Attached files and connected apps appear here.",
         "share_chat": "Copy chat",
         "tools": "Tools",
-        "tools_subtitle": "Everything Nezuko can use is visible here.",
+        "tools_subtitle": "Everything Jarvis can use is visible here.",
         "tool_files": "FILES",
         "tool_voice": "VOICE",
         "tool_workspace": "WORKSPACE",
         "tool_attach": "Attach file",
         "tool_scan": "Security scan",
-        "tool_mic": "Talk to Nezuko",
+        "tool_mic": "Talk to Jarvis",
         "tool_voices": "Voice library",
         "tool_connectors": "Connectors",
         "tool_plugins": "Plugins",
         "tool_skills": "Skills",
-        "tool_repair": "Repair Nezuko",
+        "tool_repair": "Repair Jarvis",
         "tool_send": "Send",
         # الحالة
         "status_running": "running",
@@ -204,9 +204,9 @@ STRINGS: dict[str, dict[str, str]] = {
         "coding_plan": "تخطيط · قراءة فقط",
         "coding_ask": "برمجة · بتأكيدك",
         "coding_auto": "برمجة · تنفيذ تلقائي",
-        "app_title": "نيزوكو",
+        "app_title": "جارفيس",
         "app_subtitle": "مساعدتك الذكية المحلية",
-        "workspace_title": "نيزوكو  /  مساعدتك الشخصية",
+        "workspace_title": "جارفيس  /  مساعدتك الشخصية",
         "start_conversation": "ابدأ محادثة صوتية",
         "end_conversation": "إنهاء المحادثة",
         "new_chat": "محادثة جديدة",
@@ -220,18 +220,18 @@ STRINGS: dict[str, dict[str, str]] = {
         "sources_empty": "الملفات المرفقة والبرامج المتصلة بتظهر هنا.",
         "share_chat": "نسخ المحادثة",
         "tools": "الأدوات",
-        "tools_subtitle": "كل حاجة نيزوكو تقدر تستخدمها موجودة قدامك.",
+        "tools_subtitle": "كل حاجة جارفيس تقدر تستخدمها موجودة قدامك.",
         "tool_files": "الملفات",
         "tool_voice": "الصوت",
         "tool_workspace": "مساحة العمل",
         "tool_attach": "إرفاق ملف",
         "tool_scan": "فحص أمني",
-        "tool_mic": "اتكلم مع نيزوكو",
+        "tool_mic": "اتكلم مع جارفيس",
         "tool_voices": "مكتبة الأصوات",
         "tool_connectors": "الموصلات",
         "tool_plugins": "الإضافات",
         "tool_skills": "المهارات",
-        "tool_repair": "إصلاح نيزوكو",
+        "tool_repair": "إصلاح جارفيس",
         "tool_send": "إرسال",
         "status_running": "شغالة",
         "status_stopped": "متوقفة",

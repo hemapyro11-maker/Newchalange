@@ -1,4 +1,4 @@
-"""Nezuko terminal client: python cli.py --project /path/to/repo."""
+"""Jarvis terminal client: python cli.py --project /path/to/repo."""
 from __future__ import annotations
 
 import argparse
@@ -11,7 +11,7 @@ import sessions
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Nezuko coding assistant")
+    parser = argparse.ArgumentParser(description="Jarvis coding assistant")
     parser.add_argument("--project", type=pathlib.Path, default=pathlib.Path.cwd())
     parser.add_argument("--prompt", help="Run one request; proposed commands still require interactive approval")
     parser.add_argument("--coding-only", action="store_true", help="Load only file editing tools and built-in coding commands")
@@ -28,7 +28,7 @@ def main(argv=None):
         register(engine)
     engine.project_dir = args.project.resolve()
     engine.start()
-    print(f"Nezuko · {engine.project_dir}\n/help · /cancel · /new · /exit\nFor multiline edits use /paste and finish with /end.")
+    print(f"Jarvis · {engine.project_dir}\n/help · /cancel · /new · /exit\nFor multiline edits use /paste and finish with /end.")
     try:
         if args.prompt:
             engine.submit(args.prompt)

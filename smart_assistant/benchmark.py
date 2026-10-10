@@ -1,7 +1,7 @@
 """
-benchmark.py — قياس حقيقي لنيزوكو بدل الأرقام المفبركة.
+benchmark.py — قياس حقيقي لجارفيس بدل الأرقام المفبركة.
 
-**ليه ده موجود:** لما تسأل "نيزوكو ذكية قد إيه؟" الإجابة الأمينة الوحيدة
+**ليه ده موجود:** لما تسأل "جارفيس ذكية قد إيه؟" الإجابة الأمينة الوحيدة
 هي قياس. أي "نسبة ذكاء" بتتقال من غير تشغيل حاجة هي رقم مخترع شكله
 موثوق ومعناه صفر.
 
@@ -28,7 +28,7 @@ import intents
 
 # ── مجموعة النوايا المعلّمة ──────────────────────────────────────────
 # صيغة كلام حقيقية → الأمر اللي المفروض تتحل ليه. اللغتين مقصودتين:
-# نيزوكو بتدّعي إنها بتفهم الاتنين، والادعاء ده لازم يتقاس.
+# جارفيس بتدّعي إنها بتفهم الاتنين، والادعاء ده لازم يتقاس.
 INTENT_CASES: list[tuple[str, str]] = [
     # عربي
     ("حلل الفيديو ده", "probe"),
@@ -543,7 +543,7 @@ def run(engine, include_model: bool = True) -> list[Result]:
 
 
 def report(results: list[Result], show_failures: bool = True) -> str:
-    lines = ["📐 Nezuko benchmark — measured, not estimated\n"]
+    lines = ["📐 Jarvis benchmark — measured, not estimated\n"]
     for r in results:
         if r.skipped:
             lines.append(f"  ⏭  {r.name:<32} skipped — {r.detail}")

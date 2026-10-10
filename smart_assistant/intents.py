@@ -292,7 +292,7 @@ RULES: tuple[IntentRule, ...] = (
          ArgSpec(OUT, suffix="_big")),
     ),
 
-    # ── صوت نيزوكو ────────────────────────────────────────────────
+    # ── صوت جارفيس ────────────────────────────────────────────────
     IntentRule("speak", ("قولي", "اقري", "انطقي", "قول ",
      "say ", "speak ", "read out", "read this"), (ArgSpec(REST),), priority=5),
     IntentRule("listen", ("اسمعيني", "سجل صوت", "شغل المايك",

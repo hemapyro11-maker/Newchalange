@@ -102,7 +102,7 @@ _TERMINAL_TOOLS = frozenset({"speak", "voice_status", "stt_status", "listen"})
 _REPOMAP_BUDGET = 6000
 
 _SYSTEM_PROMPT = (
-    "You are Nezuko, an assistant running inside an app on the user's own "
+    "You are Jarvis, an assistant running inside an app on the user's own "
     "machine, with real tools you can propose running.\n\n"
     "**Answer in the same language the user wrote in.** If they write in "
     "Arabic, answer in natural Egyptian Arabic. If they write in English, "
@@ -280,7 +280,7 @@ class AssistantEngine:
         self.skills_path = default_state_dir() / "skills.json"
         self.memory = companion.Memory(default_state_dir())
         # المشروع اللي بنشتغل عليه — منه بتتبني خريطة الكود. المجلد
-        # الحالي هو الافتراضي المعقول (إنت شغّلت نيزوكو من جوه
+        # الحالي هو الافتراضي المعقول (إنت شغّلت جارفيس من جوه
         # مشروعك)، وينفع تغيّره بأمر `project`.
         self.project_dir = pathlib.Path.cwd()
         self.skills = self._load_skills()
@@ -961,7 +961,7 @@ class AssistantEngine:
                 return "CODE & PROJECTS"
             if any(x in plugin for x in ("schedule", "todo", "macro", "agent")):
                 return "AUTOMATION & AGENTS"
-            return "NEZUKO CORE & REPAIR"
+            return "JARVIS CORE & REPAIR"
 
         groups: dict[str, list[str]] = {}
         for command in self.registry.list_commands():
@@ -972,7 +972,7 @@ class AssistantEngine:
             )
         order = ("MEDIA, VOICE & GROWTH", "CODE & PROJECTS", "CONNECTORS",
                  "DATA", "SECURITY & INSPECTION", "AUTOMATION & AGENTS",
-                 "NEZUKO CORE & REPAIR")
+                 "JARVIS CORE & REPAIR")
         return "\n\n".join(
             f"[{label}]\n" + "\n".join(groups[label]) for label in order if groups.get(label)
         )
@@ -1054,11 +1054,11 @@ class AssistantEngine:
         normalized = intents.normalize(text).strip(" .,!؟?؛:ـ")
         arabic = {
             "عامله اي", "عامله ايه", "اخبارك اي", "اخبارك ايه",
-            "ازيك", "ازيك يا نيزكو", "انتي عامله اي", "انتي عامله ايه",
+            "ازيك", "ازيك يا جارفيس", "ازيك يا نيزكو", "ازيك يا نيزوكو", "انتي عامله اي", "انتي عامله ايه",
             "صباح الخير", "مساء الخير",
         }
         english = {
-            "hi", "hello", "hey", "hi nezuko", "hello nezuko",
+            "hi", "hello", "hey", "hi jarvis", "hello jarvis", "hey jarvis", "hi nezuko", "hello nezuko",
             "how are you", "how are you doing", "what's up", "whats up",
             "good morning", "good evening",
         }
@@ -1080,7 +1080,7 @@ class AssistantEngine:
         """بيلخّص أقدم جزء من المحادثة بدل ما يرميه.
 
         قبل كده كان `del chat_history[:-30]` — يعني الدور الواحد
-        وتلاتين بيختفي خالص، وبعده نيزوكو مش فاكرة إنك أصلاً قلت
+        وتلاتين بيختفي خالص، وبعده جارفيس مش فاكرة إنك أصلاً قلت
         إنك شغال على مشروع معيّن. الضغط بيحوّل القديم لملخص قصير
         بيفضل مثبت، فالحقايق بتعيش والتوكنات بتقل.
 
@@ -1149,7 +1149,7 @@ class AssistantEngine:
                 self.chat_history.append({"role": "user", "content": text})
                 self.chat_history.append({"role": "assistant", "content": quick_reply})
                 sessions.save(self.session_id, self.chat_history, project=str(self.project_dir))
-            self._log(f"{quick_reply}\n\n— ⚡ Nezuko", "info")
+            self._log(f"{quick_reply}\n\n— ⚡ Jarvis", "info")
             return
         if not b.ready():
             self._log(
@@ -1257,7 +1257,7 @@ class AssistantEngine:
             return
 
         body, tool, question = self._split_directives(reply.text)
-        badge = "Nezuko · Local" if companion.enabled(cfg) else f"{'🔒' if reply.is_local else '☁️'} {reply.label}"
+        badge = "Jarvis · Local" if companion.enabled(cfg) else f"{'🔒' if reply.is_local else '☁️'} {reply.label}"
 
         with self._state_lock:
             if generation != self._generation:
@@ -1331,7 +1331,7 @@ class AssistantEngine:
     def _continue_chain(self, tool_name: str, result: str | None, step: int):
         """بيرجّع نتيجة الأمر للمخ عشان يقرر الخطوة اللي بعدها.
 
-        دي الفجوة اللي كانت بتخلي نيزوكو أضعف في شغل الكود: النموذج كان
+        دي الفجوة اللي كانت بتخلي جارفيس أضعف في شغل الكود: النموذج كان
         بيقترح أمر واحد وخلاص، ونتيجته عمرها ما بترجعله. يعني مكانش
         ينفع "شغّل الاختبارات → اقرا الخطأ → صلّحه" — وده بالظبط الشكل
         اللي بيخلي مساعد يعرف يصلّح كود فعلاً.

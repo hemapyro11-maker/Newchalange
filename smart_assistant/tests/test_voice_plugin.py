@@ -249,7 +249,7 @@ def test_windows_wav_player_uses_winmm_without_winsound(tmp_path, monkeypatch):
 @requires_espeak
 def test_synthesize_espeak_produces_real_audio(tmp_path):
     out = tmp_path / "out.wav"
-    ok = vp._synthesize_espeak("أهلاً بيك، أنا نيزوكو", out)
+    ok = vp._synthesize_espeak("أهلاً بيك، أنا جارفيس", out)
     assert ok is True
     assert out.is_file()
     assert out.stat().st_size > 1000  # ملف صوت حقيقي، مش فاضي
@@ -266,7 +266,7 @@ def test_speak_end_to_end_with_only_espeak_available(make_ctx, monkeypatch):
         return real_which(name) if name in ("espeak-ng", "ffplay") else None
 
     monkeypatch.setattr(vp.shutil, "which", fake_which)
-    result = vp._cmd_speak(make_ctx("speak أهلاً بيك، أنا نيزوكو", []))
+    result = vp._cmd_speak(make_ctx("speak أهلاً بيك، أنا جارفيس", []))
     assert result.startswith("🔊")
     assert "espeak-ng" in result
 

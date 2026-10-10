@@ -1,26 +1,26 @@
 @echo off
 echo ====================================
-echo   Nezuko (Smart Assistant) - Build EXE
+echo   Jarvis (Smart Assistant) - Build EXE
 echo ====================================
 
 :: تثبيت المتطلبات
-:: ملحوظة: typer مش مستخدم فعليًا في نيزوكو نفسه — لكن --collect-all mcp
+:: ملحوظة: typer مش مستخدم فعليًا في جارفيس نفسه — لكن --collect-all mcp
 :: تحت بيحاول يمسح كل sub-modules بتاعة mcp، وده بيشمل mcp.cli اللي
 :: بيعمل import لـ typer وقت الفحص بس (مش وقت التشغيل الفعلي). من غيره
 :: البناء بالكامل بيفشل بـ "ModuleNotFoundError: No module named 'typer'"
-:: حتى لو الميزة دي (mcp.cli) نيزوكو نفسه ماستخدمهاش أبدًا.
-:: sounddevice: نيزوكو بيعمل import ليها فعليًا (voice_plugin.py، لتسجيل
+:: حتى لو الميزة دي (mcp.cli) جارفيس نفسه ماستخدمهاش أبدًا.
+:: sounddevice: جارفيس بيعمل import ليها فعليًا (voice_plugin.py، لتسجيل
 :: المايك لأمر listen) فمحتاجة تكون في بيئة البناء وتتجمع بـ collect-all
 :: تحت (بتحمل PortAudio كملف native جواها، زي ما customtkinter محتاج
 :: ملفات theme JSON تتجمع معاها). openai-whisper (أمر whisper CLI،
-:: لتفريغ الصوت لنص) عن قصد **مش** هنا ولا في collect-all: نيزوكو
+:: لتفريغ الصوت لنص) عن قصد **مش** هنا ولا في collect-all: جارفيس
 :: بيناديها عن طريق subprocess بس (زي ffmpeg/ClamAV/espeak-ng بالظبط)
 :: من غير أي import مباشر ليها، فمحتاجة تتثبت على جهاز المستخدم النهائي
 :: بس (pip install openai-whisper) مش جوه الـ exe نفسه — وبما إنها حزمة
 :: تقيلة (torch وغيرها)، ضمها بـ collect-all كان هيزود حجم/وقت البناء
 :: من غير أي فايدة حقيقية، وممكن كمان يكرر مشكلة mcp.cli اللي فوق مع
 :: أي submodule اختياري تاني جواها.
-:: python-telegram-bot: نيزوكو بيعمل import ليها فعليًا (telegram_plugin.py)
+:: python-telegram-bot: جارفيس بيعمل import ليها فعليًا (telegram_plugin.py)
 :: لو حابب قناة تليجرام تشتغل — اسم الحزمة على pip مختلف عن اسم الـ
 :: import (زي Pillow/PIL بالظبط): بتتثبت بـ python-telegram-bot، وبيتجمع
 :: بـ --collect-all telegram.
@@ -31,7 +31,7 @@ echo ====================================
 :: Secret Service) وقت التشغيل عبر entry points، فمحتاج --collect-all
 :: عشان الميتاداتا دي تتجمع صح — اتجرب فعليًا (onefile Linux مبني بنفس
 :: الفلاج ده اشتغل وكشف حالة الـ backend صح من غير أي crash).
-:: faster-whisper: أول محاولة تفريغ صوتي (STT) للأمر listen — نيزوكو
+:: faster-whisper: أول محاولة تفريغ صوتي (STT) للأمر listen — جارفيس
 :: بيعمل import ليها فعليًا (voice_plugin.py) فمحتاجة collect-all زيها
 :: زي sounddevice. بتجيب معاها ctranslate2 (حزمة compiled تقيلة) —
 :: اتجرب فعليًا (onefile Linux بنفس الفلاج ده بنى واشتغل من غير أي
@@ -42,7 +42,7 @@ echo ====================================
 :: (شوف الملاحظات تحت) لأنه مفيش نموذج قياسي واحد نقدر نحطه هنا.
 :: openai-whisper لسه عن قصد **مش** هنا زي ما هو موضح فوق — بيتنادى
 :: بس عن طريق subprocess (أمر whisper CLI)، مش import مباشر.
-:: sherpa-onnx: محرك النطق المحلي الأساسي دلوقتي (Apache-2.0). نيزوكو
+:: sherpa-onnx: محرك النطق المحلي الأساسي دلوقتي (Apache-2.0). جارفيس
 :: بتعمل له import مباشر فمحتاج collect-all زي faster-whisper. مبني
 :: على onnxruntime اللي متجمّع أصلاً تحت، فالزيادة في الحجم محدودة —
 :: مش زي torch اللي خلانا نستبعد pyannote/Coqui/silero. نماذج الأصوات
@@ -55,7 +55,7 @@ echo ====================================
 :: نفسها — لو مش موجودة، الواجهة تشتغل عادي من غير تلميحات بس. اتجرب
 :: فعليًا (onefile Linux بنفس الفلاج ده بنى واشتغل من غير أي crash).
 :: scenedetect: كشف تلقائي لتغييرات المشاهد (detect_scenes في
-:: cinema_plugin.py) — نيزوكو بيعمل import ليها فعليًا (زي
+:: cinema_plugin.py) — جارفيس بيعمل import ليها فعليًا (زي
 :: faster-whisper بالظبط)، فمحتاجة collect-all. بتجيب معاها
 :: opencv-python (حزمة كبيرة الحجم لكنها مستقرة ومعروفة) — اتجرب
 :: فعليًا (onefile Linux بنفس الفلاج ده بنى واشتغل من غير أي crash).
@@ -72,14 +72,14 @@ echo ====================================
 :: Face + موافقة يدوية على نموذج gated، clone_voice محتاج موافقة
 :: على ترخيص CPML + تحميل نموذج ~2GB) اللي غالبية المستخدمين مش
 :: هيستخدموها أصلاً. النتيجة العملية: diarize/clone_voice بيشتغلوا
-:: بس لو نيزوكو شغّال من السورس (python main_gui.py) مع تثبيت
+:: بس لو جارفيس شغّال من السورس (python main_gui.py) مع تثبيت
 :: pyannote.audio/TTS يدويًا في نفس بيئة بايثون — مش متاحين في
-:: Nezuko.exe الجاهز. ده قيد معماري صريح ومقصود، مش نسيان.
+:: Jarvis.exe الجاهز. ده قيد معماري صريح ومقصود، مش نسيان.
 ::
 :: silero-vad بيتبع نفس المنطق ده بالظبط: النموذج نفسه 2 ميجا بس،
 :: لكنه محتاج PyTorch عشان يشتغل — وهو السبب اللي خلانا نستبعد
 :: pyannote/TTS فوق. فمش هنا ولا في collect-all. النتيجة: في
-:: Nezuko.exe أمر listen بيسجّل المدة الثابتة (5 ثواني)، ومن السورس
+:: Jarvis.exe أمر listen بيسجّل المدة الثابتة (5 ثواني)، ومن السورس
 :: مع `pip install silero-vad` بيقف لوحده لما تسكت. الكود بيتعامل مع
 :: الحالتين — `_record_until_silence` بترجع (None, False) لو النموذج
 :: مش متثبت والنداء اللي فوقها بيرجع للمدة الثابتة، فمفيش أي كسر.
@@ -91,7 +91,9 @@ py -m pip install "openwakeword==0.6.0" --quiet
 py -m PyInstaller ^
     --onefile ^
     --windowed ^
-    --name "Nezuko" ^
+    --name "Jarvis" ^
+    --icon "assets/jarvis.ico" ^
+    --hidden-import jarvis_hud ^
     --hidden-import customtkinter ^
     --hidden-import core_engine ^
     --hidden-import coding ^
@@ -167,7 +169,7 @@ py -m PyInstaller ^
 
 echo.
 echo ====================================
-echo   تم البناء! الملف في مجلد dist\Nezuko.exe
+echo   تم البناء! الملف في مجلد dist\Jarvis.exe
 echo   ملحوظات:
 echo   - أوامر الميديا (probe/convert/trim/...) محتاجة FFmpeg
 echo     متثبت على الجهاز ومضاف للـ PATH: https://ffmpeg.org/download.html
@@ -187,7 +189,7 @@ echo     من غيرهم بيفحص الأسرار المكشوفة وصلاحي
 echo   - code_scan بيستخدم bandit (اختياري: pip install bandit) كفحص
 echo     إضافي فوق تحليل AST الأساسي بتاعنا — من غيره بيفضل يشتغل
 echo     بالفحص الأساسي بس.
-echo   - أمر speak (صوت نيزوكو) محتاج ffplay (جزء من FFmpeg، شوف فوق)
+echo   - أمر speak (صوت جارفيس) محتاج ffplay (جزء من FFmpeg، شوف فوق)
 echo     عشان يشغّل الصوت. أفضل جودة تستخدم VoiceTut المصري في بيئة
 echo     Python معزولة (requirements-human-voice.txt) ونموذجه المحلي،
 echo     وتُضبط مرة واحدة بأمر human_voice_setup. النموذج لا يدخل جوه

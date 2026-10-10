@@ -84,7 +84,7 @@ def _yt_get(endpoint: str, params: dict) -> dict:
     q = dict(params)
     q["key"] = key
     url = f"{API_BASE}/{endpoint}?{urllib.parse.urlencode(q)}"
-    req = urllib.request.Request(url, headers={"User-Agent": "Nezuko/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "Jarvis/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
             raw = resp.read()

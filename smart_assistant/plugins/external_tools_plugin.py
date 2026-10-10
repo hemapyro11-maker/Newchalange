@@ -1,6 +1,6 @@
 """
 external_tools_plugin.py — ربط أي برنامج خارجي (أداة CLI، سكربت
-بايثون/جافا/شل، أو تطبيق سطح مكتب) كأمر دائم في نيزوكو، بنفس فلسفة
+بايثون/جافا/شل، أو تطبيق سطح مكتب) كأمر دائم في جارفيس، بنفس فلسفة
 macros_plugin.py بالظبط: قالب أمر فيه {args}، محفوظ في ملف، وبيتسجل
 كأمر حي فورًا وبعد كل إعادة تشغيل.
 
@@ -63,7 +63,7 @@ def _make_handler(command_template: str, tool_type: str):
 
         if tool_type == "desktop":
             # تطبيقات سطح المكتب بتتشغّل في الخلفية (مش بننتظرها تقفل)
-            # عشان مانوقّفش طابور تنفيذ نيزوكو لحد ما البرنامج يتقفل.
+            # عشان مانوقّفش طابور تنفيذ جارفيس لحد ما البرنامج يتقفل.
             try:
                 subprocess.Popen(argv)
             except FileNotFoundError:
@@ -111,7 +111,7 @@ def _cmd_external_add(ctx) -> str:
 
     existing = ctx.engine.registry.get(name)
     if existing is not None and not existing.description.startswith(_TOOL_MARKER):
-        return f"❌ the name '{name}' collides with a built-in Nezuko command — pick another"
+        return f"❌ the name '{name}' collides with a built-in Jarvis command — pick another"
 
     registry_data = _load_registry()
     registry_data[name] = {"command": command_template, "type": tool_type}

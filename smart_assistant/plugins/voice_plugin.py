@@ -22,7 +22,7 @@ voice_plugin.py — نطق عربي/إنجليزي عبر محركين أساس�
 السلسلة بتجرب بالترتيب ده وتاخد أول واحد يشتغل فعليًا — مش اختيار
 عشوائي.
 
-**استماع صوتي (STT) — الاتجاه التاني اللي كان ناقص:** نيزوكو كان
+**استماع صوتي (STT) — الاتجاه التاني اللي كان ناقص:** جارفيس كان
 عنده نطق (TTS) بس من غير استماع خالص — نقطة متسجلة في CLAUDE.md نفسه
 ("Voice Interaction Pipeline"). `listen`/`listen_run` بيسجلوا من
 المايك عبر `sounddevice` (مكتبة بايثون خفيفة، مش أداة CLI منفصلة —
@@ -50,11 +50,11 @@ voice_plugin.py — نطق عربي/إنجليزي عبر محركين أساس�
 **ملحوظة منصة (اتجرب فعليًا):** على ويندوز/ماك، wheel بتاع
 `sounddevice` بيجي ومعاه PortAudio جاهز — من غير خطوة إضافية. على
 لينكس، الـ wheel **مبيضمّش** PortAudio (سياسة sounddevice نفسها، مش
-حد في نيزوكو) — لازم `apt install libportaudio2` (أو المكافئ في
+حد في جارفيس) — لازم `apt install libportaudio2` (أو المكافئ في
 توزيعتك) قبل `pip install sounddevice`، وإلا `import sounddevice`
 بيفشل بـ `OSError: PortAudio library not found`. اتأكد من السلوك ده
 تجريبيًا (نفس الخطأ بيحصل حتى من غير PyInstaller خالص)، فمش باگ في
-التجميع — بس حد حقيقي يستاهل التوثيق لمين بيشغّل نيزوكو من السورس
+التجميع — بس حد حقيقي يستاهل التوثيق لمين بيشغّل جارفيس من السورس
 على لينكس مباشرة.
 
 **معالجة صوت متقدمة:** `separate_vocals` بيفصل مسار صوتي لعناصره
@@ -68,7 +68,7 @@ install demucs`) — مفيد لعزل الصوت من موسيقى خلفية �
 install pyannote.audio`). النموذج الافتراضي (pyannote/speaker-diarization-3.1)
 "gated" على Hugging Face — يعني محتاج توكن حساب مجاني
 (huggingface.co/settings/tokens) **وموافقة يدوية لمرة واحدة بس** على
-شروط الاستخدام (ماينفعش تتعمل أوتوماتيك، قرار Hugging Face مش نيزوكو)
+شروط الاستخدام (ماينفعش تتعمل أوتوماتيك، قرار Hugging Face مش جارفيس)
 قبل أول استخدام. التوكن بيتحفظ بنفس نموذج keyring-مع-fallback بتاع
 telegram_plugin.py/youtube_strategy_plugin.py عبر `diarize_set_token`.
 
@@ -77,7 +77,7 @@ telegram_plugin.py/youtube_strategy_plugin.py عبر `diarize_set_token`.
 XTTS-v2 (اختيارية، `pip install coqui-tts` — أول تشغيل بيحمّل نموذج تقيل
 ~2GB). زي pyannote، النموذج ده محتاج موافقة صريحة على الترخيص
 (Coqui Public Model License — استخدام غير تجاري بشكل أساسي،
-https://coqui.ai/cpml) قبل أول استخدام؛ نيزوكو **مش** بيوافق نيابة
+https://coqui.ai/cpml) قبل أول استخدام؛ جارفيس **مش** بيوافق نيابة
 عنك أوتوماتيك — لازم تشغّل `clone_voice_agree_license` بنفسك مرة
 واحدة الأول. **مهم:** الاستخدام المقصود هنا هو استنساخ صوتك إنت أو
 صوت عندك إذن صريح منه — مش تقليد صوت أي حد من غير موافقته.
@@ -133,7 +133,7 @@ except ImportError:
     _HAS_KEYRING = False
 
 # ── أصوات لكل لغة ────────────────────────────────────────────────────
-# نيزوكو بتتكلم عربي وإنجليزي. قبل كده كل المحركات كانت مربوطة بالعربي
+# جارفيس بتتكلم عربي وإنجليزي. قبل كده كل المحركات كانت مربوطة بالعربي
 # بالإيد، فأي نص إنجليزي كان بيتقري بصوت عربي — كلام مش مفهوم.
 # دلوقتي اللغة بتتحدد من النص نفسه (_detect_lang) وكل محرك بياخد
 # الصوت المناسب ليها.
@@ -1316,7 +1316,7 @@ def _cmd_diarize(ctx) -> str:
 
 # ═══════════════════════════════════════════════════════════════════
 # استنساخ الصوت (Coqui XTTS-v2) — أداة خارجية اختيارية، محتاجة موافقة
-# صريحة على الترخيص قبل أول استخدام (ماينفعش نيزوكو يوافق نيابة عنك)
+# صريحة على الترخيص قبل أول استخدام (ماينفعش جارفيس يوافق نيابة عنك)
 # ═══════════════════════════════════════════════════════════════════
 
 _clone_voice_models: dict[str, object] = {}
@@ -1375,7 +1375,7 @@ def _cmd_clone_voice_agree_license(ctx) -> str:
     return (
         "✅ Your acceptance of the Coqui Public Model License (CPML) for XTTS-v2 is recorded.\n"
         "Full text: https://coqui.ai/cpml — in short: primarily non-commercial\n"
-        "use. Nezuko will not accept a licence on your behalf when it governs your own\n"
+        "use. Jarvis will not accept a licence on your behalf when it governs your own\n"
         "use, so this command must be run explicitly, once, before clone_voice.\n"
         "Try it now: clone_voice <reference.wav> \"<text>\" <output.wav> [language=ar]"
     )
@@ -1621,9 +1621,9 @@ def _cmd_stt_status(ctx) -> str:
 
 
 def register(engine):
-    engine.registry.register("speak", _cmd_speak, "speak <text> — say something in Nezuko's voice (edge-tts → sherpa-onnx offline → espeak-ng fallback)")
+    engine.registry.register("speak", _cmd_speak, "speak <text> — say something in Jarvis's voice (edge-tts → sherpa-onnx offline → espeak-ng fallback)")
     engine.registry.register("voice_profile", _cmd_voice_profile, "voice_profile natural|warm|clear|fast — tune speech pacing, pitch, and clarity")
-    engine.registry.register("voice_reference", _cmd_voice_reference, "voice_reference <authorized-audio|clear> — set the natural Nezuko voice")
+    engine.registry.register("voice_reference", _cmd_voice_reference, "voice_reference <authorized-audio|clear> — set the natural Jarvis voice")
     engine.registry.register("voice_status", _cmd_voice_status, "voice_status — which speech engines are available")
     engine.registry.register("listen", _cmd_listen, "listen [seconds] [lang=auto|ar|en] [model=...] — transcribe the mic without executing")
     engine.registry.register("listen_run", _cmd_listen_run, "listen_run [seconds] [lang=auto|ar|en] — transcribe then submit through normal approvals")

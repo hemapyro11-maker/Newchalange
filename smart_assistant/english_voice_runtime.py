@@ -1,4 +1,4 @@
-"""Run Kokoro's native English voice in Nezuko's isolated voice environment."""
+"""Run Kokoro's native English voice in Jarvis's isolated voice environment."""
 from __future__ import annotations
 
 import json

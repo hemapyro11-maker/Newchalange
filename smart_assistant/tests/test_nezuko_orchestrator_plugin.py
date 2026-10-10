@@ -56,4 +56,5 @@ def test_registers_orchestrator_commands():
             names.append(name)
 
     nop.register(SimpleNamespace(registry=R()))
-    assert names == ["nezuko_integrate", "nezuko_workflow", "nezuko_evolve"]
+    assert names == ["jarvis_integrate", "jarvis_workflow", "jarvis_evolve",
+                     "nezuko_integrate", "nezuko_workflow", "nezuko_evolve"]

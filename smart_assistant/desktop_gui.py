@@ -26,6 +26,7 @@ import companion
 import sessions
 import theme
 import wake_word
+from jarvis_hud import Reactor, app_icon
 from core_engine import AssistantEngine
 from version import __version__
 
@@ -65,8 +66,8 @@ class Composer(QTextEdit):
         super().__init__(parent)
         self.setAcceptRichText(False)
         self.setFixedHeight(86)
-        self.setPlaceholderText("اكتب أو اتكلم مع نيزكو…  /  Ask Nezuko anything…")
-        self.setAccessibleName("Message Nezuko")
+        self.setPlaceholderText("اكتب أو اتكلم مع جارفيس…  /  Ask Jarvis anything…")
+        self.setAccessibleName("Message Jarvis")
 
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not (
@@ -165,7 +166,8 @@ class Desktop(QMainWindow):
         self.engine._voice_cancel = threading.Event()
         self.engine.on_preview = self.events.preview.emit
         self.engine.on_need_file = self.events.pick.emit
-        self.setWindowTitle("Nezuko · " + __version__)
+        self.setWindowTitle("Jarvis · " + __version__)
+        self.setWindowIcon(app_icon())
         self.resize(1480, 900)
         self.setMinimumSize(980, 640)
         self.build()
@@ -187,7 +189,7 @@ class Desktop(QMainWindow):
         return ar if self.ar else en
 
     def button(self, text, callback, layout, *, name=None):
-        button = QPushButton(text)
+        button = QPushButton(text.replace("&", "&&"))
         if name:
             button.setObjectName(name)
         button.clicked.connect(callback)
@@ -203,9 +205,12 @@ class Desktop(QMainWindow):
         self.sidebar.setMaximumWidth(280)
         left = QVBoxLayout(self.sidebar)
         left.setContentsMargins(14, 22, 14, 16)
-        brand = QLabel("Nezuko  ⌄")
+        brand = QLabel("J A R V I S")
         brand.setObjectName("brand")
         left.addWidget(brand)
+        subtitle = QLabel(self.tr_pair("PERSONAL ASSISTANT", "مساعدك الشخصي"))
+        subtitle.setObjectName("muted")
+        left.addWidget(subtitle)
         self.button(self.tr_pair("＋  New chat", "＋  محادثة جديدة"), self.new_chat, left)
         for en, ar, cmd in (("Projects", "المشاريع", "project"),
                             ("Scheduled", "المهام المجدولة", "schedule list"),
@@ -227,7 +232,8 @@ class Desktop(QMainWindow):
         center = QVBoxLayout(self.main)
         center.setContentsMargins(28, 16, 28, 18)
         header = QHBoxLayout()
-        self.title = QLabel(self.tr_pair("Nezuko workspace", "مساحة نيزكو"))
+        self.title = QLabel(self.tr_pair("Command center", "مركز التحكم"))
+        self.title.setObjectName("workspaceTitle")
         header.addWidget(self.title)
         header.addStretch()
         self.state_label = QLabel()
@@ -245,6 +251,20 @@ class Desktop(QMainWindow):
         self.transcript_layout = QVBoxLayout(self.transcript)
         self.transcript_layout.setContentsMargins(18, 28, 18, 18)
         self.transcript_layout.setSpacing(20)
+        self.welcome = QFrame()
+        self.welcome.setObjectName("welcome")
+        welcome_layout = QVBoxLayout(self.welcome)
+        greeting = QLabel(self.tr_pair("How can I help?", "تحب نبدأ بإيه؟"))
+        greeting.setObjectName("greeting")
+        welcome_layout.addWidget(greeting)
+        description = QLabel(self.tr_pair("Talk, create, and build with Jarvis.", "اتكلم، اصنع فيديوهات، واشتغل على مشاريعك مع جارفيس."))
+        description.setWordWrap(True)
+        description.setObjectName("muted")
+        welcome_layout.addWidget(description)
+        for en, ar in (("Plan a video", "خطط لفيديو"), ("Review my project", "راجع مشروعي"),
+                       ("Help me choose a voice", "ساعدني أختار صوت")):
+            self.button(self.tr_pair(en, ar), lambda _=False, text=self.tr_pair(en, ar): self.seed(text), welcome_layout)
+        self.transcript_layout.addWidget(self.welcome)
         self.transcript_layout.addStretch()
         self.scroll.setWidget(self.transcript)
         self.scroll.setAlignment(Qt.AlignmentFlag.AlignHCenter)
@@ -263,7 +283,7 @@ class Desktop(QMainWindow):
         controls = QHBoxLayout()
         self.button("＋", self.attach_file, controls)
         controls.addStretch()
-        self.brain_label = QLabel("Nezuko · Local")
+        self.brain_label = QLabel("Jarvis · Local")
         self.brain_label.setObjectName("muted")
         controls.addWidget(self.brain_label)
         self.mic = self.button("🎙", self.listen, controls)
@@ -283,6 +303,17 @@ class Desktop(QMainWindow):
         self.tools.setMaximumWidth(300)
         right = QVBoxLayout(self.tools)
         right.setContentsMargins(18, 24, 18, 18)
+        self.reactor = Reactor()
+        right.addWidget(self.reactor)
+        self.core_status = QLabel()
+        self.core_status.setObjectName("coreStatus")
+        self.core_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.core_status.setWordWrap(True)
+        right.addWidget(self.core_status)
+        system_caption = QLabel(self.tr_pair("LOCAL INTELLIGENCE", "عقل محلي · خصوصية"))
+        system_caption.setObjectName("muted")
+        system_caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        right.addWidget(system_caption)
         right.addWidget(QLabel(self.tr_pair("Outputs", "النتائج")))
         self.button(self.tr_pair("Create a file or video", "إنشاء ملف أو فيديو"),
                     lambda: self.seed(self.tr_pair("Help me make a video", "ساعديني أعمل فيديو")), right)
@@ -292,7 +323,7 @@ class Desktop(QMainWindow):
         self.sources.setMaximumHeight(140)
         right.addWidget(self.sources)
         for en, ar, callback in (("Attach file", "إرفاق ملف", self.attach_file),
-            ("Repair Nezuko", "إصلاح نيزكو", lambda: self.command("self_repair")),
+            ("Repair Jarvis", "إصلاح جارفيس", lambda: self.command("self_repair")),
             ("Tools & plugins", "الأدوات والإضافات", self.tools_dialog),
             ("Memory", "الذاكرة", self.memory_dialog),
             ("Connectors", "المنصات المتصلة", lambda: self.command("connectors list"))):
@@ -300,8 +331,8 @@ class Desktop(QMainWindow):
         right.addStretch()
         self.wake_button = self.button(self.tr_pair("Enable Hey Jarvis", "فعّل نداء Hey Jarvis"),
                                        self.toggle_wake, right)
-        self.wake_button.setToolTip(self.tr_pair("Local wake detection while Nezuko is open. Click again to stop.",
-                                                "نداء محلي أثناء فتح نيزكو. اضغط تاني لإيقاف الاستماع."))
+        self.wake_button.setToolTip(self.tr_pair("Local wake detection while Jarvis is open. Click again to stop.",
+                                                "نداء محلي أثناء فتح جارفيس. اضغط تاني لإيقاف الاستماع."))
         right.addWidget(QLabel(self.tr_pair("One local brain · No subscription", "عقل محلي واحد · بدون اشتراك")))
         self.splitter.addWidget(self.tools)
         self.splitter.setSizes([220, 980, 280])
@@ -337,14 +368,22 @@ class Desktop(QMainWindow):
             QLabel {{background:transparent;}}
             QWidget#sidebar {{background:{c['panel']};}}
             QWidget#tools {{background:{c['panel']};border-left:1px solid {c['border']};}}
-            QLabel#brand {{font-size:21px;font-weight:600;padding-bottom:14px;}}
-            QLabel#muted {{color:{c['dim']};font-size:13px;}}
+            QLabel#brand {{color:{c['accent']};font-size:23px;font-weight:600;padding-bottom:6px;}}
+            QLabel#workspaceTitle {{font-size:20px;font-weight:600;}}
+            QLabel#coreStatus {{color:{c['accent']};font-size:17px;font-weight:600;}}
+            QLabel#greeting {{font-size:32px;font-weight:600;padding-top:20px;}}
+            QFrame#welcome {{border-top:1px solid {c['border']};padding:12px;}}
+            QLabel#muted {{color:{c['dim']};font-size:14px;}}
             QLabel#hint {{color:{c['faint']};font-size:12px;}}
             QFrame#composer {{background:{c['panel_hi']};border:1px solid {c['border']};border-radius:18px;}}
             QTextEdit, QTextBrowser {{border:0;background:transparent;selection-background-color:#285c92;}}
             QPushButton {{background:transparent;border:0;border-radius:8px;padding:9px 10px;text-align:left;}}
-            QPushButton:hover {{background:{c['panel_hi']};}}
-            QPushButton#send {{background:#2864b7;color:white;border-radius:18px;text-align:center;min-width:28px;}}
+            QPushButton:hover {{background:{c['panel_hi']};color:{c['accent']};}}
+            QPushButton:focus {{border:1px solid {c['accent']};}}
+            QPushButton#send {{background:{c['accent']};color:{c['bg']};border-radius:18px;text-align:center;min-width:28px;}}
+            QMenuBar,QMenu {{background:{c['panel']};color:{c['text']};}}
+            QMenuBar::item:selected,QMenu::item:selected {{background:{c['panel_hi']};}}
+            QSplitter::handle {{background:{c['border']};width:1px;}}
             QListWidget {{border:0;background:transparent;outline:0;}}
             QListWidget::item {{padding:9px;border-radius:7px;}}
             QListWidget::item:selected {{background:{c['panel_hi']};}}
@@ -356,6 +395,8 @@ class Desktop(QMainWindow):
         text_font = QFont("Segoe UI")
         text_font.setPixelSize(self.text_size)
         self.entry.setFont(text_font)
+        self.reactor.color = QColor(c['accent'])
+        self.reactor.update()
         for card, browser in self.cards:
             browser.setFont(text_font)
             browser.document().setDefaultFont(text_font)
@@ -369,6 +410,7 @@ class Desktop(QMainWindow):
         self.apply_theme()
 
     def add_message(self, role, text, *, level="info", record=True):
+        self.welcome.hide()
         if record:
             self.messages.append((role, text))
         card = QFrame()
@@ -378,7 +420,7 @@ class Desktop(QMainWindow):
             card.setStyleSheet(f"QFrame {{background:{theme.palette(self.mode)['panel_hi']};border-radius:14px;}}")
         head = QHBoxLayout()
         label = QLabel(self.tr_pair("You", "أنت") if role == "user" else
-                       self.tr_pair("Activity", "النشاط") if role == "tool" else "Nezuko")
+                       self.tr_pair("Activity", "النشاط") if role == "tool" else "Jarvis")
         label.setObjectName("muted")
         head.addWidget(label)
         head.addStretch()
@@ -568,7 +610,7 @@ class Desktop(QMainWindow):
         self.update_status()
 
     def update_status(self):
-        self.wake_button.setText(self.tr_pair("● Listening for Hey Jarvis · Stop", "● بسمع Hey Jarvis · إيقاف")
+        self.wake_button.setText(self.tr_pair("● Hey Jarvis · Stop", "● Hey Jarvis · إيقاف")
                                  if self.wake_enabled and self.wake_state == "waiting" else
                                  self.tr_pair("Wake enabled · Stop", "النداء مفعّل · إيقاف") if self.wake_enabled else
                                  self.tr_pair("Enable Hey Jarvis", "فعّل نداء Hey Jarvis"))
@@ -584,6 +626,15 @@ class Desktop(QMainWindow):
                   "queued": ("Preparing…", "بحضّر…"), "working": ("Working…", "شغالة…"), "ready": ("", "")}
         en, ar = labels.get(self.activity, (self.activity, self.activity))
         self.progress.setText(self.tr_pair(en, ar))
+        reactor_state = self.activity
+        if self.health != "ready" and self.activity == "ready":
+            reactor_state = "starting" if self.health == "loading" else "offline"
+        elif self.activity == "ready" and self.wake_enabled and self.wake_state == "waiting":
+            reactor_state = "waiting"
+        self.reactor.set_state(reactor_state)
+        self.core_status.setText(self.progress.text() or
+            (self.tr_pair("Hey Jarvis · standing by", "Hey Jarvis · مستني النداء") if reactor_state == "waiting" else
+             self.state_label.text()))
         self.conversation.setText(self.tr_pair("End conversation", "إنهاء المحادثة") if self.continuous else
                                   self.tr_pair("Start conversation", "ابدأ محادثة صوتية"))
 
@@ -611,6 +662,7 @@ class Desktop(QMainWindow):
             card.deleteLater()
         self.cards.clear()
         self.messages.clear()
+        self.welcome.show()
         self.entry.clear()
         self.refresh_sessions()
 
@@ -620,6 +672,7 @@ class Desktop(QMainWindow):
         if not text:
             self.clear_preview()
             return
+        self.welcome.hide()
         if self.preview_browser is None:
             font = QFont("Segoe UI")
             font.setPixelSize(self.text_size)
@@ -629,7 +682,7 @@ class Desktop(QMainWindow):
         self.preview_browser.setPlainText(text)
         readable_blocks(self.preview_browser.document())
         self.preview_browser.fit()
-        self.progress.setText(self.tr_pair("Nezuko is writing…", "نيزكو بتكتب…"))
+        self.progress.setText(self.tr_pair("Jarvis is writing…", "جارفيس بتكتب…"))
         self.scroll_bottom()
 
     def clear_preview(self):
@@ -656,7 +709,7 @@ class Desktop(QMainWindow):
                 self.add_message(msg["role"], msg["content"])
 
     def markdown(self):
-        return "# Nezuko conversation\n\n" + "\n\n".join(
+        return "# Jarvis conversation\n\n" + "\n\n".join(
             f"## {role.title()}\n\n{text}" for role, text in self.messages)
 
     def copy_chat(self):
@@ -667,7 +720,7 @@ class Desktop(QMainWindow):
         self.progress.setText(self.tr_pair("Conversation saved", "اتحفظت المحادثة"))
 
     def export_chat(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Export chat", "Nezuko-chat.md", "Markdown (*.md)")
+        path, _ = QFileDialog.getSaveFileName(self, "Export chat", "Jarvis-chat.md", "Markdown (*.md)")
         if path:
             pathlib.Path(path).write_text(self.markdown(), encoding="utf-8")
 
@@ -826,7 +879,7 @@ class Desktop(QMainWindow):
 
 def run():
     app = QApplication.instance() or QApplication(sys.argv)
-    app.setApplicationName("Nezuko")
+    app.setApplicationName("Jarvis")
     window = Desktop()
     window.showMaximized()
     return app.exec()

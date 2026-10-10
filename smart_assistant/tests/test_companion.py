@@ -8,6 +8,13 @@ import companion
 import voice_plugin as voice
 
 
+def test_assistant_identity_is_jarvis_with_existing_voice_preferences():
+    prompt = companion.prompt("English", "", "")
+    assert "You are Jarvis" in prompt
+    assert "Nezuko" not in prompt
+    assert "Egyptian Arabic" in prompt
+
+
 def test_migration_preserves_voice_and_credentials_and_disables_fanout():
     original = {"keys": {"gemini": "private"}, "human_voice_speaker": "Omnia"}
     cfg = companion.activate(original)
@@ -148,7 +155,7 @@ def test_companion_greeting_uses_actual_model_once(bare_engine, monkeypatch):
 
 def test_latest_request_language_overrides_previous_conversation():
     assert "only in English" in companion.language_for("Explain this Arabic phrase: مرحبًا")
-    assert "Egyptian Arabic" in companion.language_for("🎤 عاملة إيه يا Nezuko؟")
+    assert "Egyptian Arabic" in companion.language_for("🎤 عاملة إيه يا Jarvis؟")
     assert "only in English" in companion.language_for("ردي عليا", "en")
     assert "Egyptian Arabic" in companion.language_for("Hello", "ar")
 

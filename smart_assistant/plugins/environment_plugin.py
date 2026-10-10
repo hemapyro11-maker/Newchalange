@@ -1,6 +1,6 @@
 """
 environment_plugin.py — "طبيب" بيئة العمل: فحص شامل لكل الأدوات
-الخارجية ومكتبات بايثون اللي أي أمر في نيزوكو (أو أي مشروع سقالة
+الخارجية ومكتبات بايثون اللي أي أمر في جارفيس (أو أي مشروع سقالة
 scaffold وّلدته) ممكن يحتاجها، مع تعليمات تثبيت مضبوطة على نظام
 تشغيلك فعليًا (apt/dnf/pacman/brew/winget/choco)، وتثبيت تلقائي حقيقي
 لمكتبات بايثون (عبر pip — آمن، مساحة المستخدم، بدون صلاحيات مرتفعة).
@@ -28,9 +28,9 @@ OLLAMA_URL = "http://localhost:11434/api/tags"
 # لكل نظام تشغيل/مدير حزم معروف. bin/module فاضي يعني "مش قابل للفحص
 # بالطريقة دي".
 TOOLS: dict[str, dict] = {
-    # ── الأساسيات (لازمة عشان نيزوكو نفسها تشتغل) ──────────────────────
+    # ── الأساسيات (لازمة عشان جارفيس نفسها تشتغل) ──────────────────────
     "customtkinter": {
-        "category": "Core", "label": "CustomTkinter (Nezuko's interface)",
+        "category": "Core", "label": "CustomTkinter (Jarvis's interface)",
         "kind": "python", "module": "customtkinter", "pip": "customtkinter",
     },
     "mcp": {
@@ -54,11 +54,11 @@ TOOLS: dict[str, dict] = {
         "kind": "python", "module": "matplotlib", "pip": "matplotlib",
     },
     "edge-tts": {
-        "category": "Core", "label": "edge-tts (Nezuko's primary voice)",
+        "category": "Core", "label": "edge-tts (Jarvis's primary voice)",
         "kind": "python", "module": "edge_tts", "pip": "edge-tts",
     },
     "piper-tts": {
-        "category": "Core", "label": "Piper (Nezuko's local voice)",
+        "category": "Core", "label": "Piper (Jarvis's local voice)",
         "kind": "python", "module": "piper", "pip": "piper-tts",
     },
 
@@ -74,7 +74,7 @@ TOOLS: dict[str, dict] = {
         "kind": "binary", "bin": "ffprobe", "same_as": "ffmpeg",
     },
     "ffplay": {
-        "category": "Media", "label": "FFplay (plays Nezuko's voice)",
+        "category": "Media", "label": "FFplay (plays Jarvis's voice)",
         "kind": "binary", "bin": "ffplay", "same_as": "ffmpeg",
     },
     "espeak-ng": {
@@ -269,7 +269,7 @@ def _cmd_env_check(ctx) -> str:
 
 def _cmd_env_install(ctx) -> str:
     if getattr(sys, "frozen", False):
-        return "Install dependencies using an external Python environment; the Nezuko executable cannot run pip. See env_check."
+        return "Install dependencies using an external Python environment; the Jarvis executable cannot run pip. See env_check."
     if not ctx.args:
         return "usage: env_install <tool_key> [--yes]   (env_check lists every available tool_key)"
     key = ctx.args[0].lower()
@@ -315,7 +315,7 @@ def _cmd_env_install(ctx) -> str:
 
 def _cmd_env_install_all(ctx) -> str:
     if getattr(sys, "frozen", False):
-        return "Install dependencies using an external Python environment; the Nezuko executable cannot run pip. See env_check."
+        return "Install dependencies using an external Python environment; the Jarvis executable cannot run pip. See env_check."
     confirm = "--yes" in ctx.args
     missing = [k for k in TOOLS if not _is_installed(k)]
     if not missing:
@@ -361,7 +361,7 @@ def _cmd_env_install_all(ctx) -> str:
 
 def register(engine):
     engine.registry.register("env_check", _cmd_env_check,
-                              "env_check — check every tool and library Nezuko might need")
+                              "env_check — check every tool and library Jarvis might need")
     engine.registry.register("env_install", _cmd_env_install,
                               "env_install <tool_key> [--yes] — install one tool (automatic for Python packages only)")
     engine.registry.register("env_install_all", _cmd_env_install_all,
