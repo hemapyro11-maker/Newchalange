@@ -1723,6 +1723,50 @@ def test_edge_synthesis_uses_python_api_without_console_launcher(monkeypatch, tm
     assert captured["voice"] == vp._voice_for("en")["edge"]
 
 
+def test_edge_handshake_403_returns_failure(monkeypatch, tmp_path):
+    from aiohttp import WSServerHandshakeError
+    class RejectedSpeech:
+        def __init__(self, *args, **kwargs):
+            pass
+        async def save(self, output):
+            raise WSServerHandshakeError(None, (), status=403, message="Invalid response status")
+    fake = types.ModuleType("edge_tts")
+    fake.Communicate = RejectedSpeech
+    monkeypatch.setattr(vp.shutil, "which", lambda _name: None)
+    monkeypatch.setitem(sys.modules, "edge_tts", fake)
+    assert vp._synthesize_edge("أهلاً", tmp_path / "failed.mp3", "ar") is False
+
+
+def test_speech_backend_exception_does_not_block_offline_fallback(monkeypatch, tmp_path):
+    monkeypatch.setattr(vp.brain, "load_config", lambda: {"local_only": True})
+    monkeypatch.setattr(vp, "_BACKENDS", [
+        ("failed", "_synthesize_human", ".wav", "edge"),
+        ("offline", "_synthesize_piper", ".wav", "piper_name"),
+    ])
+    def failed(text, path, lang):
+        path.write_bytes(b"partial")
+        raise ValueError("backend failed")
+    def offline(text, path, lang):
+        assert not path.exists()
+        path.write_bytes(b"valid audio")
+        return True
+    monkeypatch.setattr(vp, "_synthesize_human", failed)
+    monkeypatch.setattr(vp, "_synthesize_piper", offline)
+    path, label = vp._synthesize_with_fallback("أهلاً", tmp_path, "ar")
+    assert path.read_bytes() == b"valid audio"
+    assert label.startswith("offline")
+
+
+@pytest.mark.parametrize("options,expected", [([], "ar"), (["lang=en"], "en"), (["lang=auto"], None)])
+def test_microphone_language_setting_and_explicit_override(monkeypatch, make_ctx, options, expected):
+    monkeypatch.setattr(vp.brain, "load_config", lambda: {"stt_language": "ar"})
+    monkeypatch.setattr(vp, "_record_until_silence", lambda *args: (None, True))
+    seen = []
+    monkeypatch.setattr(vp, "_transcribe", lambda wav, model, language: (seen.append(language) or "أهلاً", None))
+    assert vp._listen_smart(make_ctx("listen", options))[0] == "أهلاً"
+    assert seen == [expected]
+
+
 def test_espeak_synthesis_passes_the_right_voice_flag(monkeypatch, tmp_path):
     captured = {}
 

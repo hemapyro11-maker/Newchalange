@@ -676,6 +676,12 @@ class Desktop(QMainWindow):
         stt.addItems(["base", "small", "turbo"])
         stt.setCurrentText(cfg.get("stt_model", "base"))
         form.addRow(self.tr_pair("Speech recognition", "التعرف على الكلام"), stt)
+        stt_language = QComboBox()
+        for label, value in (("العربية", "ar"), ("English", "en"),
+                             (self.tr_pair("Automatic", "تلقائي"), "auto")):
+            stt_language.addItem(label, value)
+        stt_language.setCurrentIndex(max(0, stt_language.findData(cfg.get("stt_language", "auto"))))
+        form.addRow(self.tr_pair("Microphone language", "لغة المايك"), stt_language)
         latency = QComboBox()
         latency.addItem(self.tr_pair("Fast Salma · Internet", "سلمى السريعة · إنترنت"), "instant")
         latency.addItem(self.tr_pair("Local studio · Slower", "استوديو محلي · أبطأ"), "studio")
@@ -703,7 +709,8 @@ class Desktop(QMainWindow):
             if dialog.exec() != QDialog.DialogCode.Accepted:
                 return
             cfg.update(chat_font_size=size.value(), ui_theme=mode.currentText(), ui_lang=lang.currentData(),
-                       stt_model=stt.currentText(), voice_latency_mode=latency.currentData(),
+                       stt_model=stt.currentText(), stt_language=stt_language.currentData(),
+                       voice_latency_mode=latency.currentData(),
                        voice_local_only=latency.currentData() == "studio",
                        human_voice_speaker=arabic.currentText(), english_voice_voice=english.currentData())
             brain.save_config(cfg)

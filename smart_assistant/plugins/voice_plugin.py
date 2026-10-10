@@ -384,7 +384,10 @@ def _synthesize_edge(text: str, out_path: pathlib.Path, lang: str = "ar") -> boo
             volume=profile["volume"], pitch=profile["pitch"],
         )
         asyncio.run(speech.save(str(out_path)))
-    except (ImportError, OSError, RuntimeError, subprocess.TimeoutExpired):
+    except Exception:
+        # aiohttp handshake failures (including 403) and edge_tts' own
+        # NoAudioReceived are not OSError/RuntimeError. A service outage
+        # must leave the offline backends available, not abort speaking.
         return False
     return out_path.is_file() and out_path.stat().st_size > 0
 
@@ -615,7 +618,16 @@ def _synthesize_with_fallback(text: str, tmp_dir: pathlib.Path,
             continue
         synth_fn = globals()[fn_name]
         out_path = tmp_dir / f"speech{ext}"
-        if synth_fn(text, out_path, lang):
+        try:
+            succeeded = synth_fn(text, out_path, lang)
+        except Exception:
+            # Isolate independently installed speech backends. Never play
+            # a partial file left by a failed engine.
+            succeeded = False
+        if not succeeded:
+            out_path.unlink(missing_ok=True)
+            continue
+        if succeeded:
             if fn_name == "_synthesize_human":
                 voice_name = vtr._settings()[2]
             elif fn_name == "_synthesize_english_native":
@@ -1485,7 +1497,9 @@ def _listen_smart(ctx) -> tuple[str | None, str | None]:
     """
     options = [a for a in ctx.args if "=" in a]
     positional = [a for a in ctx.args if "=" not in a]
-    language, model = None, _listen_model()
+    configured_language = brain.load_config().get("stt_language", "auto")
+    language = configured_language if configured_language in {"ar", "en"} else None
+    model = _listen_model()
     for option in options:
         key, value = option.split("=", 1)
         if key == "lang" and value in {"auto", "ar", "en"}:
