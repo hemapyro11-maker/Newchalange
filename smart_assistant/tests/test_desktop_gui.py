@@ -23,7 +23,7 @@ def test_jarvis_identity_and_activity_indicator_follow_real_status(desktop, qtap
     desktop.set_status("ready")
     assert not desktop.reactor.timer.isActive()
     desktop.set_status("thinking")
-    desktop.tools.hide()
+    desktop.reactor.hide()
     qtapp.processEvents()
     assert not desktop.reactor.timer.isActive()
 
@@ -153,7 +153,7 @@ def test_native_chat_keeps_original_text_and_larger_font(desktop, qtapp):
     assert desktop.cards[-1][1].font().pixelSize() == 19
     desktop.copy_chat()
     assert original in qtapp.clipboard().text()
-    assert ui.theme.DARK["bg"] == "#0b111a"
+    assert ui.theme.DARK["bg"] == "#030a10"
 
 
 def test_native_settings_save_font_without_overwriting_brain(desktop, qtapp):

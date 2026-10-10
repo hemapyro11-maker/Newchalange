@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 DARK = {
-    "bg":       "#0b111a",
-    "panel":    "#101b28",
-    "panel_hi": "#162536",
+    "bg":       "#030a10",
+    "panel":    "#07121c",
+    "panel_hi": "#0d202c",
     "text":     "#e5f2f8",
     "dim":      "#a1bbca",
     "faint":    "#748c9c",

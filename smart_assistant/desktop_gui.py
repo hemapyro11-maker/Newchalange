@@ -232,7 +232,7 @@ class Desktop(QMainWindow):
         center = QVBoxLayout(self.main)
         center.setContentsMargins(28, 16, 28, 18)
         header = QHBoxLayout()
-        self.title = QLabel(self.tr_pair("Command center", "مركز التحكم"))
+        self.title = QLabel(self.tr_pair("J.A.R.V.I.S.  /  COMMAND INTERFACE", "جارفيس  /  واجهة التحكم"))
         self.title.setObjectName("workspaceTitle")
         header.addWidget(self.title)
         header.addStretch()
@@ -243,6 +243,14 @@ class Desktop(QMainWindow):
         self.conversation = self.button(self.tr_pair("Start conversation", "ابدأ محادثة صوتية"),
                                         self.toggle_conversation, header)
         center.addLayout(header)
+        self.reactor = Reactor()
+        self.reactor.setFixedHeight(330)
+        center.addWidget(self.reactor)
+        self.core_status = QLabel()
+        self.core_status.setObjectName("coreStatus")
+        self.core_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.core_status.setWordWrap(True)
+        center.addWidget(self.core_status)
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -254,16 +262,18 @@ class Desktop(QMainWindow):
         self.welcome = QFrame()
         self.welcome.setObjectName("welcome")
         welcome_layout = QVBoxLayout(self.welcome)
-        greeting = QLabel(self.tr_pair("How can I help?", "تحب نبدأ بإيه؟"))
+        greeting = QLabel(self.tr_pair("SYSTEM / JARVIS", "جارفيس · جاهز لأوامرك"))
         greeting.setObjectName("greeting")
         welcome_layout.addWidget(greeting)
         description = QLabel(self.tr_pair("Talk, create, and build with Jarvis.", "اتكلم، اصنع فيديوهات، واشتغل على مشاريعك مع جارفيس."))
         description.setWordWrap(True)
         description.setObjectName("muted")
         welcome_layout.addWidget(description)
+        missions = QHBoxLayout()
+        welcome_layout.addLayout(missions)
         for en, ar in (("Plan a video", "خطط لفيديو"), ("Review my project", "راجع مشروعي"),
                        ("Help me choose a voice", "ساعدني أختار صوت")):
-            self.button(self.tr_pair(en, ar), lambda _=False, text=self.tr_pair(en, ar): self.seed(text), welcome_layout)
+            self.button(self.tr_pair(en, ar), lambda _=False, text=self.tr_pair(en, ar): self.seed(text), missions)
         self.transcript_layout.addWidget(self.welcome)
         self.transcript_layout.addStretch()
         self.scroll.setWidget(self.transcript)
@@ -303,13 +313,6 @@ class Desktop(QMainWindow):
         self.tools.setMaximumWidth(300)
         right = QVBoxLayout(self.tools)
         right.setContentsMargins(18, 24, 18, 18)
-        self.reactor = Reactor()
-        right.addWidget(self.reactor)
-        self.core_status = QLabel()
-        self.core_status.setObjectName("coreStatus")
-        self.core_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.core_status.setWordWrap(True)
-        right.addWidget(self.core_status)
         system_caption = QLabel(self.tr_pair("LOCAL INTELLIGENCE", "عقل محلي · خصوصية"))
         system_caption.setObjectName("muted")
         system_caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -366,16 +369,16 @@ class Desktop(QMainWindow):
         self.setStyleSheet(f"""
             QMainWindow, QWidget {{background:{c['bg']};color:{c['text']};font-family:'Segoe UI';}}
             QLabel {{background:transparent;}}
-            QWidget#sidebar {{background:{c['panel']};}}
+            QWidget#sidebar {{background:{c['panel']};border-right:1px solid {c['accent']};}}
             QWidget#tools {{background:{c['panel']};border-left:1px solid {c['border']};}}
             QLabel#brand {{color:{c['accent']};font-size:23px;font-weight:600;padding-bottom:6px;}}
             QLabel#workspaceTitle {{font-size:20px;font-weight:600;}}
             QLabel#coreStatus {{color:{c['accent']};font-size:17px;font-weight:600;}}
-            QLabel#greeting {{font-size:32px;font-weight:600;padding-top:20px;}}
-            QFrame#welcome {{border-top:1px solid {c['border']};padding:12px;}}
+            QLabel#greeting {{font-size:23px;font-weight:600;padding-top:2px;}}
+            QFrame#welcome {{border:1px solid {c['border']};border-left:3px solid {c['accent']};padding:8px;}}
             QLabel#muted {{color:{c['dim']};font-size:14px;}}
             QLabel#hint {{color:{c['faint']};font-size:12px;}}
-            QFrame#composer {{background:{c['panel_hi']};border:1px solid {c['border']};border-radius:18px;}}
+            QFrame#composer {{background:{c['panel_hi']};border:1px solid {c['border']};border-radius:4px;}}
             QTextEdit, QTextBrowser {{border:0;background:transparent;selection-background-color:#285c92;}}
             QPushButton {{background:transparent;border:0;border-radius:8px;padding:9px 10px;text-align:left;}}
             QPushButton:hover {{background:{c['panel_hi']};color:{c['accent']};}}
@@ -411,6 +414,7 @@ class Desktop(QMainWindow):
 
     def add_message(self, role, text, *, level="info", record=True):
         self.welcome.hide()
+        self.reactor.setFixedHeight(190)
         if record:
             self.messages.append((role, text))
         card = QFrame()
@@ -631,6 +635,8 @@ class Desktop(QMainWindow):
             reactor_state = "starting" if self.health == "loading" else "offline"
         elif self.activity == "ready" and self.wake_enabled and self.wake_state == "waiting":
             reactor_state = "waiting"
+        self.reactor.brain_health = self.health
+        self.reactor.wake_enabled = self.wake_enabled
         self.reactor.set_state(reactor_state)
         self.core_status.setText(self.progress.text() or
             (self.tr_pair("Hey Jarvis · standing by", "Hey Jarvis · مستني النداء") if reactor_state == "waiting" else
@@ -663,6 +669,7 @@ class Desktop(QMainWindow):
         self.cards.clear()
         self.messages.clear()
         self.welcome.show()
+        self.reactor.setFixedHeight(330)
         self.entry.clear()
         self.refresh_sessions()
 
@@ -673,6 +680,7 @@ class Desktop(QMainWindow):
             self.clear_preview()
             return
         self.welcome.hide()
+        self.reactor.setFixedHeight(190)
         if self.preview_browser is None:
             font = QFont("Segoe UI")
             font.setPixelSize(self.text_size)
