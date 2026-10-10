@@ -64,6 +64,33 @@ def test_enter_and_ctrl_enter_submit_but_shift_enter_inserts_newline(qtapp):
     composer.close()
 
 
+def test_wake_queues_acknowledgement_before_microphone(desktop, monkeypatch):
+    calls = []
+    desktop.health = "ready"
+    desktop.wake_enabled = True
+    monkeypatch.setattr(desktop.engine, "run_task", lambda name, fn: calls.append(name))
+    monkeypatch.setattr(desktop.engine, "listen", lambda: calls.append("listen"))
+    desktop.on_wake()
+    assert calls == ["wake acknowledgement", "listen"]
+    assert desktop.voice and desktop.activity == "queued"
+    desktop.on_wake()
+    assert len(calls) == 2
+
+
+def test_wake_ignores_disabled_busy_or_playing_voice(desktop, monkeypatch):
+    calls = []
+    monkeypatch.setattr(desktop.engine, "listen", lambda: calls.append(True))
+    desktop.health = "ready"
+    desktop.on_wake()
+    desktop.wake_enabled = True
+    desktop.activity = "speaking"
+    desktop.on_wake()
+    desktop.activity = "ready"
+    desktop.tts_pending = True
+    desktop.on_wake()
+    assert not calls
+
+
 def test_arabic_markdown_wraps_without_reversing_copy(qtapp):
     text = "أهلاً بيك، هنراجع فيديو Tuty Storytime ونكتب خطة واضحة. " * 6
     browser = ui.MessageText(text + "\n\nEnglish paragraph stays readable.", QFont("Segoe UI", 14), markdown=True)

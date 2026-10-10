@@ -23,6 +23,7 @@ sherpa-onnx>=1.10.0
 # الأول وبيشغّل نفس الأصوات، فده مش مطلوب لتثبيت جديد.
 piper-tts>=1.2.0
 sounddevice>=0.4.6
+openwakeword==0.6.0
 faster-whisper>=0.10.0
 openai-whisper>=20231117
 vosk>=0.3.45

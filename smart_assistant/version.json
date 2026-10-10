@@ -1,5 +1,5 @@
 {
-  "version": "0.4.2",
-  "notes": "Recover from speech service errors with offline fallbacks and select Arabic, English or automatic microphone recognition.",
+  "version": "0.4.3",
+  "notes": "Optional local Hey Jarvis wake detection with cached spoken acknowledgement and microphone handoff.",
   "url": "https://github.com/hemapyro11-maker/Newchalange/tree/nezuko-professional-upgrade/smart_assistant"
 }

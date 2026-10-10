@@ -11,3 +11,4 @@ sessions/
 connectors.json
 youtube_config.json
 clone_voice_config.json
+wake_models/

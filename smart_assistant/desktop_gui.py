@@ -25,6 +25,7 @@ import brain
 import companion
 import sessions
 import theme
+import wake_word
 from core_engine import AssistantEngine
 from version import __version__
 
@@ -122,6 +123,8 @@ class Events(QObject):
     health = Signal(bool)
     pick = Signal(object, object)
     preview = Signal(str, int)
+    wake = Signal()
+    wake_status = Signal(str)
 
 
 class Desktop(QMainWindow):
@@ -146,12 +149,17 @@ class Desktop(QMainWindow):
         self.voice_ready_since = 0.0
         self.last_command = ""
         self.dialog_open = False
+        self.wake_listener = None
+        self.wake_enabled = False
+        self.wake_state = "off"
         self.events = Events(self)
         self.events.log.connect(self.render_log)
         self.events.status.connect(self.set_status)
         self.events.health.connect(self.brain_ready)
         self.events.pick.connect(self.pick_file)
         self.events.preview.connect(self.show_preview)
+        self.events.wake.connect(self.on_wake)
+        self.events.wake_status.connect(self.on_wake_status)
         self.engine = AssistantEngine(on_log=self.events.log.emit,
                                       on_status=self.events.status.emit)
         self.engine._voice_cancel = threading.Event()
@@ -172,6 +180,8 @@ class Desktop(QMainWindow):
         else:
             self.activity = "ready"
         self.update_status()
+        if start_engine and cfg.get("wake_word_enabled", False):
+            self.toggle_wake()
 
     def tr_pair(self, en, ar):
         return ar if self.ar else en
@@ -288,6 +298,10 @@ class Desktop(QMainWindow):
             ("Connectors", "المنصات المتصلة", lambda: self.command("connectors list"))):
             self.button(self.tr_pair(en, ar), callback, right)
         right.addStretch()
+        self.wake_button = self.button(self.tr_pair("Enable Hey Jarvis", "فعّل نداء Hey Jarvis"),
+                                       self.toggle_wake, right)
+        self.wake_button.setToolTip(self.tr_pair("Local wake detection while Nezuko is open. Click again to stop.",
+                                                "نداء محلي أثناء فتح نيزكو. اضغط تاني لإيقاف الاستماع."))
         right.addWidget(QLabel(self.tr_pair("One local brain · No subscription", "عقل محلي واحد · بدون اشتراك")))
         self.splitter.addWidget(self.tools)
         self.splitter.setSizes([220, 980, 280])
@@ -455,6 +469,10 @@ class Desktop(QMainWindow):
         if self.activity != "ready" or not self.engine._queue.empty():
             return
         self.voice = True
+        if self.wake_listener:
+            listener = self.wake_listener
+            listener.allow(False)
+            self.engine.run_task("microphone handoff", lambda ctx: listener.released.wait(1.0))
         self.engine._voice_cancel.clear()
         self.last_command = "listen_run"
         self.activity = "listening"
@@ -471,6 +489,8 @@ class Desktop(QMainWindow):
         self.update_status()
 
     def voice_tick(self):
+        if self.wake_listener:
+            self.wake_listener.allow(self.wake_enabled and self.voice_idle() and not self.continuous)
         if self.closed or not self.continuous:
             return
         ready = (self.activity == "ready" and self.health == "ready" and not self.tts_pending
@@ -486,6 +506,57 @@ class Desktop(QMainWindow):
         else:
             self.voice_ready_since = 0
 
+    def voice_idle(self):
+        return (not self.closed and self.activity == "ready" and self.health == "ready"
+                and not self.tts_pending and self.engine._queue.empty()
+                and not self.engine._pending_intent and not self.engine._pending_args
+                and not self.dialog_open)
+
+    def toggle_wake(self):
+        self.wake_enabled = not self.wake_enabled
+        cfg = brain.load_config()
+        cfg["wake_word_enabled"] = self.wake_enabled
+        brain.save_config(cfg)
+        if self.wake_listener:
+            self.wake_listener.close()
+            self.wake_listener = None
+        self.wake_state = "off"
+        if self.wake_enabled:
+            self.wake_listener = wake_word.WakeListener(brain._base_dir() / "wake_models",
+                                                       self.events.wake.emit, self.events.wake_status.emit)
+            self.wake_listener.start()
+        self.update_status()
+
+    def on_wake_status(self, status):
+        if self.closed:
+            return
+        self.wake_state = status
+        if status.startswith("error:"):
+            self.wake_enabled = False
+            if self.wake_listener:
+                self.wake_listener.close()
+                self.wake_listener = None
+            self.add_message("tool", self.tr_pair("Wake detection couldn't start. Check the microphone and wake models.",
+                                                  "تعذّر تشغيل النداء. راجع المايك ونماذج النداء."), level="warn")
+        self.update_status()
+
+    def on_wake(self):
+        if not self.wake_enabled or not self.voice_idle() or self.continuous:
+            return
+        self.voice = True
+        self.engine._voice_cancel.clear()
+        self.activity = "queued"
+        self.last_command = "listen_run"
+        language = brain.load_config().get("stt_language", "ar")
+        generation = self.engine._generation
+        def acknowledge(ctx):
+            if generation == self.engine._generation and not self.engine._voice_cancel.is_set():
+                self.engine._set_status("speaking")
+                wake_word.play_acknowledgement(language)
+        self.engine.run_task("wake acknowledgement", acknowledge)
+        self.engine.listen()
+        self.update_status()
+
     def set_status(self, status):
         self.activity = status
         if status == "ready" and self.engine._queue.empty():
@@ -497,6 +568,10 @@ class Desktop(QMainWindow):
         self.update_status()
 
     def update_status(self):
+        self.wake_button.setText(self.tr_pair("● Listening for Hey Jarvis · Stop", "● بسمع Hey Jarvis · إيقاف")
+                                 if self.wake_enabled and self.wake_state == "waiting" else
+                                 self.tr_pair("Wake enabled · Stop", "النداء مفعّل · إيقاف") if self.wake_enabled else
+                                 self.tr_pair("Enable Hey Jarvis", "فعّل نداء Hey Jarvis"))
         self.state_label.setText(self.tr_pair("● Ready", "● جاهزة") if self.health == "ready" else
                                 self.tr_pair("Loading local brain…", "تحميل العقل المحلي…") if self.health == "loading" else
                                 self.tr_pair("Local brain needs attention", "العقل المحلي محتاج مراجعة"))
@@ -740,6 +815,8 @@ class Desktop(QMainWindow):
 
     def closeEvent(self, event):
         self.closed = True
+        if self.wake_listener:
+            self.wake_listener.close()
         self.timer.stop()
         self.continuous = False
         self.engine._voice_cancel.set()
