@@ -1,5 +1,5 @@
 {
-  "version": "0.6.0",
-  "notes": "Jarvis command center with real local telemetry, shared-engine tools, microphone selection and wake confidence diagnostics.",
+  "version": "0.6.1",
+  "notes": "Windows microphone mute diagnosis and explicit unmute control; independent wake greeting language and automatic bilingual speech.",
   "url": "https://github.com/hemapyro11-maker/Newchalange/tree/nezuko-professional-upgrade/smart_assistant"
 }

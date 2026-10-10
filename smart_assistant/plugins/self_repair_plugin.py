@@ -318,6 +318,13 @@ def _cmd_self_repair(ctx) -> str:
     checks.extend(external_reports)
     media_ok, media_detail = _real_media_smoke()
     checks.append(("media: " if media_ok else "media problem: ") + media_detail)
+    import audio_health
+    mic = audio_health.microphone_state(brain.load_config().get("microphone_device", ""))
+    audio_problem = mic.get("muted") or (mic.get("available") and mic.get("volume") == 0)
+    if mic.get("available"):
+        checks.append(("microphone problem: " if audio_problem else "microphone: ") +
+                      ("Windows input is muted; use Settings → Unmute Windows microphone" if mic.get("muted") else
+                       f"input level {mic['volume']}%"))
     transcript = "\n".join(f"[{level}] {message}" for level, message in list(engine.log_history)[-100:])
     known = (("Fontconfig error", "portable title rendering handles this now"),
              ("cannot identify image file", "thumbnail validation handles this now"),
@@ -342,7 +349,7 @@ def _cmd_self_repair(ctx) -> str:
         (fixed if ai_result.startswith("AI repaired") else found).append(ai_result)
     lines = ["🩺 Jarvis hybrid self-repair completed."]
     lines += [f"✅ {item}" for item in fixed]
-    failure_markers = ("media problem", "rejected", "chat failed", "offline",
+    failure_markers = ("media problem", "microphone problem", "rejected", "chat failed", "offline",
                        "unreachable", "0/")
     lines += [
         ("❌ " if any(marker in item.lower() for marker in failure_markers) else "✅ ") + item
@@ -354,7 +361,7 @@ def _cmd_self_repair(ctx) -> str:
         for item in external_reports
         for marker in failure_markers[1:]
     )
-    if not fixed and media_ok and not broken and not provider_problem:
+    if not fixed and media_ok and not broken and not provider_problem and not audio_problem:
         lines.append("✅ No repairable fault remains in the checked systems.")
     if broken:
         lines.append("❌ Broken plugins: " + ", ".join(broken))

@@ -95,6 +95,9 @@ py -m PyInstaller ^
     --icon "assets/jarvis.ico" ^
     --hidden-import jarvis_hud ^
     --hidden-import jarvis_dashboard ^
+    --hidden-import audio_health ^
+    --hidden-import pycaw ^
+    --hidden-import comtypes ^
     --hidden-import psutil ^
     --hidden-import customtkinter ^
     --hidden-import core_engine ^

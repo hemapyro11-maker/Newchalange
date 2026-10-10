@@ -98,6 +98,12 @@ def test_microphone_name_survives_device_reordering(monkeypatch):
         wake.configured_input({"microphone_device": "Old microphone"})
 
 
+def test_wake_greeting_does_not_force_the_request_language():
+    assert wake.acknowledgement_language({"stt_language": "auto"}) == "en"
+    assert wake.acknowledgement_language({"stt_language": "ar"}) == "en"
+    assert wake.acknowledgement_language({"stt_language": "en", "wake_ack_language": "ar"}) == "ar"
+
+
 def test_detection_reports_actual_audio_level_and_confidence(tmp_path):
     done, reports = threading.Event(), []
     class Detector:

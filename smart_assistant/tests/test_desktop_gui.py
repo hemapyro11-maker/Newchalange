@@ -154,6 +154,19 @@ def test_composer_shortcut_opens_chat_from_command_center(desktop, qtapp):
     assert desktop.pages.currentIndex() == 1
 
 
+def test_muted_windows_input_is_reported_before_detector_load(desktop, monkeypatch):
+    monkeypatch.setattr(ui.audio_health, "microphone_state", lambda selected: {"available": True, "muted": True, "volume": 100})
+    class Listener:
+        def __init__(self, folder, on_wake, on_status, **kwargs):
+            self.folder, self.factory = folder, kwargs["detector_factory"]
+        def start(self): self.factory(self.folder)
+        def close(self): pass
+    monkeypatch.setattr(ui.wake_word, "WakeListener", Listener)
+    desktop.toggle_wake()
+    assert not desktop.wake_enabled
+    assert "Windows microphone is muted" in desktop.messages[-1][1]
+
+
 def test_arabic_markdown_wraps_without_reversing_copy(qtapp):
     text = "أهلاً بيك، هنراجع فيديو Tuty Storytime ونكتب خطة واضحة. " * 6
     browser = ui.MessageText(text + "\n\nEnglish paragraph stays readable.", QFont("Segoe UI", 14), markdown=True)

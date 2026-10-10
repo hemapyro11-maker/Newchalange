@@ -196,3 +196,8 @@ def play_acknowledgement(language="ar"):
     path = base / "assets" / ("wake-en.wav" if language == "en" else "wake-ar.wav")
     return path.is_file() and bool(ctypes.WinDLL("winmm").PlaySoundW(
         ctypes.c_wchar_p(str(path)), None, 0x00020002))
+
+
+def acknowledgement_language(cfg):
+    """The English wake phrase has its own greeting; STT/reply language is separate."""
+    return "ar" if cfg.get("wake_ack_language", "en") == "ar" else "en"

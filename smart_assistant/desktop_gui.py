@@ -26,6 +26,7 @@ import companion
 import sessions
 import theme
 import wake_word
+import audio_health
 from jarvis_hud import Reactor, app_icon
 from jarvis_dashboard import CommandCenter
 from core_engine import AssistantEngine
@@ -633,6 +634,11 @@ class Desktop(QMainWindow):
                 def detector_factory(folder):
                     if previous and not previous.released.wait(2):
                         raise RuntimeError("Previous microphone session is still closing")
+                    state = audio_health.microphone_state(cfg.get("microphone_device", ""))
+                    if state.get("muted"):
+                        raise RuntimeError("Windows microphone is muted. Settings → Unmute Windows microphone.")
+                    if state.get("available") and state.get("volume") == 0:
+                        raise RuntimeError("Windows microphone input volume is zero. Raise its input level in Windows.")
                     return wake_word.load_detector(folder)
                 self.wake_listener = wake_word.WakeListener(brain._base_dir() / "wake_models",
                     lambda: self.events.wake.emit() if epoch == self.wake_epoch else None,
@@ -665,7 +671,7 @@ class Desktop(QMainWindow):
         self.engine._voice_cancel.clear()
         self.activity = "queued"
         self.last_command = "listen_run"
-        language = brain.load_config().get("stt_language", "ar")
+        language = wake_word.acknowledgement_language(brain.load_config())
         generation = self.engine._generation
         def acknowledge(ctx):
             if generation == self.engine._generation and not self.engine._voice_cancel.is_set():
@@ -915,8 +921,12 @@ class Desktop(QMainWindow):
         dialog.setWindowTitle(self.tr_pair("Settings", "الإعدادات"))
         dialog.resize(650, 600)
         layout = QVBoxLayout(dialog)
-        form = QFormLayout()
-        layout.addLayout(form)
+        form_container = QWidget()
+        form = QFormLayout(form_container)
+        settings_scroll = QScrollArea()
+        settings_scroll.setWidgetResizable(True)
+        settings_scroll.setWidget(form_container)
+        layout.addWidget(settings_scroll, 1)
         size = QSpinBox()
         size.setRange(16, 26)
         size.setValue(self.text_size)
@@ -955,6 +965,32 @@ class Desktop(QMainWindow):
             microphone.addItem(selected + " · disconnected", selected)
         microphone.setCurrentIndex(max(0, microphone.findData(selected)))
         form.addRow(self.tr_pair("Input microphone", "مايك الإدخال"), microphone)
+        audio_state = QLabel()
+        audio_state.setWordWrap(True)
+        def check_audio():
+            state = audio_health.microphone_state(microphone.currentData())
+            audio_state.setText((self.tr_pair("Windows microphone", "مايك ويندوز") +
+                                f": {'MUTED' if state.get('muted') else 'ON'} · {state['volume']}%")
+                               if state.get("available") else state.get("detail", "Unavailable"))
+        check_audio()
+        microphone.currentIndexChanged.connect(check_audio)
+        form.addRow(audio_state)
+        def unmute_input():
+            state = audio_health.microphone_state(microphone.currentData(), unmute=True)
+            if not state.get("available"):
+                audio_state.setText(state.get("detail", "Could not unmute microphone"))
+                return
+            check_audio()
+            if cfg.get("wake_word_enabled") and not self.wake_enabled:
+                self.toggle_wake()
+        unmute_button = QPushButton(self.tr_pair("Unmute Windows microphone", "فك كتم مايك ويندوز"))
+        unmute_button.clicked.connect(unmute_input)
+        form.addRow(unmute_button)
+        wake_language = QComboBox()
+        wake_language.addItem("English · I am here", "en")
+        wake_language.addItem("العربية · أيوه، معاك", "ar")
+        wake_language.setCurrentIndex(max(0, wake_language.findData(cfg.get("wake_ack_language", "en"))))
+        form.addRow(self.tr_pair("Wake greeting language", "لغة الرد القصير للنداء"), wake_language)
         sensitivity = QDoubleSpinBox()
         sensitivity.setRange(0.1, 0.95); sensitivity.setSingleStep(0.05)
         sensitivity.setValue(cfg.get("wake_threshold", 0.5))
@@ -989,6 +1025,7 @@ class Desktop(QMainWindow):
             cfg.update(chat_font_size=size.value(), ui_theme=mode.currentText(), ui_lang=lang.currentData(),
                        stt_model=stt.currentText(), stt_language=stt_language.currentData(),
                        microphone_device=microphone.currentData(), wake_threshold=sensitivity.value(),
+                       wake_ack_language=wake_language.currentData(),
                        voice_latency_mode=latency.currentData(),
                        voice_local_only=latency.currentData() == "studio",
                        human_voice_speaker=arabic.currentText(), english_voice_voice=english.currentData())
